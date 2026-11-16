@@ -88,3 +88,7 @@ func TriggerResume(dataDir, account string) error { return writeTrigger(dataDir,
 
 // TriggerReload asks the engine to reload the configuration now.
 func TriggerReload(dataDir string) error { return writeTrigger(dataDir, ".reload") }
+
+// WriteHeartbeat records t as the engine's last tick; exported for tests of
+// tools that read the heartbeat.
+func WriteHeartbeat(dataDir string, t time.Time) error { return writeHeartbeat(dataDir, t) }

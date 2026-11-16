@@ -122,6 +122,10 @@ func TestValidate(t *testing.T) {
 		{"end before start", mod(func(c *Config) { c.Schedule.WorkStart = "22:00"; c.Schedule.WorkEnd = "06:00" }), "schedule.work_end"},
 		{"proxy", mod(func(c *Config) { c.Network.Proxy = "nonsense" }), "network.proxy"},
 		{"webhook", mod(func(c *Config) { c.Notify.WebhookURL = "ftp://x" }), "notify.webhook_url"},
+		{"stale parse", mod(func(c *Config) { c.Notify.StaleAfter = "soon" }), "notify.stale_after: not a duration"},
+		{"stale short", mod(func(c *Config) { c.Notify.StaleAfter = "10m" }), "notify.stale_after: must be at least 1h"},
+		{"event unknown", mod(func(c *Config) { c.Notify.Events = []string{"stale", "boom"} }), "notify.events[1]"},
+		{"event dup", mod(func(c *Config) { c.Notify.Events = []string{"stale", "stale"} }), "duplicate event"},
 		{"backend", mod(func(c *Config) { c.Vault.Backend = "cloud" }), "vault.backend"},
 		{"name chars", mod(func(c *Config) { c.Accounts[0].Name = "a b" }), "accounts[0].name"},
 		{"name uppercase", mod(func(c *Config) { c.Accounts[0].Name = "Main" }), "accounts[0].name"},
@@ -217,5 +221,25 @@ func TestProxyUserinfoRedacted(t *testing.T) {
 	}
 	if got := redactURL("http://u:p4ss@host:1"); strings.Contains(got, "p4ss") {
 		t.Fatalf("redactURL = %q", got)
+	}
+}
+
+func TestNotifyDefaultsAndRoundTrip(t *testing.T) {
+	cfg, err := Parse([]byte("version = 1\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Notify.StaleAfter != "72h" || len(cfg.Notify.Events) != 0 || cfg.Notify.StaleDuration().Hours() != 72 {
+		t.Errorf("defaults: %+v", cfg.Notify)
+	}
+	cfg.Notify.Events = []string{"stale", "recovered"}
+	cfg.Notify.StaleAfter = "96h"
+	path := filepath.Join(t.TempDir(), "c.toml")
+	if err := cfg.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(path)
+	if err != nil || back.Notify.StaleAfter != "96h" || len(back.Notify.Events) != 2 {
+		t.Fatalf("round trip: %v %+v", err, back.Notify)
 	}
 }

@@ -17,6 +17,7 @@ import (
 
 	"github.com/KKazuhaK/e5-renew/internal/auth"
 	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-renew/internal/service"
 	"github.com/KKazuhaK/e5-renew/internal/vault"
 )
 
@@ -28,12 +29,18 @@ type env struct {
 	dataDir   string
 	newAuth   func(acct config.Account, store auth.Store, c *http.Client) (auth.Authenticator, error)
 	graphBase string
+
+	runner      *service.FakeRunner // never a real systemctl, launchctl, schtasks or loginctl
+	exe         string
+	home        string
+	interactive bool
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	keyring.MockInit()
-	e := &env{t: t, cfgDir: t.TempDir(), dataDir: t.TempDir()}
+	e := &env{t: t, cfgDir: t.TempDir(), dataDir: t.TempDir(), home: t.TempDir(),
+		runner: &service.FakeRunner{}, exe: filepath.Join(string(filepath.Separator), "opt", "e5renew", "e5renew")}
 	t.Setenv("E5RENEW_CONFIG_DIR", e.cfgDir)
 	t.Setenv("E5RENEW_DATA_DIR", e.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
@@ -51,6 +58,11 @@ func (e *env) runCtx(ctx context.Context, stdin string, args ...string) (string,
 	a := newApp()
 	a.graphBase = e.graphBase
 	a.noCallGap = true
+	a.runner = e.runner
+	a.exe = func() (string, error) { return e.exe, nil }
+	a.svc = svcIdentity{Home: e.home, UID: "501", User: "tester"}
+	a.interactive = func(io.Reader) bool { return e.interactive }
+	a.webhookBackoff = []time.Duration{time.Millisecond}
 	if e.newAuth != nil {
 		a.newAuth = e.newAuth
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
@@ -15,6 +16,7 @@ import (
 	"github.com/KKazuhaK/e5-renew/internal/auth"
 	"github.com/KKazuhaK/e5-renew/internal/config"
 	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-renew/internal/service"
 	"github.com/KKazuhaK/e5-renew/internal/vault"
 )
 
@@ -25,6 +27,16 @@ type app struct {
 	graphBase string
 	// noCallGap removes the pause between calls; tests only.
 	noCallGap bool
+
+	// The fields below let tests keep the real service manager, the real
+	// binary path and the terminal out of the picture. Zero values mean the
+	// real thing.
+	runner      service.Runner // runs systemctl, launchctl, schtasks, loginctl
+	exe         func() (string, error)
+	svc         svcIdentity
+	interactive func(in io.Reader) bool
+	// webhookBackoff replaces the retry waits of alert delivery.
+	webhookBackoff []time.Duration
 }
 
 func newApp() *app {

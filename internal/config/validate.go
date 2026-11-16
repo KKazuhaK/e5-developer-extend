@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 )
@@ -70,6 +71,21 @@ func (c *Config) Validate() error {
 		if u, err := url.Parse(w); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
 			add("notify.webhook_url", "must be an http(s) URL")
 		}
+	}
+	if d, err := time.ParseDuration(c.Notify.StaleAfter); err != nil {
+		add("notify.stale_after", "not a duration: %q", c.Notify.StaleAfter)
+	} else if d < time.Hour {
+		add("notify.stale_after", "must be at least 1h")
+	}
+	seenEv := map[string]bool{}
+	for i, ev := range c.Notify.Events {
+		switch {
+		case !slices.Contains(NotifyEvents, ev):
+			add(fmt.Sprintf("notify.events[%d]", i), "unknown event %q (use %s)", ev, strings.Join(NotifyEvents, ", "))
+		case seenEv[ev]:
+			add(fmt.Sprintf("notify.events[%d]", i), "duplicate event %q", ev)
+		}
+		seenEv[ev] = true
 	}
 	switch c.Vault.Backend {
 	case BackendAuto, BackendKeyring, BackendFile:

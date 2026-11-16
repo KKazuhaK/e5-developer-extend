@@ -3,7 +3,9 @@ package main
 import (
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 	"github.com/KKazuhaK/e5-renew/internal/engine"
 	"github.com/KKazuhaK/e5-renew/internal/graph"
 	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-renew/internal/sdnotify"
 	"github.com/KKazuhaK/e5-renew/internal/store"
 	"github.com/KKazuhaK/e5-renew/internal/version"
 )
@@ -60,7 +63,7 @@ func (a *app) engineOptions(cfg *config.Config, cfgPath string) (engine.Options,
 }
 
 func (a *app) newRunCmd() *cobra.Command {
-	var logFormat string
+	var logFormat, logFile string
 	cmd := &cobra.Command{
 		Use:   "run",
 		Short: "Run the engine in the foreground until interrupted",
@@ -68,44 +71,92 @@ func (a *app) newRunCmd() *cobra.Command {
 			"On Unix, SIGHUP reloads the configuration. Run logs go to stderr.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			// Without a console (the Windows background build) stderr is not
+			// usable, so with --log-file everything that would go to the
+			// console, startup errors and crash dumps included, goes there.
+			var w io.Writer = cmd.ErrOrStderr()
+			if logFile != "" {
+				rf, err := openRotating(logFile, maxLogFile)
+				if err != nil {
+					return fmt.Errorf("open the log file: %w", err)
+				}
+				defer rf.Close()
+				w = rf
+				// Crash dumps get their own file: a handle to the rotating log
+				// would not follow rotation (and on Windows would block it).
+				if cf, err := openCrashLog(logFile); err == nil {
+					defer cf.Close()
+					if err := debug.SetCrashOutput(cf, debug.CrashOptions{}); err == nil {
+						defer debug.SetCrashOutput(nil, debug.CrashOptions{})
+					}
+				}
+			}
 			var h slog.Handler
 			switch logFormat {
-			case "text":
-				h = slog.NewTextHandler(cmd.ErrOrStderr(), nil)
 			case "json":
-				h = slog.NewJSONHandler(cmd.ErrOrStderr(), nil)
+				h = slog.NewJSONHandler(w, nil)
 			default:
-				return fmt.Errorf("--log-format must be text or json, got %q", logFormat)
+				h = slog.NewTextHandler(w, nil)
 			}
-			cfg, path, err := a.loadConfig()
-			if err != nil {
-				return err
+			log := slog.New(h)
+			var err error
+			if logFormat != "text" && logFormat != "json" {
+				err = fmt.Errorf("--log-format must be text or json, got %q", logFormat)
+			} else {
+				err = a.runEngine(cmd, log)
 			}
-			o, err := a.engineOptions(cfg, path)
-			if err != nil {
-				return err
+			if err != nil && logFile != "" {
+				log.Error("e5renew run failed", "err", err.Error())
 			}
-			o.Logger = slog.New(h)
-			e, err := engine.New(o)
-			if err != nil {
-				return err
-			}
-			if len(cfg.Accounts) == 0 {
-				o.Logger.Warn("no accounts configured; add one with: e5renew account add")
-			}
-			ctx := contextOrBackground(cmd)
-			reloadOnSIGHUP(ctx, e.Reload)
-			if err := e.Run(ctx); err != nil {
-				if errors.Is(err, engine.ErrRunning) {
-					return errors.New("an engine is already running for this data directory (see: e5renew status)")
-				}
-				return err
-			}
-			return nil
+			return err
 		},
 	}
 	cmd.Flags().StringVar(&logFormat, "log-format", "text", "run log format: text or json")
+	cmd.Flags().StringVar(&logFile, "log-file", "", "append the run log to this file instead of stderr (kept to about 5 MB plus one older file)")
 	return cmd
+}
+
+func (a *app) runEngine(cmd *cobra.Command, log *slog.Logger) error {
+	cfg, path, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	o, err := a.engineOptions(cfg, path)
+	if err != nil {
+		return err
+	}
+	o.Logger = log
+	o.Hooks = engine.Hooks{
+		Ready:    func() { logSDNotify(log, sdnotify.Ready()) },
+		Tick:     func() { logSDNotify(log, sdnotify.Watchdog()) },
+		Stopping: func() { logSDNotify(log, sdnotify.Stopping()) },
+	}
+	o.Notifier = a.notifier(cfg, path, log)
+	e, err := engine.New(o)
+	if err != nil {
+		o.Notifier.Close()
+		return err
+	}
+	if len(cfg.Accounts) == 0 {
+		log.Warn("no accounts configured; add one with: e5renew account add")
+	}
+	ctx := contextOrBackground(cmd)
+	reloadOnSIGHUP(ctx, e.Reload)
+	if err := e.Run(ctx); err != nil {
+		if errors.Is(err, engine.ErrRunning) {
+			return errors.New("an engine is already running for this data directory (see: e5renew status)")
+		}
+		return err
+	}
+	return nil
+}
+
+// logSDNotify logs a failed systemd notification at debug level; it only
+// means systemd is not listening.
+func logSDNotify(log *slog.Logger, err error) {
+	if err != nil {
+		log.Debug("systemd notification failed", "err", err)
+	}
 }
 
 func (a *app) newRunNowCmd() *cobra.Command {
@@ -138,6 +189,7 @@ func (a *app) newRunNowCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			o.Notifier = a.notifier(cfg, path, nil)
 			if engine.Running(o.DataDir) {
 				for _, n := range targets {
 					if err := engine.TriggerRun(o.DataDir, n); err != nil {

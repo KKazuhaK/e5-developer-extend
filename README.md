@@ -4,7 +4,7 @@
 让开发者租户保持有开发活动。支持 **Windows、macOS、Linux**，提供 **GUI** 和 **CLI** 两种形态，
 设计目标是**长期在后台稳定运行**。
 
-> **状态：开发中**，还不能使用。设计文档见 [`docs/`](docs/)。
+> **状态：开发中**，命令行部分已可试用。设计文档见 [`docs/`](docs/)。
 
 *A cross-platform (Windows / macOS / Linux) tool that keeps a Microsoft 365 E5 developer tenant active by
 calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI. Work in progress.*
@@ -19,10 +19,32 @@ calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI. Wo
   令牌和 Secret 到期提醒、桌面通知和 Webhook 告警
 - **体积小**：CLI 约 10 MB，单个可执行文件，无运行时依赖
 
+## 快速开始
+
+```bash
+go build -o e5renew ./cmd/e5renew
+./e5renew init                  # 交互式向导：配置、账号、登录、试跑、告警、后台服务、体检
+```
+
+Windows 上要在后台不弹控制台窗口，还需要编译一个窗口子系统版本，放在 `e5renew.exe` 同一目录（正式发布前自己编译）：
+
+```bash
+GOOS=windows go build -ldflags -H=windowsgui -o e5renew-bg.exe ./cmd/e5renew
+```
+
+或者分步：`config init` → `account add` → `account login` → `run-now` → `service install` → `doctor`。
+详见 [docs/user/getting-started.md](docs/user/getting-started.md)。
+
 ## 文档
 
 | 文档 | 内容 |
 |---|---|
+| [docs/user/getting-started.md](docs/user/getting-started.md) | 五分钟上手 |
+| [docs/user/app-registration.md](docs/user/app-registration.md) | Entra 应用注册（委托身份和应用身份） |
+| [docs/user/background.md](docs/user/background.md) | 各平台后台运行：Linux、macOS、Windows、Docker |
+| [docs/user/docker.md](docs/user/docker.md) | Docker 和 compose |
+| [docs/user/faq.md](docs/user/faq.md) | 常见问题 |
+| [docs/user/troubleshooting.md](docs/user/troubleshooting.md) | 按 `doctor` 检查项排错 |
 | [docs/research.md](docs/research.md) | 技术选型与决定 |
 | [docs/architecture.md](docs/architecture.md) | 架构、模块、长期后台运行设计 |
 | [docs/graph-api-catalog.md](docs/graph-api-catalog.md) | Graph API 库与权限（只读部分已对照官方文档核实，部分条目待实测） |

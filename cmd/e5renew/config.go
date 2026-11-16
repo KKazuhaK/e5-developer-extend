@@ -30,7 +30,10 @@ work_end = "22:00"
 proxy = ""                  # empty uses HTTPS_PROXY and friends
 
 [notify]
-webhook_url = ""
+# Set the alert address with: e5renew notify set-webhook <url>   (it is kept in the vault, not here)
+webhook_url = ""            # legacy plaintext address; set-webhook moves it into the vault
+stale_after = "72h"         # alert when an account has had no successful call for this long
+events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended
 
 [vault]
 backend = "auto"            # auto | keyring | file

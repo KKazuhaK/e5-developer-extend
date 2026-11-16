@@ -329,3 +329,75 @@ func TestCheckNoOrphans(t *testing.T) {
 		t.Fatalf("unreadable vault must refuse key creation, got %v", err)
 	}
 }
+
+func TestLookupMasterKeyNeverCreates(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv(EnvMasterKey, "")
+	t.Setenv("CREDENTIALS_DIRECTORY", "")
+	if _, _, err := LookupMasterKey(BackendAuto); !errors.Is(err, ErrNoMasterKey) {
+		t.Fatalf("empty keyring: %v", err)
+	}
+	if _, err := getFromKeyring(); err == nil {
+		t.Fatal("LookupMasterKey created a key")
+	}
+	if _, _, err := LookupMasterKey(BackendFile); !errors.Is(err, ErrNoMasterKey) {
+		t.Errorf("file backend: %v", err)
+	}
+	key, _ := GenerateKey()
+	t.Setenv(EnvMasterKey, EncodeKey(key))
+	if got, src, err := LookupMasterKey(BackendAuto); err != nil || src != SourceEnv || !bytes.Equal(got, key) {
+		t.Errorf("env: %v %v", src, err)
+	}
+	t.Setenv(EnvMasterKey, "")
+	if err := InitKeyring(""); err != nil {
+		t.Fatal(err)
+	}
+	if _, src, err := LookupMasterKey(BackendKeyring); err != nil || src != SourceKeyring {
+		t.Errorf("keyring: %v %v", src, err)
+	}
+	keyring.MockInitWithError(errors.New("no dbus"))
+	if _, _, err := LookupMasterKey(BackendAuto); !errors.Is(err, ErrNoMasterKey) {
+		t.Errorf("unavailable keyring: %v", err)
+	}
+	if _, _, err := LookupMasterKey("cloud"); err == nil {
+		t.Error("unknown backend accepted")
+	}
+}
+
+func TestMasterKeyFromFile(t *testing.T) {
+	keyring.MockInit()
+	t.Setenv(EnvMasterKey, "")
+	t.Setenv("CREDENTIALS_DIRECTORY", "")
+	key, _ := GenerateKey()
+	p := filepath.Join(t.TempDir(), "master.key")
+	if err := os.WriteFile(p, []byte(EncodeKey(key)+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvMasterKeyFile, p)
+	got, src, err := ResolveMasterKey(BackendFile, "")
+	if err != nil || src != SourceKeyFile || !bytes.Equal(got, key) {
+		t.Fatalf("file key: %v %v", src, err)
+	}
+	if got, _, err := LookupMasterKey(BackendAuto); err != nil || !bytes.Equal(got, key) {
+		t.Errorf("lookup: %v", err)
+	}
+	// The environment variable still wins.
+	other, _ := GenerateKey()
+	t.Setenv(EnvMasterKey, EncodeKey(other))
+	if got, src, _ := ResolveMasterKey(BackendAuto, ""); src != SourceEnv || !bytes.Equal(got, other) {
+		t.Errorf("env must win: %v", src)
+	}
+	t.Setenv(EnvMasterKey, "")
+	// A missing or damaged file is an error, never a silent fallback to a new key.
+	t.Setenv(EnvMasterKeyFile, filepath.Join(t.TempDir(), "gone"))
+	if _, _, err := ResolveMasterKey(BackendAuto, ""); err == nil {
+		t.Error("missing key file ignored")
+	}
+	if err := os.WriteFile(p, []byte("not base64!"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(EnvMasterKeyFile, p)
+	if _, _, err := ResolveMasterKey(BackendAuto, ""); err == nil {
+		t.Error("damaged key file ignored")
+	}
+}

@@ -28,7 +28,7 @@ type sim struct {
 	entries []store.Entry
 }
 
-func newSim(t *testing.T, start time.Time, mod func(*config.Config)) *sim {
+func newSim(t *testing.T, start time.Time, mod func(*config.Config), opts ...func(*Options)) *sim {
 	t.Helper()
 	// Thousands of state saves: skip fsync so slow disks do not dominate.
 	paths.SyncWrites = false
@@ -59,6 +59,9 @@ func newSim(t *testing.T, start time.Time, mod func(*config.Config)) *sim {
 	}
 	if mod != nil {
 		mod(f.cfg)
+	}
+	for _, o := range opts {
+		o(&f.opts)
 	}
 	f.start()
 	return s

@@ -71,7 +71,7 @@ home_account_id = ""             # 委托身份登录成功后由程序写入，
   - `password` 模式下 `username` 必填
 - 校验信息里的代理地址会隐藏用户名和密码；无法按 `scheme://host` 解析的值不会回显。
 - `Default()`：返回带默认值、没有账号的配置。
-- TODO：考虑把 `webhook_url` 移进 vault（Webhook 地址本身可能带令牌）。目前仍放在配置里。
+- `webhook_url` 仍被读取，但推荐用 `e5renew notify set-webhook` 把地址存进 vault（见 service-doctor-notify.md）。
 
 ## 3. 密钥 `internal/vault`
 

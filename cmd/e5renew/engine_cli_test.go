@@ -256,3 +256,96 @@ func TestRunRejectsBadLogFormat(t *testing.T) {
 		t.Error("bad format accepted")
 	}
 }
+
+func TestRunWritesLogFileAndNotifiesSystemd(t *testing.T) {
+	e := newEnv(t)
+	addDelegated(e, "main")
+	useAuth(e, &fakeAuth{err: auth.ErrTransient})
+	logPath := filepath.Join(e.dataDir, "logs-out", "engine.log")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, errOut, err := e.runCtx(ctx, "", "run", "--log-format", "json", "--log-file", logPath)
+		if errOut != "" {
+			t.Errorf("run wrote to stderr although --log-file was given: %q", errOut)
+		}
+		done <- err
+	}()
+	deadline := time.Now().Add(20 * time.Second)
+	for {
+		if b, err := os.ReadFile(logPath); err == nil && strings.Contains(string(b), `"event"`) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("no log file content")
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRotatingFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "d", "engine.log")
+	r, err := openRotating(p, 100)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	line := strings.Repeat("x", 40) + "\n"
+	for i := 0; i < 10; i++ {
+		if _, err := r.Write([]byte(line)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cur, _ := os.ReadFile(p)
+	old, err := os.ReadFile(p + ".1")
+	if err != nil || len(cur) > 100 || len(old) == 0 {
+		t.Errorf("rotation: cur=%d old=%d err=%v", len(cur), len(old), err)
+	}
+}
+
+// Under the Windows background build there is no console, so startup errors
+// must end up in the log file.
+func TestRunStartupErrorsGoToTheLogFile(t *testing.T) {
+	e := newEnv(t) // no config file
+	logPath := filepath.Join(e.dataDir, "engine.log")
+	_, errOut, err := e.run("", "run", "--log-file", logPath)
+	if err == nil {
+		t.Fatal("run without a config succeeded")
+	}
+	b, rerr := os.ReadFile(logPath)
+	if rerr != nil || !strings.Contains(string(b), "e5renew run failed") || !strings.Contains(string(b), "config file not found") {
+		t.Errorf("log file: %v\n%s", rerr, b)
+	}
+	if strings.Contains(errOut, "run failed") {
+		t.Errorf("the log line also went to stderr: %q", errOut)
+	}
+
+	// A bad --log-format is logged too (as text).
+	e.mustRun("", "config", "init")
+	if _, _, err := e.run("", "run", "--log-format", "xml", "--log-file", logPath); err == nil {
+		t.Fatal("bad format accepted")
+	}
+	b, _ = os.ReadFile(logPath)
+	if !strings.Contains(string(b), "--log-format must be text or json") {
+		t.Errorf("bad format not logged:\n%s", b)
+	}
+
+	// An engine that is already running.
+	release, err := engine.AcquireLock(e.dataDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, _, err := e.run("", "run", "--log-file", logPath); err == nil {
+		t.Fatal("second engine started")
+	}
+	b, _ = os.ReadFile(logPath)
+	if !strings.Contains(string(b), "already running") {
+		t.Errorf("lock error not logged:\n%s", b)
+	}
+}

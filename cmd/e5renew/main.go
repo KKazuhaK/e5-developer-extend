@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -20,9 +21,18 @@ func main() {
 	go func() { <-ctx.Done(); stop() }()
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		stop()
+		var ee exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
 		os.Exit(1)
 	}
 }
+
+// exitError makes the process exit with a specific code without printing a message.
+type exitError struct{ code int }
+
+func (e exitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 
 func newRootCmd() *cobra.Command { return newRootCmdWith(newApp()) }
 
@@ -34,7 +44,8 @@ func newRootCmdWith(a *app) *cobra.Command {
 		SilenceErrors: false,
 	}
 	root.AddCommand(newVersionCmd(), a.newConfigCmd(), a.newAccountCmd(), a.newVaultCmd(),
-		a.newRunCmd(), a.newRunNowCmd(), a.newStatusCmd(), a.newLogsCmd(), a.newCatalogCmd())
+		a.newRunCmd(), a.newRunNowCmd(), a.newStatusCmd(), a.newLogsCmd(), a.newCatalogCmd(),
+		a.newServiceCmd(), a.newDoctorCmd(), a.newNotifyCmd(), a.newInitCmd())
 	return root
 }
 

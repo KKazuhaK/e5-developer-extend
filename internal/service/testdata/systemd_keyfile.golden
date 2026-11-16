@@ -1,0 +1,18 @@
+[Unit]
+Description=e5renew - keep a Microsoft 365 E5 developer tenant active
+# No network ordering: the user manager has no network-online.target and
+# the engine retries by itself when the network is down.
+
+[Service]
+Type=notify
+ExecStart=/home/u/.local/bin/e5renew run --log-format json
+Restart=on-failure
+RestartSec=30
+WatchdogSec=120
+TimeoutStopSec=30
+LoadCredential=e5renew-master-key:/home/u/.config/e5renew/master.key
+Environment=E5RENEW_CONFIG_DIR=/home/u/.config/e5renew
+Environment=E5RENEW_DATA_DIR=/home/u/.local/share/e5renew
+
+[Install]
+WantedBy=default.target

@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +18,9 @@ import (
 const (
 	// EnvMasterKey holds the base64 master key.
 	EnvMasterKey = "E5RENEW_MASTER_KEY"
+	// EnvMasterKeyFile names a file that holds the base64 master key; used
+	// where systemd credentials are not available.
+	EnvMasterKeyFile = "E5RENEW_MASTER_KEY_FILE"
 	// CredentialName is the systemd credential file name.
 	CredentialName = "e5renew-master-key"
 
@@ -36,6 +41,7 @@ type Source string
 const (
 	SourceEnv        Source = "environment"
 	SourceCredential Source = "systemd credential"
+	SourceKeyFile    Source = "key file"
 	SourceKeyring    Source = "system keyring"
 )
 
@@ -71,7 +77,7 @@ func DecodeKey(s string) ([]byte, error) {
 }
 
 const noKeyAdvice = "set " + EnvMasterKey + " (generate one with: e5renew vault init --print-key), " +
-	"or provide the systemd credential " + CredentialName + " via LoadCredential="
+	"point " + EnvMasterKeyFile + " at a key file, or provide the systemd credential " + CredentialName + " via LoadCredential="
 
 // KeyringTimeout bounds each system keyring call, so a locked Secret Service
 // cannot hang the process.
@@ -213,6 +219,20 @@ func fromEnvOrCredential() ([]byte, Source, error) {
 		}
 		return key, SourceEnv, nil
 	}
+	if p := os.Getenv(EnvMasterKeyFile); p != "" {
+		if fi, err := os.Stat(p); err == nil && runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
+			slog.Warn("the master key file is readable by other users; fix it with: chmod 600 "+p, "mode", fi.Mode().Perm().String())
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: read the key file: %w", EnvMasterKeyFile, err)
+		}
+		key, err := DecodeKey(string(data))
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: %w", EnvMasterKeyFile, err)
+		}
+		return key, SourceKeyFile, nil
+	}
 	if dir := os.Getenv("CREDENTIALS_DIRECTORY"); dir != "" {
 		p := filepath.Join(dir, CredentialName)
 		data, err := os.ReadFile(p)
@@ -247,3 +267,34 @@ func InitKeyring(vaultDir string) error {
 
 // ErrKeyExists means the system keyring already holds a master key.
 var ErrKeyExists = errors.New("vault: a master key already exists in the system keyring")
+
+// LookupMasterKey finds an existing master key for backend like
+// ResolveMasterKey does, but never creates one. It returns ErrNoMasterKey
+// (wrapped) when none exists.
+func LookupMasterKey(backend string) ([]byte, Source, error) {
+	switch backend {
+	case BackendAuto, "", BackendKeyring, BackendFile:
+	default:
+		return nil, "", fmt.Errorf("vault: unknown backend %q", backend)
+	}
+	if backend != BackendKeyring {
+		if key, src, err := fromEnvOrCredential(); key != nil || err != nil {
+			return key, src, err
+		}
+		if backend == BackendFile {
+			return nil, "", fmt.Errorf("%w: backend \"file\" needs a key: %s", ErrNoMasterKey, noKeyAdvice)
+		}
+	}
+	s, err := getFromKeyring()
+	switch {
+	case err == nil:
+		key, derr := DecodeKey(s)
+		if derr != nil {
+			return nil, "", fmt.Errorf("vault: master key in the system keyring is invalid: %w", derr)
+		}
+		return key, SourceKeyring, nil
+	case errors.Is(err, keyring.ErrNotFound):
+		return nil, "", fmt.Errorf("%w: none found in the environment, credentials or system keyring", ErrNoMasterKey)
+	}
+	return nil, "", unavailable("the system keyring is unavailable", err)
+}

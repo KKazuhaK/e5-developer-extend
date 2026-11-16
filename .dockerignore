@@ -1,0 +1,9 @@
+.git
+bin
+docs
+*.md
+master.key
+*.key
+.env
+compose*.yml
+compose*.yaml
