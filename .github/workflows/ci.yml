@@ -21,14 +21,82 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # The desktop app (package ./gui) needs CGO and GTK on Linux, so it is
+      # built by the GUI job. Everything else, including its pure-Go parts
+      # (./gui/services, ./gui/trayhost), is checked here without any GUI libraries.
       - name: Vet
-        run: go vet ./...
+        shell: bash
+        run: go vet $(go list ./... | grep -v '/gui$' | tr -d '\r')
       - name: Test
-        run: go test -race ./...
+        shell: bash
+        run: go test -race $(go list ./... | grep -v '/gui$' | tr -d '\r')
       - name: Build
         env:
           CGO_ENABLED: "0"
         run: go build -o bin/ ./cmd/e5renew
+      - name: CLI does not depend on the GUI toolkit
+        shell: bash
+        run: |
+          if go list -deps ./cmd/e5renew | grep -i wails; then
+            echo "cmd/e5renew must not import Wails"; exit 1
+          fi
+
+  gui:
+    name: GUI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install GTK4 and WebKitGTK
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libx11-dev libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: Install the Wails CLI
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+      - name: Generate the frontend bindings
+        shell: bash
+        run: wails3 generate bindings -d gui/frontend/bindings -ts ./gui
+      - name: Frontend checks and build
+        shell: bash
+        run: |
+          if [ -f gui/frontend/package.json ]; then
+            cd gui/frontend
+            npm ci
+            npm run typecheck
+            npm test
+            npm run build
+          else
+            echo "gui/frontend/package.json not found; building with the placeholder page"
+          fi
+      - name: Build
+        shell: bash
+        run: |
+          mkdir -p bin
+          tags=""
+          if [ -f gui/frontend/dist/index.html ]; then tags="frontend"; fi
+          # Windows: a GUI-subsystem binary, so no console window opens.
+          ldflags=""
+          if [ "$RUNNER_OS" = "Windows" ]; then ldflags="-H=windowsgui"; fi
+          go build -tags "$tags" -ldflags "$ldflags" -o bin/ ./gui
+      - name: Vet
+        shell: bash
+        run: go vet ./gui/...
+      - name: Test
+        shell: bash
+        run: go test ./gui/... ./internal/ops/...
 
   fmt:
     runs-on: ubuntu-latest

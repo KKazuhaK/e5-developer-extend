@@ -15,6 +15,7 @@ import (
 
 	"github.com/KKazuhaK/e5-renew/internal/catalog"
 	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-renew/internal/ops"
 	"github.com/KKazuhaK/e5-renew/internal/paths"
 	"github.com/KKazuhaK/e5-renew/internal/vault"
 )
@@ -326,7 +327,7 @@ func (w *wizard) stepLogin(added []string) error {
 	did := false
 	for _, acct := range cfg.Accounts {
 		fresh := slices.Contains(added, acct.Name)
-		loggedIn := strings.Contains(accountStatus(v, acct), "logged in") && !strings.Contains(accountStatus(v, acct), "not logged in")
+		loggedIn := strings.Contains(ops.LocalEntry(v, acct).Status, "logged in") && !strings.Contains(ops.LocalEntry(v, acct).Status, "not logged in")
 		if !fresh && (!acct.Delegated() || loggedIn) {
 			continue
 		}

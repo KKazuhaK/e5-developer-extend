@@ -114,6 +114,9 @@ func TestRunNowWithoutEngineReportsLoginProblem(t *testing.T) {
 	if !strings.Contains(out, "needs_attention") || !strings.Contains(out, "engine: not running") {
 		t.Errorf("status:\n%s", out)
 	}
+	if !strings.Contains(out, "e5renew service install") || !strings.Contains(out, "e5renew run") {
+		t.Errorf("status must say how to start the engine:\n%s", out)
+	}
 }
 
 func TestRunNowNetworkProblem(t *testing.T) {

@@ -105,6 +105,11 @@ e5renew service install
 验证：`e5renew service status`、`schtasks /Query /TN e5renew`、`e5renew doctor`。
 Windows 服务（LocalSystem）形式暂未实现。
 
+## 桌面应用（托盘）
+
+桌面应用的托盘模式在没有后台服务时，会在托盘进程里运行引擎。**一旦安装了后台服务，托盘就只监视**：它显示状态，但不运行引擎，也不会去抢引擎的锁。
+如果服务已安装但引擎没有在运行，托盘图标会变成警告，菜单里有“检查问题…”可以打开健康检查页面；修好服务（`e5renew service status`、`e5renew doctor`）后警告会自行消失。
+
 ## Docker
 
 见 [docker.md](docker.md)。验证：`docker compose logs -f`、`docker compose exec` 不可用（镜像没有 shell），
