@@ -13,13 +13,12 @@ import (
 	"golang.org/x/term"
 
 	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-renew/internal/ops"
 	"github.com/KKazuhaK/e5-renew/internal/store"
 )
 
 // staleAfter marks an account whose last success is older than this.
-const staleAfter = 3 * 24 * time.Hour
+const staleAfter = ops.StaleAfter
 
 func (a *app) newStatusCmd() *cobra.Command {
 	return &cobra.Command{
@@ -27,78 +26,44 @@ func (a *app) newStatusCmd() *cobra.Command {
 		Short: "Show whether the engine is running and how each account is doing",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			cfg, _, err := a.loadConfigOrDefault()
-			if err != nil {
-				return err
-			}
-			dataDir, err := paths.DataDir()
+			snap, err := a.ops().Snapshot()
 			if err != nil {
 				return err
 			}
 			out := cmd.OutOrStdout()
 			now := time.Now()
-			st := store.New(dataDir)
 
-			if engine.Running(dataDir) {
+			if snap.Engine.Running {
 				line := "engine: running"
-				if hb, err := engine.ReadHeartbeat(dataDir); err == nil {
-					line += fmt.Sprintf(" (last heartbeat %s ago)", now.Sub(hb).Round(time.Second))
+				if !snap.Heartbeat.IsZero() {
+					line += fmt.Sprintf(" (last heartbeat %s ago)", now.Sub(snap.Heartbeat).Round(time.Second))
 				}
 				fmt.Fprintln(out, line)
 			} else {
 				line := "engine: not running"
-				if hb, err := engine.ReadHeartbeat(dataDir); err == nil {
-					line += " (last seen " + hb.Local().Format("2006-01-02 15:04") + ")"
+				if !snap.Heartbeat.IsZero() {
+					line += " (last seen " + snap.Heartbeat.Local().Format("2006-01-02 15:04") + ")"
 				}
-				fmt.Fprintln(out, line+"; start it with: e5renew run")
+				fmt.Fprintln(out, line+"; "+a.ops().EngineStoppedHint())
 			}
 
-			state, err := st.LoadState()
-			if err != nil {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", err)
+			if snap.StateErr != nil {
+				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", snap.StateErr)
 			}
-			if len(cfg.Accounts) == 0 {
+			if len(snap.Accounts) == 0 {
 				fmt.Fprintln(out, "no accounts; add one with: e5renew account add")
 				return nil
-			}
-
-			// Today's calls per account.
-			y, m, d := now.Date()
-			midnight := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
-			today, _ := st.Read(store.Filter{Since: midnight})
-			type counts struct{ ok, failed int }
-			byAcct := map[string]*counts{}
-			for _, en := range today {
-				if en.API == "" || en.API == "users.pick" {
-					continue
-				}
-				c := byAcct[en.Account]
-				if c == nil {
-					c = &counts{}
-					byAcct[en.Account] = c
-				}
-				switch en.Class {
-				case "ok":
-					c.ok++
-				case "throttled", "network", "canceled":
-				default:
-					c.failed++
-				}
 			}
 
 			color := isTerminal(out) && os.Getenv("NO_COLOR") == ""
 			tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
 			fmt.Fprintln(tw, "NAME\tSTATUS\tNEXT RUN\tLAST SUCCESS\tTODAY OK/FAILED")
 			var notes []string
-			for _, acct := range cfg.Accounts {
-				as := state.Accounts[acct.Name]
-				var ok, failed int
-				if c := byAcct[acct.Name]; c != nil {
-					ok, failed = c.ok, c.failed
-				}
-				fmt.Fprintln(tw, statusRow(acct, as, now, color, ok, failed))
+			for _, sum := range snap.Accounts {
+				as := sum.State
+				fmt.Fprintln(tw, statusRow(sum.Account, as, now, color, sum.TodayOK, sum.TodayFailed))
 				if as != nil && as.Reason != "" {
-					notes = append(notes, fmt.Sprintf("  %s: %s", acct.Name, as.Reason))
+					notes = append(notes, fmt.Sprintf("  %s: %s", sum.Name, as.Reason))
 				}
 			}
 			if err := tw.Flush(); err != nil {
@@ -156,7 +121,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 		Short: "Show the call log",
 		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
-			dataDir, err := paths.DataDir()
+			st, err := a.ops().Store()
 			if err != nil {
 				return err
 			}
@@ -164,7 +129,6 @@ func (a *app) newLogsCmd() *cobra.Command {
 			if len(args) == 1 {
 				account = args[0]
 			}
-			st := store.New(dataDir)
 			out := cmd.OutOrStdout()
 			f := store.Filter{Account: account, Since: time.Now().Add(-since), Limit: limit}
 			entries, err := st.Read(f)

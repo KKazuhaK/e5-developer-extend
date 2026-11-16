@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -100,6 +101,11 @@ func TestPauseAndResume(t *testing.T) {
 
 func TestRunNowWithoutEngineReportsLoginProblem(t *testing.T) {
 	e := newEnv(t)
+	if runtime.GOOS == "windows" {
+		// The fake runner succeeds by default, which would make the scheduled
+		// task look installed; on a clean machine the query fails.
+		e.runner.FailOn = []string{"schtasks /Query"}
+	}
 	addDelegated(e, "main")
 	useAuth(e, &fakeAuth{err: fmt.Errorf("refresh: %w", auth.ErrLoginRequired)})
 	out, _, err := e.run("", "run-now")
@@ -113,6 +119,9 @@ func TestRunNowWithoutEngineReportsLoginProblem(t *testing.T) {
 	out = e.mustRun("", "status")
 	if !strings.Contains(out, "needs_attention") || !strings.Contains(out, "engine: not running") {
 		t.Errorf("status:\n%s", out)
+	}
+	if !strings.Contains(out, "e5renew service install") || !strings.Contains(out, "e5renew run") {
+		t.Errorf("status must say how to start the engine:\n%s", out)
 	}
 }
 

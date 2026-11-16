@@ -15,12 +15,13 @@ import (
 
 	"github.com/KKazuhaK/e5-renew/internal/auth"
 	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-renew/internal/ops"
 	"github.com/KKazuhaK/e5-renew/internal/service"
 	"github.com/KKazuhaK/e5-renew/internal/vault"
 )
 
-// app holds the pieces commands depend on, so tests can replace them.
+// app holds the pieces commands depend on, so tests can replace them. The
+// business logic lives in internal/ops; commands only read input and format output.
 type app struct {
 	newAuth func(acct config.Account, store auth.Store, httpClient *http.Client) (auth.Authenticator, error)
 	// graphBase overrides the Graph endpoint; tests point it at a fake server.
@@ -39,55 +40,37 @@ type app struct {
 	webhookBackoff []time.Duration
 }
 
+// svcIdentity overrides who the service is installed for; tests only.
+type svcIdentity = ops.SvcIdentity
+
 func newApp() *app {
 	return &app{newAuth: auth.New}
 }
 
-// loadConfig reads the config file and turns validation errors into a readable message.
-func (a *app) loadConfig() (*config.Config, string, error) {
-	path, err := paths.ConfigFile()
-	if err != nil {
-		return nil, "", err
+// ops returns the operations layer configured like this app.
+func (a *app) ops() *ops.Ops {
+	return &ops.Ops{
+		NewAuth: a.newAuth, GraphBase: a.graphBase, NoCallGap: a.noCallGap,
+		Runner: a.runner, Exe: a.exe, Svc: a.svc, WebhookBackoff: a.webhookBackoff,
 	}
-	cfg, err := config.Load(path)
-	switch {
-	case errors.Is(err, config.ErrNotFound):
-		return nil, path, fmt.Errorf("%w\nrun: e5renew config init", err)
-	case err != nil && cfg != nil:
-		return nil, path, fmt.Errorf("%s is invalid; check it with: e5renew config validate\n%w", path, err)
-	case err != nil:
-		return nil, path, err
-	}
-	return cfg, path, nil
 }
+
+// loadConfig reads the config file and turns validation errors into a readable message.
+func (a *app) loadConfig() (*config.Config, string, error) { return a.ops().LoadConfig() }
 
 // loadConfigOrDefault is like loadConfig but starts from defaults when no file exists.
 func (a *app) loadConfigOrDefault() (*config.Config, string, error) {
-	cfg, path, err := a.loadConfig()
-	if errors.Is(err, config.ErrNotFound) {
-		return config.Default(), path, nil
-	}
-	return cfg, path, err
+	return a.ops().LoadConfigOrDefault()
 }
 
-func (a *app) openVault(cfg *config.Config) (*vault.Vault, error) {
-	return vault.Open(cfg.Vault.Backend)
-}
+func (a *app) openVault(cfg *config.Config) (*vault.Vault, error) { return a.ops().OpenVault(cfg) }
 
 func (a *app) authenticator(cfg *config.Config, acct config.Account) (auth.Authenticator, error) {
-	v, err := a.openVault(cfg)
-	if err != nil {
-		return nil, err
-	}
-	return a.newAuth(acct, v, auth.NewHTTPClient(cfg.Network.Proxy))
+	return a.ops().Authenticator(cfg, acct)
 }
 
 func (a *app) findAccount(cfg *config.Config, name string) (*config.Account, error) {
-	acct, ok := cfg.Find(name)
-	if !ok {
-		return nil, fmt.Errorf("no account named %q\nrun: e5renew account list", name)
-	}
-	return acct, nil
+	return a.ops().FindAccount(cfg, name)
 }
 
 var errInterrupted = errors.New("interrupted")
@@ -171,52 +154,10 @@ func readLine(r io.Reader) (string, error) {
 	return strings.TrimRight(sb.String(), "\r"), nil
 }
 
-// lockConfig serializes config read-modify-write cycles across processes.
-func (a *app) lockConfig(cmd *cobra.Command) (func(), error) {
-	p, err := paths.ConfigLockFile()
-	if err != nil {
-		return nil, err
-	}
-	return paths.Lock(contextOrBackground(cmd), p)
-}
-
 // hint returns the next step to suggest for err, or "".
-func hint(err error, name string) string {
-	text := err.Error()
-	switch {
-	case strings.Contains(text, "AADSTS7000218"):
-		return "enable \"Allow public client flows\" in the app registration (Authentication > Advanced settings)"
-	case strings.Contains(text, "AADSTS50126"):
-		return "the stored password is wrong or expired: run `e5renew account set-secret " + name + "`"
-	case strings.Contains(text, "AADSTS50076"), strings.Contains(text, "AADSTS50079"):
-		return "this account requires MFA; switch to device_code or browser (remove it and add it again with --auth device_code)"
-	case errors.Is(err, auth.ErrLoginRequired) && errors.Is(err, vault.ErrWrongKey):
-		return "the stored token cache cannot be decrypted (did the master key change?); run: e5renew account login " + name + " (this discards the unreadable cache)"
-	case errors.Is(err, auth.ErrLoginRequired):
-		return "run: e5renew account login " + name
-	case errors.Is(err, auth.ErrInvalidClient):
-		return "check the client ID and client secret; to replace the secret run: e5renew account set-secret " + name
-	case errors.Is(err, auth.ErrConsentRequired):
-		return "an administrator must grant consent for the app's API permissions (Azure portal > App registrations > API permissions > Grant admin consent)"
-	case errors.Is(err, auth.ErrTransient):
-		return "network or service problem; check connectivity and the proxy setting, then try again"
-	case errors.Is(err, vault.ErrRemoteSession):
-		return "the key is probably fine but out of reach from this remote session: run the command in the desktop session, or set E5RENEW_MASTER_KEY for this shell; do not reset the vault"
-	case errors.Is(err, vault.ErrNoMasterKey):
-		return "if the vault already holds data, restore the old key (E5RENEW_MASTER_KEY or the system keyring entry); if it is empty, run: e5renew vault init; " +
-			"only as a last resort, e5renew vault reset deletes all stored secrets"
-	case errors.Is(err, vault.ErrWrongKey):
-		return "restore the original master key (E5RENEW_MASTER_KEY or the system keyring entry); otherwise re-enter the secret with: e5renew account set-secret " + name
-	}
-	return ""
-}
+func hint(err error, name string) string { return ops.Hint(err, name) }
 
-func withHint(err error, name string) error {
-	if h := hint(err, name); h != "" {
-		return fmt.Errorf("%w\n%s", err, h)
-	}
-	return err
-}
+func withHint(err error, name string) error { return ops.WithHint(err, name) }
 
 func contextOrBackground(cmd *cobra.Command) context.Context {
 	if ctx := cmd.Context(); ctx != nil {

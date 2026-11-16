@@ -5,9 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-renew/internal/ops"
 )
 
 func (a *app) newAccountPauseCmd() *cobra.Command {
@@ -33,36 +31,25 @@ func (a *app) newAccountResumeCmd() *cobra.Command {
 }
 
 func (a *app) setPaused(cmd *cobra.Command, name string, paused bool) error {
-	cfg, _, err := a.loadConfig()
-	if err != nil {
-		return err
+	o := a.ops()
+	ctx := contextOrBackground(cmd)
+	var res ops.PauseResult
+	var err error
+	if paused {
+		res, err = o.Pause(ctx, name)
+	} else {
+		res, err = o.Resume(ctx, name)
 	}
-	if _, err := a.findAccount(cfg, name); err != nil {
-		return err
-	}
-	if err := a.updateAccount(cmd, name, func(ac *config.Account) { ac.Paused = paused }); err != nil {
-		return err
-	}
-	dataDir, err := paths.DataDir()
 	if err != nil {
 		return err
 	}
 	out := cmd.OutOrStdout()
-	running := engine.Running(dataDir)
-	if running {
-		// Ask for an immediate reload instead of waiting for the periodic check.
-		_ = engine.TriggerReload(dataDir)
-	}
 	if paused {
 		fmt.Fprintf(out, "paused account %q\n", name)
 		return nil
 	}
-	// The engine alone writes state.json, so it clears an automatic pause itself.
-	if err := engine.TriggerResume(dataDir, name); err != nil {
-		return err
-	}
 	fmt.Fprintf(out, "resumed account %q\n", name)
-	if running {
+	if res.EngineRunning {
 		fmt.Fprintln(out, "the engine picks this up within about 30 seconds; the next round follows in a few minutes")
 	} else {
 		fmt.Fprintln(out, "no engine is running; it takes effect when the engine starts")

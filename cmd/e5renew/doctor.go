@@ -1,18 +1,12 @@
 package main
 
 import (
-	"errors"
-	"net/http"
 	"os"
 	"runtime"
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
 	"github.com/KKazuhaK/e5-renew/internal/doctor"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
 )
 
 func (a *app) newDoctorCmd() *cobra.Command {
@@ -26,38 +20,10 @@ func (a *app) newDoctorCmd() *cobra.Command {
 		SilenceErrors: true,
 		SilenceUsage:  true,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			dataDir, err := paths.DataDir()
+			checks, err := a.ops().Doctor(contextOrBackground(cmd), offline)
 			if err != nil {
 				return err
 			}
-			cfgPath, err := paths.ConfigFile()
-			if err != nil {
-				return err
-			}
-			d := doctor.Deps{
-				GOOS: runtime.GOOS, DataDir: dataDir, GraphBase: a.graphBase,
-				LoadConfig: func() (*config.Config, error) { return config.Load(cfgPath) },
-				OpenVault: func(cfg *config.Config) (doctor.Vault, error) {
-					return a.openVault(cfg)
-				},
-				NewAuth: func(cfg *config.Config, acct config.Account) (auth.Authenticator, error) {
-					return a.authenticator(cfg, acct)
-				},
-				HTTP: func(cfg *config.Config) *http.Client {
-					proxy := ""
-					if cfg != nil {
-						proxy = cfg.Network.Proxy
-					}
-					return auth.NewHTTPClient(proxy)
-				},
-				Hint: hint,
-			}
-			if m, err := a.serviceManager(); err == nil {
-				d.Service = m.Status
-			} else if !errors.Is(err, service.ErrUnsupported) {
-				d.Service = func() (service.Status, error) { return service.Status{}, err }
-			}
-			checks := doctor.Run(contextOrBackground(cmd), d, doctor.Options{Offline: offline})
 			out := cmd.OutOrStdout()
 			if asJSON {
 				if err := doctor.WriteJSON(out, checks); err != nil {

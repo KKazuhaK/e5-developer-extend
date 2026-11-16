@@ -57,6 +57,15 @@ type ExecRunner struct {
 	Timeout time.Duration // per command; 60 seconds when zero
 }
 
+// buildCmd prepares an external command. On Windows the command gets no
+// console window, so a program built for the GUI subsystem does not flash one
+// each time it asks the Task Scheduler.
+func buildCmd(ctx context.Context, name string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, name, args...)
+	hideWindow(cmd)
+	return cmd
+}
+
 // Run implements Runner.
 func (r ExecRunner) Run(ctx context.Context, name string, args ...string) (Output, error) {
 	timeout := r.Timeout
@@ -66,7 +75,7 @@ func (r ExecRunner) Run(ctx context.Context, name string, args ...string) (Outpu
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	var so, se bytes.Buffer
-	cmd := exec.CommandContext(ctx, name, args...)
+	cmd := buildCmd(ctx, name, args...)
 	cmd.Stdout, cmd.Stderr = &so, &se
 	err := cmd.Run()
 	out := Output{Stdout: so.String(), Stderr: se.String()}
