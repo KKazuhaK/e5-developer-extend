@@ -66,6 +66,11 @@ func TestInitScriptedHappyPath(t *testing.T) {
 
 	// A second run skips what is done and sets up the webhook and the job.
 	e.runner.Replies = nil
+	if runtime.GOOS == "windows" {
+		// The fake runner succeeds by default, which would make the task look
+		// installed already; on a clean machine the query fails.
+		e.runner.FailOn = []string{"schtasks /Query"}
+	}
 	answers2 := strings.Join([]string{
 		"n",                               // sign in again: the fake sign-in leaves no token cache, so it is offered
 		"n",                               // first round
@@ -94,6 +99,9 @@ func TestInitScriptedHappyPath(t *testing.T) {
 }
 
 func TestInitServerPathPrintsKey(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("showing a generated key is offered on Linux only (it needs --key-file for the service)")
+	}
 	e := newEnv(t)
 	e.interactive = true
 	t.Setenv("DISPLAY", "")
