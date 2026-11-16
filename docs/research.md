@@ -31,7 +31,7 @@ CPU 性能基本无关，真正有区别的是：
 | 方案 | CLI 体积 | GUI 体积 | 常驻内存 | 官方 MSAL | 备注 |
 |---|---|---|---|---|---|
 | Python + PySide6 + PyInstaller | ~20–30 MB | ~80–150 MB（Qt） | CLI ~30–50 MB / GUI ~80–150 MB | 有（`msal`） | 开发最快；GUI 包大；macOS 签名和公证较麻烦 |
-| **Go + Wails v3（系统 WebView）** | **预计 ~5 MB**（msal-go 测试程序实测 4.8–5.0 MB） | **实测 11 MB** | **实测托盘 60 MB**，开窗约 320–350 MB | **有**（`msal-go`） | 单一静态二进制，交叉编译方便；Linux 依赖 WebKitGTK |
+| **Go + Wails v3（系统 WebView）** | **实测 9.4 MB**（含认证、配置、钥匙串；只有 msal-go 时 4.8–5.0 MB） | **实测 11 MB** | **实测托盘 60 MB**，开窗约 320–350 MB | **有**（`msal-go`） | 单一静态二进制，交叉编译方便；Linux 依赖 WebKitGTK |
 | Go + Fyne | 同上 | ~25–40 MB | ~50–80 MB | 有 | 纯 Go GUI，不依赖 WebView；外观不够原生 |
 | Rust + Tauri | ~5–10 MB | ~8–15 MB | 与 Wails 相近 | **无**（需自己实现 OAuth） | 体积最小，但认证得自己写，开发量最大 |
 | .NET 8 + Avalonia | ~30–70 MB（自包含 + 裁剪） | ~50–90 MB | ~60–120 MB | 有 | 体积和内存都偏大 |
