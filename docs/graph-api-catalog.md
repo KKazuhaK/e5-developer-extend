@@ -24,7 +24,8 @@
 
 ## 只读接口
 
-推荐授予的最小权限写在第一位。
+推荐授予的最小权限写在第一位。后面的 ReadWrite 等更高权限同样能调用只读接口，所以也列在 any-of 里（只用来判断能不能启用，我们不会申请它们）。
+本表和 `internal/catalog/apis.yaml` 必须一致，`internal/catalog` 的测试会逐条核对 id、路径和权限集合。
 
 | 分类 | id | 委托路径 | 委托权限（any-of） | 应用路径 | 应用权限（any-of） |
 |---|---|---|---|---|---|
@@ -35,22 +36,22 @@
 | org | org.domains | `/domains` | Domain.Read.All, Directory.Read.All | `/domains` | Domain.Read.All, Directory.Read.All |
 | group | group.list | `/groups?$top=20` | Group.ReadBasic.All, GroupMember.Read.All, Group.Read.All, Directory.Read.All | `/groups?$top=20` | Group.ReadBasic.All², GroupMember.Read.All, Group.Read.All, Directory.Read.All |
 | apps | apps.list | `/applications?$top=10` | Application.Read.All, Directory.Read.All | `/applications?$top=10` | Application.Read.All, Directory.Read.All |
-| mail | mail.messages | `/me/messages?$top=10` | Mail.ReadBasic, Mail.Read | `/users/{user}/messages?$top=10` | Mail.ReadBasic.All, Mail.Read |
-| mail | mail.folders | `/me/mailFolders` | Mail.ReadBasic, Mail.Read | `/users/{user}/mailFolders` | Mail.ReadBasic.All, Mail.Read |
-| mail | mail.inbox.delta | `/me/mailFolders/inbox/messages/delta` | Mail.ReadBasic, Mail.Read | `/users/{user}/mailFolders/inbox/messages/delta` | Mail.ReadBasic.All, Mail.Read |
-| mail | mail.rules | `/me/mailFolders/inbox/messageRules` | MailboxSettings.Read | `/users/{user}/mailFolders/inbox/messageRules` | MailboxSettings.Read |
-| mail | mail.settings | `/me/mailboxSettings` | MailboxSettings.Read | `/users/{user}/mailboxSettings` | MailboxSettings.Read |
-| mail | mail.categories | `/me/outlook/masterCategories` | MailboxSettings.Read | `/users/{user}/outlook/masterCategories` | MailboxSettings.Read |
-| calendar | cal.list | `/me/calendars` | Calendars.ReadBasic, Calendars.Read | `/users/{user}/calendars` | Calendars.ReadBasic³, Calendars.Read |
-| calendar | cal.events | `/me/events?$top=10` | Calendars.ReadBasic, Calendars.Read | `/users/{user}/events?$top=10` | Calendars.ReadBasic³, Calendars.Read |
-| contacts | contacts.list | `/me/contacts?$top=10` | Contacts.Read | `/users/{user}/contacts?$top=10` | Contacts.Read |
+| mail | mail.messages | `/me/messages?$top=10` | Mail.ReadBasic, Mail.Read, Mail.ReadWrite | `/users/{user}/messages?$top=10` | Mail.ReadBasic.All, Mail.Read, Mail.ReadWrite |
+| mail | mail.folders | `/me/mailFolders` | Mail.ReadBasic, Mail.Read, Mail.ReadWrite | `/users/{user}/mailFolders` | Mail.ReadBasic.All, Mail.Read, Mail.ReadWrite |
+| mail | mail.inbox.delta | `/me/mailFolders/inbox/messages/delta` | Mail.ReadBasic, Mail.Read, Mail.ReadWrite | `/users/{user}/mailFolders/inbox/messages/delta` | Mail.ReadBasic.All, Mail.Read, Mail.ReadWrite |
+| mail | mail.rules | `/me/mailFolders/inbox/messageRules` | MailboxSettings.Read, MailboxSettings.ReadWrite | `/users/{user}/mailFolders/inbox/messageRules` | MailboxSettings.Read, MailboxSettings.ReadWrite |
+| mail | mail.settings | `/me/mailboxSettings` | MailboxSettings.Read, MailboxSettings.ReadWrite | `/users/{user}/mailboxSettings` | MailboxSettings.Read, MailboxSettings.ReadWrite |
+| mail | mail.categories | `/me/outlook/masterCategories` | MailboxSettings.Read, MailboxSettings.ReadWrite | `/users/{user}/outlook/masterCategories` | MailboxSettings.Read, MailboxSettings.ReadWrite |
+| calendar | cal.list | `/me/calendars` | Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite | `/users/{user}/calendars` | Calendars.ReadBasic³, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite |
+| calendar | cal.events | `/me/events?$top=10` | Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite | `/users/{user}/events?$top=10` | Calendars.ReadBasic³, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite |
+| contacts | contacts.list | `/me/contacts?$top=10` | Contacts.Read, Contacts.ReadWrite | `/users/{user}/contacts?$top=10` | Contacts.Read, Contacts.ReadWrite |
 | files | drive.info | `/me/drive` | Files.Read, Files.Read.All, Sites.Read.All | —⁴ | — |
 | files | drive.root | `/me/drive/root/children` | Files.Read, Files.Read.All, Sites.Read.All | `/users/{user}/drive/root/children` | Files.Read.All, Sites.Read.All |
 | sites | sites.root | `/sites/root` | Sites.Read.All | `/sites/root` | Sites.Read.All |
 | sites | sites.lists | `/sites/root/lists` | Sites.Read.All | `/sites/root/lists` | Sites.Read.All |
 | sites | sites.search | `/sites?search=*` | Sites.Read.All | `/sites?search=*` | Sites.Read.All |
 | notes | onenote.notebooks | `/me/onenote/notebooks` | Notes.Create, Notes.Read, Notes.Read.All | —⁵ | — |
-| tasks | todo.lists | `/me/todo/lists` | Tasks.Read | `/users/{user}/todo/lists` | Tasks.Read.All |
+| tasks | todo.lists | `/me/todo/lists` | Tasks.Read, Tasks.ReadWrite | `/users/{user}/todo/lists` | Tasks.Read.All, Tasks.ReadWrite.All |
 | tasks | planner.tasks | `/me/planner/tasks` | Tasks.Read, Group.Read.All | `/users/{user}/planner/tasks` | Tasks.Read.All |
 | teams | teams.joined | `/me/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All | `/users/{user}/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All |
 | reports | reports.active | `/reports/getOffice365ActiveUserDetail(period='D7')`⁶ | Reports.Read.All（还需管理员角色） | 同左 | Reports.Read.All |

@@ -9,6 +9,9 @@ import (
 	"time"
 )
 
+// minInterval is the shortest allowed interval_min; tests may lower it.
+var minInterval = 5 * time.Minute
+
 var (
 	nameRe = regexp.MustCompile(`^[a-z0-9_-]{1,64}$`)
 	guidRe = regexp.MustCompile(`^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$`)
@@ -85,8 +88,8 @@ func validateSchedule(s *Schedule, add func(path, format string, args ...any)) {
 	dmin, err1 := time.ParseDuration(s.IntervalMin)
 	if err1 != nil {
 		add("schedule.interval_min", "not a duration: %q", s.IntervalMin)
-	} else if dmin <= 0 {
-		add("schedule.interval_min", "must be positive")
+	} else if dmin < minInterval {
+		add("schedule.interval_min", "must be at least %s", minInterval)
 	}
 	dmax, err2 := time.ParseDuration(s.IntervalMax)
 	if err2 != nil {
@@ -115,10 +118,16 @@ func validateSchedule(s *Schedule, add func(path, format string, args ...any)) {
 		}
 		days[d] = true
 	}
-	for _, f := range []struct{ name, val string }{{"work_start", s.WorkStart}, {"work_end", s.WorkEnd}} {
-		if _, err := time.Parse("15:04", f.val); err != nil {
+	var hm [2]time.Time
+	for i, f := range []struct{ name, val string }{{"work_start", s.WorkStart}, {"work_end", s.WorkEnd}} {
+		t, err := time.Parse("15:04", f.val)
+		if err != nil {
 			add("schedule."+f.name, "not a HH:MM time: %q", f.val)
 		}
+		hm[i] = t
+	}
+	if !hm[0].IsZero() && !hm[1].IsZero() && hm[1].Before(hm[0]) {
+		add("schedule.work_end", "must not be before work_start (windows across midnight are not supported); use equal values for all day")
 	}
 	if s.PeriodStart != nil && s.PeriodEnd != nil {
 		a := time.Date(s.PeriodStart.Year, time.Month(s.PeriodStart.Month), s.PeriodStart.Day, 0, 0, 0, 0, time.UTC)

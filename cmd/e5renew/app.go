@@ -21,6 +21,10 @@ import (
 // app holds the pieces commands depend on, so tests can replace them.
 type app struct {
 	newAuth func(acct config.Account, store auth.Store, httpClient *http.Client) (auth.Authenticator, error)
+	// graphBase overrides the Graph endpoint; tests point it at a fake server.
+	graphBase string
+	// noCallGap removes the pause between calls; tests only.
+	noCallGap bool
 }
 
 func newApp() *app {
