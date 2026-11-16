@@ -130,3 +130,25 @@ func TestPrune(t *testing.T) {
 		}
 	}
 }
+
+func TestNotifiedRoundTrip(t *testing.T) {
+	s := New(t.TempDir())
+	st := NewState()
+	at := time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
+	st.Accounts["a"] = &AccountState{Status: StatusOK, Notified: map[string]Notice{"stale": {At: at, Key: "72"}}}
+	st.Accounts["b"] = &AccountState{Status: StatusOK}
+	if err := s.SaveState(st); err != nil {
+		t.Fatal(err)
+	}
+	back, err := s.LoadState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := back.Accounts["a"].Notified["stale"]; !n.At.Equal(at) || n.Key != "72" {
+		t.Errorf("notice = %+v", n)
+	}
+	raw, _ := os.ReadFile(filepath.Join(s.Dir(), "state.json"))
+	if strings.Count(string(raw), "notified") != 1 {
+		t.Errorf("empty notified maps must be omitted:\n%s", raw)
+	}
+}

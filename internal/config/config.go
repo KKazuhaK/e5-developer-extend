@@ -67,8 +67,21 @@ type Network struct {
 
 // Notify holds notification settings.
 type Notify struct {
+	// WebhookURL is the legacy plaintext location; `e5renew notify set-webhook`
+	// stores the address in the vault instead.
 	WebhookURL string `toml:"webhook_url"`
+	// StaleAfter is how long an account may go without a successful call
+	// before a "stale" alert is sent.
+	StaleAfter string `toml:"stale_after"`
+	// Events lists the alert kinds to send; empty means all of them.
+	Events []string `toml:"events"`
 }
+
+// NotifyEvents are the alert kinds accepted in Notify.Events.
+var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended"}
+
+// DefaultStaleAfter is the default for Notify.StaleAfter.
+const DefaultStaleAfter = "72h"
 
 // Vault selects where the vault master key comes from.
 type Vault struct {
@@ -110,6 +123,7 @@ func Default() *Config {
 			WorkStart:       "08:00",
 			WorkEnd:         "22:00",
 		},
+		Notify:   Notify{StaleAfter: DefaultStaleAfter, Events: []string{}},
 		Vault:    Vault{Backend: BackendAuto},
 		Accounts: []Account{},
 	}
@@ -214,4 +228,13 @@ func (s Schedule) Intervals() (min, max time.Duration, err error) {
 	}
 	max, err = time.ParseDuration(s.IntervalMax)
 	return min, max, err
+}
+
+// StaleDuration returns the parsed Notify.StaleAfter. Valid after Validate.
+func (n Notify) StaleDuration() time.Duration {
+	d, err := time.ParseDuration(n.StaleAfter)
+	if err != nil || d <= 0 {
+		d, _ = time.ParseDuration(DefaultStaleAfter)
+	}
+	return d
 }

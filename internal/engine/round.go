@@ -89,6 +89,7 @@ func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
 	for _, ev := range follow {
 		e.event(acct.Name, ev, msg)
 	}
+	e.evalNotify()
 	e.log.Info("round finished", "account", acct.Name, "ok", out.ok, "failed", out.failed, "skipped", skipped)
 }
 

@@ -5,8 +5,10 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -16,6 +18,9 @@ import (
 const (
 	// EnvMasterKey holds the base64 master key.
 	EnvMasterKey = "E5RENEW_MASTER_KEY"
+	// EnvMasterKeyFile names a file that holds the base64 master key; used
+	// where systemd credentials are not available.
+	EnvMasterKeyFile = "E5RENEW_MASTER_KEY_FILE"
 	// CredentialName is the systemd credential file name.
 	CredentialName = "e5renew-master-key"
 
@@ -36,11 +41,32 @@ type Source string
 const (
 	SourceEnv        Source = "environment"
 	SourceCredential Source = "systemd credential"
+	SourceKeyFile    Source = "key file"
 	SourceKeyring    Source = "system keyring"
 )
 
 // ErrNoMasterKey means no master key could be found or created.
 var ErrNoMasterKey = errors.New("vault: no master key available")
+
+// ErrRemoteSession marks a missing key that may only be invisible: over SSH
+// (or another remote logon) the user's keyring is often not reachable at all
+// (Windows does not load Credential Manager for key-based SSH logons, Linux
+// has no Secret Service without a desktop session). It is always wrapped
+// together with ErrNoMasterKey.
+var ErrRemoteSession = errors.New("the system keyring may not be reachable from this remote (SSH) session")
+
+// RemoteSession reports whether this process runs in a remote shell session.
+// A variable so tests can override it.
+var RemoteSession = func() bool {
+	return os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != ""
+}
+
+// remote wraps a missing or unreachable keyring key when the session is
+// remote, so callers never suggest wiping data that is only out of reach.
+func remote(err error) error {
+	return fmt.Errorf("%w: %w: run this from the desktop session of the same user, "+
+		"or provide the key for this shell with %s (%v)", ErrNoMasterKey, ErrRemoteSession, EnvMasterKey, err)
+}
 
 // GenerateKey returns a new random master key.
 func GenerateKey() ([]byte, error) {
@@ -71,7 +97,7 @@ func DecodeKey(s string) ([]byte, error) {
 }
 
 const noKeyAdvice = "set " + EnvMasterKey + " (generate one with: e5renew vault init --print-key), " +
-	"or provide the systemd credential " + CredentialName + " via LoadCredential="
+	"point " + EnvMasterKeyFile + " at a key file, or provide the systemd credential " + CredentialName + " via LoadCredential="
 
 // KeyringTimeout bounds each system keyring call, so a locked Secret Service
 // cannot hang the process.
@@ -131,8 +157,8 @@ func checkNoOrphans(vaultDir string) error {
 		return fmt.Errorf("%w: cannot check existing vault data (%v); refusing to create a new key", ErrNoMasterKey, err)
 	}
 	if has {
-		return fmt.Errorf("%w: the vault has data but no master key was found; restore the old key via %s or the system keyring, "+
-			"or run `e5renew vault reset` to wipe the vault", ErrNoMasterKey, EnvMasterKey)
+		return fmt.Errorf("%w: the vault has data but no master key was found; restore the old key via %s or the system keyring "+
+			"(as a last resort, `e5renew vault reset` deletes all stored secrets)", ErrNoMasterKey, EnvMasterKey)
 	}
 	return nil
 }
@@ -165,6 +191,10 @@ func ResolveMasterKey(backend, vaultDir string) ([]byte, Source, error) {
 			return nil, "", fmt.Errorf("vault: master key in the system keyring is invalid: %w", derr)
 		}
 		return key, SourceKeyring, nil
+	case RemoteSession():
+		// Possibly just out of reach: never create a key here, it could
+		// orphan the real one that the desktop session still sees.
+		return nil, "", remote(err)
 	case !errors.Is(err, keyring.ErrNotFound):
 		return nil, "", unavailable("the system keyring is unavailable", err)
 	}
@@ -213,6 +243,20 @@ func fromEnvOrCredential() ([]byte, Source, error) {
 		}
 		return key, SourceEnv, nil
 	}
+	if p := os.Getenv(EnvMasterKeyFile); p != "" {
+		if fi, err := os.Stat(p); err == nil && runtime.GOOS != "windows" && fi.Mode().Perm()&0o077 != 0 {
+			slog.Warn("the master key file is readable by other users; fix it with: chmod 600 "+p, "mode", fi.Mode().Perm().String())
+		}
+		data, err := os.ReadFile(p)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: read the key file: %w", EnvMasterKeyFile, err)
+		}
+		key, err := DecodeKey(string(data))
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: %w", EnvMasterKeyFile, err)
+		}
+		return key, SourceKeyFile, nil
+	}
 	if dir := os.Getenv("CREDENTIALS_DIRECTORY"); dir != "" {
 		p := filepath.Join(dir, CredentialName)
 		data, err := os.ReadFile(p)
@@ -247,3 +291,36 @@ func InitKeyring(vaultDir string) error {
 
 // ErrKeyExists means the system keyring already holds a master key.
 var ErrKeyExists = errors.New("vault: a master key already exists in the system keyring")
+
+// LookupMasterKey finds an existing master key for backend like
+// ResolveMasterKey does, but never creates one. It returns ErrNoMasterKey
+// (wrapped) when none exists.
+func LookupMasterKey(backend string) ([]byte, Source, error) {
+	switch backend {
+	case BackendAuto, "", BackendKeyring, BackendFile:
+	default:
+		return nil, "", fmt.Errorf("vault: unknown backend %q", backend)
+	}
+	if backend != BackendKeyring {
+		if key, src, err := fromEnvOrCredential(); key != nil || err != nil {
+			return key, src, err
+		}
+		if backend == BackendFile {
+			return nil, "", fmt.Errorf("%w: backend \"file\" needs a key: %s", ErrNoMasterKey, noKeyAdvice)
+		}
+	}
+	s, err := getFromKeyring()
+	switch {
+	case err == nil:
+		key, derr := DecodeKey(s)
+		if derr != nil {
+			return nil, "", fmt.Errorf("vault: master key in the system keyring is invalid: %w", derr)
+		}
+		return key, SourceKeyring, nil
+	case RemoteSession():
+		return nil, "", remote(err)
+	case errors.Is(err, keyring.ErrNotFound):
+		return nil, "", fmt.Errorf("%w: none found in the environment, credentials or system keyring", ErrNoMasterKey)
+	}
+	return nil, "", unavailable("the system keyring is unavailable", err)
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/KKazuhaK/e5-renew/internal/catalog"
 	"github.com/KKazuhaK/e5-renew/internal/config"
 	"github.com/KKazuhaK/e5-renew/internal/graph"
+	"github.com/KKazuhaK/e5-renew/internal/notify"
 	"github.com/KKazuhaK/e5-renew/internal/paths"
 	"github.com/KKazuhaK/e5-renew/internal/store"
 )
@@ -36,6 +37,27 @@ const (
 	maxRetryAfterWait = 5 * time.Minute
 	defaultRetryAfter = 30 * time.Second
 )
+
+// Hooks are optional callbacks that let a caller attach platform behaviour
+// (for example systemd readiness and watchdog messages) without the engine
+// knowing about it. Any of them may be nil. They run on the engine's own
+// goroutine and must return quickly.
+type Hooks struct {
+	Ready    func() // the lock is held and the state is loaded
+	Tick     func() // every pass of the main loop
+	Stopping func() // shutdown has begun
+}
+
+// Notifier receives the alerts the engine decides to send. Enabled must not
+// block (it runs on the tick). Close is called once when the engine stops and may wait briefly for
+// queued alerts.
+type Notifier interface {
+	Enabled() bool
+	// Send must not block. done, if not nil, later receives the delivery
+	// result; an alert counts as sent only when it is called with nil.
+	Send(ev notify.Event, done func(error))
+	Close()
+}
 
 // Options configure an Engine. Use DefaultOptions and override fields.
 type Options struct {
@@ -53,6 +75,10 @@ type Options struct {
 	Hint func(err error, account string) string
 	// OnEntry sees every call-log entry as it is written.
 	OnEntry func(store.Entry)
+	// Hooks attach platform integration; see Hooks.
+	Hooks Hooks
+	// Notifier receives alerts; nil turns alerts off.
+	Notifier Notifier
 
 	Tick             time.Duration // how often the main loop wakes
 	ConfigCheckEvery int           // ticks between config file checks
@@ -110,6 +136,7 @@ type Engine struct {
 	ticks     int
 	lastPrune string
 	cfgMod    time.Time
+	started   time.Time // engine start, for the stale-alert grace period
 
 	reload chan struct{}
 	wg     sync.WaitGroup
@@ -230,12 +257,15 @@ func (e *Engine) Run(ctx context.Context) error {
 		return err
 	}
 	defer release()
+	defer e.closeNotifier()
 
 	e.guard("init", e.init)
+	e.hook("ready", e.o.Hooks.Ready)
 	for {
 		e.guard("tick", func() { e.tick(ctx) })
 		select {
 		case <-ctx.Done():
+			e.hook("stopping", e.o.Hooks.Stopping)
 			e.wg.Wait()
 			e.withLock(e.saveLocked)
 			e.event("", "stop", "")
@@ -244,6 +274,57 @@ func (e *Engine) Run(ctx context.Context) error {
 			e.guard("reload", e.reloadConfig)
 		case <-e.clock.After(e.o.Tick):
 		}
+	}
+}
+
+// hook runs an optional callback; a panic in it is contained like any other.
+func (e *Engine) hook(name string, f func()) {
+	if f != nil {
+		e.guard("hook "+name, f)
+	}
+}
+
+func (e *Engine) closeNotifier() {
+	if e.o.Notifier != nil {
+		e.o.Notifier.Close()
+	}
+}
+
+// evalNotify decides which alerts are due and hands them to the Notifier.
+// What has been announced is kept in the state, so a condition is announced
+// once. Without a destination nothing is evaluated or recorded, so a webhook
+// added later still hears about conditions that are already present.
+func (e *Engine) evalNotify() {
+	n := e.o.Notifier
+	if n == nil || !n.Enabled() {
+		return
+	}
+	var evs []notify.Event
+	e.withLock(func() {
+		if e.state == nil {
+			return
+		}
+		var changed bool
+		evs, changed = notify.Evaluate(notify.Input{
+			Now: e.clock.Now(), Start: e.started, Config: e.cfg.Notify,
+			Accounts: e.cfg.Accounts, State: e.state,
+		})
+		if changed {
+			e.saveLocked()
+		}
+	})
+	for _, ev := range evs {
+		n.Send(ev, func(err error) {
+			if err != nil {
+				return
+			}
+			e.withLock(func() {
+				if e.state != nil && notify.MarkDelivered(e.state, ev.Account, ev.Event, ev.Time) {
+					e.saveLocked()
+				}
+			})
+		})
+		e.event(ev.Account, "alert", ev.Event)
 	}
 }
 
@@ -300,6 +381,7 @@ func (e *Engine) init() {
 	e.withLock(func() {
 		e.state = st
 		now := e.clock.Now()
+		e.started = now
 		e.syncAccountsLocked(now, true)
 		fixed = e.fixFarFutureLocked(now)
 		e.saveLocked()
@@ -394,6 +476,7 @@ func (e *Engine) tick(ctx context.Context) {
 	if err := writeHeartbeat(e.o.DataDir, now); err != nil {
 		e.log.Warn("write heartbeat", "err", err)
 	}
+	e.hook("tick", e.o.Hooks.Tick)
 
 	if !e.lastTick.IsZero() {
 		forward := now.Sub(e.lastTick) > 3*e.o.Tick
@@ -472,6 +555,8 @@ func (e *Engine) tick(ctx context.Context) {
 		}
 	})
 	e.reportClockFix(fixed)
+
+	e.evalNotify()
 
 	if day := now.Format("2006-01-02"); day != e.lastPrune {
 		e.lastPrune = day
@@ -619,6 +704,7 @@ func RunOnce(ctx context.Context, o Options, names []string) error {
 		return err
 	}
 	defer release()
+	defer e.closeNotifier()
 	e.init()
 
 	var run []config.Account

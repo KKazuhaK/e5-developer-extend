@@ -39,6 +39,19 @@ type Totals struct {
 	Failed int `json:"failed"`
 }
 
+// Notice records the last time an alert of one kind was sent for an account,
+// so the same condition is not announced again. Key holds the value the
+// decision was based on (a threshold, a reason); it never holds secrets.
+type Notice struct {
+	At  time.Time `json:"at"`
+	Key string    `json:"key,omitempty"`
+	// Pending means the alert was handed to the sender but not yet confirmed
+	// delivered; Msg and Tried let the engine try again later.
+	Pending bool      `json:"pending,omitempty"`
+	Tried   time.Time `json:"tried,omitzero"`
+	Msg     string    `json:"msg,omitempty"`
+}
+
 // AccountState is the persisted state of one account.
 type AccountState struct {
 	NextRun                time.Time            `json:"next_run,omitzero"`
@@ -51,6 +64,8 @@ type AccountState struct {
 	APISkipUntil           map[string]time.Time `json:"api_skip_until,omitempty"`
 	APIForbiddenCount      map[string]int       `json:"api_forbidden_count,omitempty"`
 	Totals                 Totals               `json:"totals"`
+	// Notified maps an alert kind to its last notice; only the engine writes it.
+	Notified map[string]Notice `json:"notified,omitempty"`
 }
 
 // State is the content of state.json.

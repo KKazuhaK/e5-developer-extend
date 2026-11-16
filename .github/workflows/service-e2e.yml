@@ -1,0 +1,41 @@
+name: Service E2E
+
+# Installs the background job on real runners, crashes the engine and checks
+# that the OS brings it back. Runs only on throwaway CI machines.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  service:
+    name: Service (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install, crash, restart, uninstall
+        shell: bash
+        run: bash scripts/service-e2e.sh
+      - name: Engine log
+        if: always()
+        shell: bash
+        run: |
+          for f in "$HOME/.local/share/e5renew/engine.log" \
+                   "$HOME/Library/Application Support/e5renew/engine.log" \
+                   "$HOME/Library/Logs/e5renew/engine.log" \
+                   "${LOCALAPPDATA:-/nonexistent}/e5renew/engine.log"; do
+            [ -f "$f" ] && { echo "--- $f"; tail -n 50 "$f"; }
+          done
+          if command -v journalctl >/dev/null; then journalctl --user -u e5renew -n 50 --no-pager || true; fi

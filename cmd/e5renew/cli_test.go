@@ -17,6 +17,7 @@ import (
 
 	"github.com/KKazuhaK/e5-renew/internal/auth"
 	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-renew/internal/service"
 	"github.com/KKazuhaK/e5-renew/internal/vault"
 )
 
@@ -28,16 +29,26 @@ type env struct {
 	dataDir   string
 	newAuth   func(acct config.Account, store auth.Store, c *http.Client) (auth.Authenticator, error)
 	graphBase string
+
+	runner      *service.FakeRunner // never a real systemctl, launchctl, schtasks or loginctl
+	exe         string
+	home        string
+	interactive bool
 }
 
 func newEnv(t *testing.T) *env {
 	t.Helper()
 	keyring.MockInit()
-	e := &env{t: t, cfgDir: t.TempDir(), dataDir: t.TempDir()}
+	e := &env{t: t, cfgDir: t.TempDir(), dataDir: t.TempDir(), home: t.TempDir(),
+		runner: &service.FakeRunner{}, exe: filepath.Join(string(filepath.Separator), "opt", "e5renew", "e5renew")}
 	t.Setenv("E5RENEW_CONFIG_DIR", e.cfgDir)
 	t.Setenv("E5RENEW_DATA_DIR", e.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
+	// Results must not depend on whether the tests run over SSH.
+	for _, v := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		t.Setenv(v, "")
+	}
 	return e
 }
 
@@ -51,6 +62,11 @@ func (e *env) runCtx(ctx context.Context, stdin string, args ...string) (string,
 	a := newApp()
 	a.graphBase = e.graphBase
 	a.noCallGap = true
+	a.runner = e.runner
+	a.exe = func() (string, error) { return e.exe, nil }
+	a.svc = svcIdentity{Home: e.home, UID: "501", User: "tester"}
+	a.interactive = func(io.Reader) bool { return e.interactive }
+	a.webhookBackoff = []time.Duration{time.Millisecond}
 	if e.newAuth != nil {
 		a.newAuth = e.newAuth
 	}
@@ -441,5 +457,19 @@ func TestMFAAndPasswordHints(t *testing.T) {
 	fa.err = fmt.Errorf("%w: cache: %w", auth.ErrLoginRequired, vault.ErrWrongKey)
 	if _, _, err := e.run("", "account", "test", "p"); err == nil || !strings.Contains(err.Error(), "discards the unreadable cache") {
 		t.Errorf("wrong-key hint: %v", err)
+	}
+}
+
+// Windows scheduled tasks cannot set environment variables, so the job gets
+// --config-dir and --data-dir instead; they must win over the environment.
+func TestDirFlagsOverrideEnvironment(t *testing.T) {
+	e := newEnv(t)
+	cfg, data := t.TempDir(), t.TempDir()
+	out, _, err := e.run("", "--config-dir", cfg, "--data-dir", data, "config", "path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, filepath.Join(cfg, "config.toml")) || !strings.Contains(out, data) {
+		t.Errorf("flags not applied:\n%s", out)
 	}
 }

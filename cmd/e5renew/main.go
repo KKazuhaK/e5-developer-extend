@@ -3,9 +3,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -20,9 +22,18 @@ func main() {
 	go func() { <-ctx.Done(); stop() }()
 	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		stop()
+		var ee exitError
+		if errors.As(err, &ee) {
+			os.Exit(ee.code)
+		}
 		os.Exit(1)
 	}
 }
+
+// exitError makes the process exit with a specific code without printing a message.
+type exitError struct{ code int }
+
+func (e exitError) Error() string { return fmt.Sprintf("exit status %d", e.code) }
 
 func newRootCmd() *cobra.Command { return newRootCmdWith(newApp()) }
 
@@ -33,8 +44,32 @@ func newRootCmdWith(a *app) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
+	var configDir, dataDir string
+	root.PersistentFlags().StringVar(&configDir, "config-dir", "", "configuration folder (same as E5RENEW_CONFIG_DIR)")
+	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data folder (same as E5RENEW_DATA_DIR)")
+	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		// The flags exist for job runners that cannot set environment
+		// variables (Windows scheduled tasks); they simply set them.
+		for _, f := range []struct{ flag, env, val string }{
+			{"config-dir", "E5RENEW_CONFIG_DIR", configDir},
+			{"data-dir", "E5RENEW_DATA_DIR", dataDir},
+		} {
+			if f.val == "" {
+				continue
+			}
+			abs, err := filepath.Abs(f.val)
+			if err != nil {
+				return fmt.Errorf("--%s: %w", f.flag, err)
+			}
+			if err := os.Setenv(f.env, abs); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	root.AddCommand(newVersionCmd(), a.newConfigCmd(), a.newAccountCmd(), a.newVaultCmd(),
-		a.newRunCmd(), a.newRunNowCmd(), a.newStatusCmd(), a.newLogsCmd(), a.newCatalogCmd())
+		a.newRunCmd(), a.newRunNowCmd(), a.newStatusCmd(), a.newLogsCmd(), a.newCatalogCmd(),
+		a.newServiceCmd(), a.newDoctorCmd(), a.newNotifyCmd(), a.newInitCmd())
 	return root
 }
 
