@@ -4,7 +4,7 @@
 让开发者租户保持有开发活动。支持 **Windows、macOS、Linux**，提供 **GUI** 和 **CLI** 两种形态，
 设计目标是**长期在后台稳定运行**。
 
-> **状态：开发中**，命令行部分已可试用。设计文档见 [`docs/`](docs/)。
+> **状态：开发中**，即将发布第一版。设计文档见 [`docs/`](docs/)。
 
 *A cross-platform (Windows / macOS / Linux) tool that keeps a Microsoft 365 E5 developer tenant active by
 calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI. Work in progress.*
@@ -21,15 +21,13 @@ calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI. Wo
 
 ## 快速开始
 
-```bash
-go build -o e5renew ./cmd/e5renew
-./e5renew init                  # 交互式向导：配置、账号、登录、试跑、告警、后台服务、体检
-```
+从 [Releases](https://github.com/KKazuhaK/e5-renew/releases) 下载：Windows 安装包、macOS dmg、Linux deb/rpm（桌面版），
+或者各平台的命令行压缩包和 Docker 镜像。选哪个文件、未签名的包怎么打开，见 [docs/user/install.md](docs/user/install.md)。
 
-Windows 上要在后台不弹控制台窗口，还需要编译一个窗口子系统版本，放在 `e5renew.exe` 同一目录（正式发布前自己编译）：
+桌面版装好后从开始菜单 / 应用程序 / 应用菜单打开 **E5 Renew**；命令行版运行向导：
 
 ```bash
-GOOS=windows go build -ldflags -H=windowsgui -o e5renew-bg.exe ./cmd/e5renew
+e5renew init                    # 交互式向导：配置、账号、登录、试跑、告警、后台服务、体检
 ```
 
 或者分步：`config init` → `account add` → `account login` → `run-now` → `service install` → `doctor`。
@@ -39,6 +37,7 @@ GOOS=windows go build -ldflags -H=windowsgui -o e5renew-bg.exe ./cmd/e5renew
 
 | 文档 | 内容 |
 |---|---|
+| [docs/user/install.md](docs/user/install.md) | 下载和安装（各平台、升级、卸载） |
 | [docs/user/getting-started.md](docs/user/getting-started.md) | 五分钟上手 |
 | [docs/user/app-registration.md](docs/user/app-registration.md) | Entra 应用注册（委托身份和应用身份） |
 | [docs/user/background.md](docs/user/background.md) | 各平台后台运行：Linux、macOS、Windows、Docker |

@@ -163,7 +163,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
   Linux 上需要 CGO 和 GTK4、WebKitGTK 6.0 开发包。
 - CI 新增 `GUI build` 任务，在三个平台上编译。ubuntu 先用 apt 装 `libgtk-4-dev libwebkitgtk-6.0-dev`；
   另外跑前端的类型检查、vitest 和构建。
-- 打包（AppImage、dmg、NSIS）留到发布阶段。
+- 打包见 [release.md](release.md)（NSIS、dmg、deb/rpm；不做 AppImage）。
 
 ## 7. 测试
 

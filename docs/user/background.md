@@ -95,7 +95,7 @@ e5renew service install
 所以进程崩溃后最迟 5 分钟内会被重新拉起。重新安装时先结束旧实例再启动。
 
 - 优先使用同目录下的 `e5renew-bg.exe`（窗口子系统版本，不弹控制台窗口）。找不到时会改用 `e5renew.exe`，
-  并警告每次启动都会出现一个控制台窗口。请把两个文件放在同一目录。发布包出来之前，自己编译：
+  并警告每次启动都会出现一个控制台窗口。请把两个文件放在同一目录（安装包和 zip 包里两者都有）。自己从源码构建时：
   `GOOS=windows go build -ldflags -H=windowsgui -o e5renew-bg.exe ./cmd/e5renew`（在 Windows 上用 PowerShell 设置 `$env:GOOS` 可省略）。
 - 任务没有控制台，运行日志写到 `%LOCALAPPDATA%\e5renew\engine.log`（超过约 5 MB 时转存为 `engine.log.1`）；程序崩溃时的堆栈另外写到同目录的 `engine-crash.log`。
 - 任务定义的 XML 保存在 `%LOCALAPPDATA%\e5renew\service\e5renew-task.xml`。

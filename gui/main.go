@@ -12,9 +12,9 @@ import (
 	"path/filepath"
 )
 
-// AppName is the product name shown in titles and the tray. The final name
-// is not decided; this is the only place to change.
-const AppName = "e5renew"
+// AppName is the product name shown in titles and the tray. The packages use
+// the same name (packaging/, scripts/release/); the command stays "e5renew".
+const AppName = "E5 Renew"
 
 // Single-instance IDs of the two modes.
 const (

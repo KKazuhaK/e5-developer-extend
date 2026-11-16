@@ -1,0 +1,32 @@
+# Command-line package: /usr/bin/e5renew, no GUI libraries.
+# Built by scripts/release/cli.sh, which copies the binaries of one
+# architecture into dist/stage/ first. nfpm expands ${...} in name, arch,
+# version and depends, but not in contents.
+name: e5renew
+arch: ${GOARCH}
+platform: linux
+version: ${VERSION}
+release: "1"
+section: utils
+priority: optional
+maintainer: KKazuhaK <KKazuhaK@users.noreply.github.com>
+description: |
+  Keeps a Microsoft 365 E5 developer tenant active.
+  Calls read-only Microsoft Graph APIs on a randomized schedule. Run it as a
+  systemd user service: e5renew init, or e5renew service install.
+vendor: KKazuhaK
+homepage: https://github.com/KKazuhaK/e5-renew
+license: MIT
+
+contents:
+  - src: dist/stage/e5renew
+    dst: /usr/bin/e5renew
+    file_info:
+      mode: 0755
+  - src: LICENSE
+    dst: /usr/share/doc/e5renew/copyright
+    file_info:
+      mode: 0644
+
+scripts:
+  preremove: packaging/linux/scripts/cli-preremove.sh

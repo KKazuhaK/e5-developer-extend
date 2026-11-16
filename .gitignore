@@ -23,3 +23,6 @@ Thumbs.db
 # Local config and secrets
 *.local.toml
 .env
+
+# Windows resources made at release time (scripts/release/common.sh)
+*.syso

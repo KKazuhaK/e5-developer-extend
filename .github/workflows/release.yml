@@ -1,0 +1,245 @@
+# Builds every package of a release (docs/design/release.md).
+# - A v* tag: build and smoke-test everything and create a DRAFT GitHub
+#   Release; the owner checks it and publishes it by hand. Publishing it
+#   pushes the Docker image (docker.yml).
+# - A pull request that touches packaging: build and smoke-test only; the
+#   packages are kept as workflow artifacts for 7 days.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "packaging/**"
+      - "scripts/release/**"
+      - "scripts/genicon/**"
+      - "Dockerfile"
+      - ".github/workflows/release.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  WAILS_VERSION: v3.1.0
+  NFPM_VERSION: v2.49.0
+
+jobs:
+  cli:
+    name: CLI archives and packages
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install tools
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@"$WAILS_VERSION"
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
+      - name: Build
+        run: scripts/release/cli.sh
+      - name: Smoke test
+        run: |
+          sudo apt-get install -y ./dist/release/e5renew_*_amd64.deb
+          e5renew version
+          tar -xzf dist/release/e5renew_*_linux_amd64.tar.gz -C "$RUNNER_TEMP" e5renew
+          "$RUNNER_TEMP/e5renew" version
+          unzip -l dist/release/e5renew_*_windows_amd64.zip | grep -q e5renew-bg.exe
+          sudo apt-get remove -y e5renew
+      - uses: actions/upload-artifact@v7
+        with:
+          name: cli
+          path: dist/release/*
+          retention-days: 7
+          if-no-files-found: error
+
+  linux-desktop:
+    name: Linux desktop (${{ matrix.arch }})
+    needs: cli
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install GTK4 and WebKitGTK
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libx11-dev libgtk-4-dev libwebkitgtk-6.0-dev desktop-file-utils
+      - name: Install tools
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@"$WAILS_VERSION"
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
+      - name: Build
+        run: scripts/release/linux-desktop.sh
+      - uses: actions/download-artifact@v8
+        with:
+          name: cli
+          path: ${{ runner.temp }}/cli
+      - name: Smoke test
+        run: |
+          # The desktop package depends on the command-line package of the same version.
+          sudo apt-get install -y "$RUNNER_TEMP"/cli/e5renew_*_${{ matrix.arch }}.deb ./dist/release/e5renew-desktop_*_${{ matrix.arch }}.deb
+          e5renew version
+          test -x /usr/bin/e5renew-gui
+          if ldd /usr/bin/e5renew-gui | grep "not found"; then exit 1; fi
+          desktop-file-validate /usr/share/applications/io.github.kkazuhak.e5renew.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/io.github.kkazuhak.e5renew.png
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux-desktop-${{ matrix.arch }}
+          path: dist/release/e5renew-desktop*
+          retention-days: 7
+          if-no-files-found: error
+
+  macos:
+    name: macOS app
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install tools
+        env:
+          CGO_ENABLED: "0"
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@"$WAILS_VERSION"
+      - name: Build
+        run: scripts/release/macos.sh
+      - name: Smoke test
+        run: |
+          dmg=$(ls dist/release/*.dmg)
+          mnt=$(mktemp -d)
+          hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
+          app="$mnt/E5 Renew.app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          plutil -lint "$app/Contents/Info.plist"
+          for b in e5renew e5renew-gui; do
+            archs=$(lipo -archs "$app/Contents/MacOS/$b")
+            echo "$b: $archs"
+            case "$archs" in *x86_64*arm64* | *arm64*x86_64*) ;; *) exit 1 ;; esac
+          done
+          "$app/Contents/MacOS/e5renew" version
+          test -L "$mnt/Applications"
+          hdiutil detach "$mnt"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos
+          path: dist/release/*.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  windows:
+    name: Windows installers
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Install tools
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          go install github.com/wailsapp/wails/v3/cmd/wails3@"$WAILS_VERSION"
+          if ! command -v makensis >/dev/null; then
+            if [ ! -x "/c/Program Files (x86)/NSIS/makensis.exe" ]; then choco install nsis -y --no-progress; fi
+            echo 'C:\Program Files (x86)\NSIS' >>"$GITHUB_PATH"
+          fi
+      - name: Build
+        run: scripts/release/windows.sh
+      - name: Smoke test
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $setup = Get-ChildItem dist\release\*_windows_amd64_setup.exe | Select-Object -First 1
+          $p = Start-Process -Wait -PassThru $setup.FullName -ArgumentList '/S'
+          if ($p.ExitCode -ne 0) { throw "setup exit code $($p.ExitCode)" }
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\E5 Renew'
+          foreach ($f in 'e5renew-gui.exe', 'e5renew.exe', 'e5renew-bg.exe', 'uninstall.exe') {
+            if (-not (Test-Path (Join-Path $dir $f))) { throw "$f was not installed" }
+          }
+          & (Join-Path $dir 'e5renew.exe') version
+          if ($LASTEXITCODE -ne 0) { throw 'e5renew version failed' }
+          $p = Start-Process -Wait -PassThru (Join-Path $dir 'uninstall.exe') -ArgumentList '/S'
+          Start-Sleep -Seconds 5
+          if (Test-Path (Join-Path $dir 'e5renew.exe')) { throw 'uninstall left the program behind' }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/release/*_setup.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  docker:
+    # Build only. The image is pushed by docker.yml once the owner publishes
+    # the draft release, so a tag that fails here or is rejected never
+    # reaches :latest.
+    name: Docker image (build check)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: ${{ github.ref_type == 'tag' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}
+          push: false
+          build-args: |
+            VERSION=0.0.0-dev.g${{ github.sha }}
+
+  publish:
+    name: Draft release
+    if: github.ref_type == 'tag'
+    needs: [cli, linux-desktop, macos, windows, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist/release
+          merge-multiple: true
+      - name: Checksums
+        working-directory: dist/release
+        run: |
+          sha256sum -- * >SHA256SUMS
+          cat SHA256SUMS
+      - name: Create the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          v=${GITHUB_REF_NAME#v}
+          sed "s/@VERSION@/$v/g" packaging/release-notes.md >"$RUNNER_TEMP/notes.md"
+          prerelease=""
+          case "$v" in *-*) prerelease="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/release/* --draft $prerelease \
+            --title "E5 Renew $v" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag

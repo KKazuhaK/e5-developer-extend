@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- scripts/release/macos.sh fills in @VERSION@ and @NUM_VERSION@. -->
+<plist version="1.0">
+<dict>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleName</key>
+	<string>E5 Renew</string>
+	<key>CFBundleDisplayName</key>
+	<string>E5 Renew</string>
+	<key>CFBundleExecutable</key>
+	<string>e5renew-gui</string>
+	<key>CFBundleIdentifier</key>
+	<string>io.github.kkazuhak.e5renew</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@NUM_VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@NUM_VERSION@</string>
+	<key>E5RenewFullVersion</key>
+	<string>@VERSION@</string>
+	<key>CFBundleIconFile</key>
+	<string>icons</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>12.0</string>
+	<!-- The default mode is the tray icon, which has no Dock icon. The window
+	     process switches itself to a regular app when it starts. -->
+	<key>LSUIElement</key>
+	<true/>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.utilities</string>
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<key>NSHumanReadableCopyright</key>
+	<string>MIT License</string>
+</dict>
+</plist>
