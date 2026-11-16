@@ -1,0 +1,287 @@
+# Read-only Microsoft Graph v1.0 calls. Scopes are any-of lists; the first
+# entry is the recommended minimum. Source: docs/graph-api-catalog.md.
+- id: user.me
+  category: user
+  name: Own profile
+  delegated: /me
+  app: /users/{user}
+  scopes:
+    delegated: [User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All]
+    app: [User.Read.All, Directory.Read.All]
+  default: true
+
+- id: user.list
+  category: user
+  name: User list
+  delegated: /users
+  app: /users
+  query:
+    $top: ["10", "20", "30"]
+    $select: ["displayName,id", "id,displayName,jobTitle"]
+  scopes:
+    delegated: [User.ReadBasic.All, User.Read.All, Directory.Read.All]
+    app: [User.Read.All, Directory.Read.All]
+  default: true
+
+- id: user.memberof
+  category: user
+  name: Group memberships
+  delegated: /me/memberOf
+  app: /users/{user}/memberOf
+  scopes:
+    delegated: [User.Read, GroupMember.Read.All, Directory.Read.All]
+    app: [Directory.Read.All]
+  default: true
+
+- id: org.info
+  category: org
+  name: Organization info
+  delegated: /organization
+  app: /organization
+  scopes:
+    delegated: [User.Read, Organization.Read.All, Directory.Read.All]
+    app: [Organization.Read.All, Directory.Read.All]
+  default: true
+
+- id: org.domains
+  category: org
+  name: Domains
+  delegated: /domains
+  app: /domains
+  scopes:
+    delegated: [Domain.Read.All, Directory.Read.All]
+    app: [Domain.Read.All, Directory.Read.All]
+  default: true
+
+- id: group.list
+  category: group
+  name: Groups
+  delegated: /groups
+  app: /groups
+  query:
+    $top: ["10", "20"]
+    $select: ["id,displayName", "id,displayName,createdDateTime"]
+  scopes:
+    delegated: [Group.ReadBasic.All, GroupMember.Read.All, Group.Read.All, Directory.Read.All]
+    app: [Group.ReadBasic.All, GroupMember.Read.All, Group.Read.All, Directory.Read.All]
+  default: true
+
+- id: apps.list
+  category: apps
+  name: App registrations
+  delegated: /applications
+  app: /applications
+  query:
+    $top: ["5", "10"]
+    $select: ["id,displayName", "id,appId,displayName"]
+  scopes:
+    delegated: [Application.Read.All, Directory.Read.All]
+    app: [Application.Read.All, Directory.Read.All]
+  default: true
+
+- id: mail.messages
+  category: mail
+  name: Recent messages
+  delegated: /me/messages
+  app: /users/{user}/messages
+  query:
+    $top: ["5", "10", "20"]
+    $select: ["subject,receivedDateTime", "id,subject"]
+  scopes:
+    delegated: [Mail.ReadBasic, Mail.Read, Mail.ReadWrite]
+    app: [Mail.ReadBasic.All, Mail.Read, Mail.ReadWrite]
+  default: true
+
+- id: mail.folders
+  category: mail
+  name: Mail folders
+  delegated: /me/mailFolders
+  app: /users/{user}/mailFolders
+  scopes:
+    delegated: [Mail.ReadBasic, Mail.Read, Mail.ReadWrite]
+    app: [Mail.ReadBasic.All, Mail.Read, Mail.ReadWrite]
+  default: true
+
+- id: mail.inbox.delta
+  category: mail
+  name: Inbox changes
+  delegated: /me/mailFolders/inbox/messages/delta
+  app: /users/{user}/mailFolders/inbox/messages/delta
+  query:
+    $select: ["subject,receivedDateTime", "id,subject"]
+  scopes:
+    delegated: [Mail.ReadBasic, Mail.Read, Mail.ReadWrite]
+    app: [Mail.ReadBasic.All, Mail.Read, Mail.ReadWrite]
+  default: true
+
+- id: mail.rules
+  category: mail
+  name: Inbox rules
+  delegated: /me/mailFolders/inbox/messageRules
+  app: /users/{user}/mailFolders/inbox/messageRules
+  scopes:
+    delegated: [MailboxSettings.Read, MailboxSettings.ReadWrite]
+    app: [MailboxSettings.Read, MailboxSettings.ReadWrite]
+  default: true
+
+- id: mail.settings
+  category: mail
+  name: Mailbox settings
+  delegated: /me/mailboxSettings
+  app: /users/{user}/mailboxSettings
+  scopes:
+    delegated: [MailboxSettings.Read, MailboxSettings.ReadWrite]
+    app: [MailboxSettings.Read, MailboxSettings.ReadWrite]
+  default: true
+
+- id: mail.categories
+  category: mail
+  name: Mail categories
+  delegated: /me/outlook/masterCategories
+  app: /users/{user}/outlook/masterCategories
+  scopes:
+    delegated: [MailboxSettings.Read, MailboxSettings.ReadWrite]
+    app: [MailboxSettings.Read, MailboxSettings.ReadWrite]
+  default: true
+
+- id: cal.list
+  category: calendar
+  name: Calendars
+  delegated: /me/calendars
+  app: /users/{user}/calendars
+  scopes:
+    delegated: [Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite]
+    # The docs name the app role Calendars.ReadBasic (no .All); see catalog footnote 3.
+    app: [Calendars.ReadBasic, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite]
+  default: true
+
+- id: cal.events
+  category: calendar
+  name: Calendar events
+  delegated: /me/events
+  app: /users/{user}/events
+  query:
+    $top: ["5", "10"]
+    $select: ["subject,start,end", "id,subject"]
+  scopes:
+    delegated: [Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite]
+    app: [Calendars.ReadBasic, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite]
+  default: true
+
+- id: contacts.list
+  category: contacts
+  name: Contacts
+  delegated: /me/contacts
+  app: /users/{user}/contacts
+  query:
+    $top: ["5", "10"]
+    $select: ["displayName,id", "id,displayName,emailAddresses"]
+  scopes:
+    delegated: [Contacts.Read, Contacts.ReadWrite]
+    app: [Contacts.Read, Contacts.ReadWrite]
+  default: true
+
+# No application path: GET /users/{id}/drive does not support app permissions.
+- id: drive.info
+  category: files
+  name: OneDrive info
+  delegated: /me/drive
+  scopes:
+    delegated: [Files.Read, Files.Read.All, Sites.Read.All]
+  default: true
+
+- id: drive.root
+  category: files
+  name: OneDrive root items
+  delegated: /me/drive/root/children
+  app: /users/{user}/drive/root/children
+  query:
+    $top: ["5", "10"]
+    $select: ["name,size", "id,name"]
+  scopes:
+    delegated: [Files.Read, Files.Read.All, Sites.Read.All]
+    app: [Files.Read.All, Sites.Read.All]
+  default: true
+
+- id: sites.root
+  category: sites
+  name: Root site
+  delegated: /sites/root
+  app: /sites/root
+  scopes:
+    delegated: [Sites.Read.All]
+    app: [Sites.Read.All]
+  default: true
+
+- id: sites.lists
+  category: sites
+  name: Root site lists
+  delegated: /sites/root/lists
+  app: /sites/root/lists
+  scopes:
+    delegated: [Sites.Read.All]
+    app: [Sites.Read.All]
+  default: true
+
+- id: sites.search
+  category: sites
+  name: Site search
+  delegated: /sites
+  app: /sites
+  query:
+    search: ["*"]
+  scopes:
+    delegated: [Sites.Read.All]
+    app: [Sites.Read.All]
+  default: true
+
+# No application path: OneNote app-only access was retired on 2025-03-31.
+- id: onenote.notebooks
+  category: notes
+  name: OneNote notebooks
+  delegated: /me/onenote/notebooks
+  scopes:
+    delegated: [Notes.Create, Notes.Read, Notes.Read.All]
+  default: true
+
+- id: todo.lists
+  category: tasks
+  name: To Do lists
+  delegated: /me/todo/lists
+  app: /users/{user}/todo/lists
+  scopes:
+    delegated: [Tasks.Read, Tasks.ReadWrite]
+    app: [Tasks.Read.All, Tasks.ReadWrite.All]
+  default: true
+
+- id: planner.tasks
+  category: tasks
+  name: Planner tasks
+  delegated: /me/planner/tasks
+  app: /users/{user}/planner/tasks
+  scopes:
+    delegated: [Tasks.Read, Group.Read.All]
+    app: [Tasks.Read.All]
+  default: true
+
+- id: teams.joined
+  category: teams
+  name: Joined teams
+  delegated: /me/joinedTeams
+  app: /users/{user}/joinedTeams
+  scopes:
+    delegated: [Team.ReadBasic.All, TeamSettings.Read.All]
+    app: [Team.ReadBasic.All, TeamSettings.Read.All]
+  default: true
+
+# Needs an Entra reporting admin role when signed in as a user; answers with a
+# 302 redirect to a CSV. Off by default.
+- id: reports.active
+  category: reports
+  name: Active user report
+  delegated: /reports/getOffice365ActiveUserDetail(period='D7')
+  app: /reports/getOffice365ActiveUserDetail(period='D7')
+  scopes:
+    delegated: [Reports.Read.All]
+    app: [Reports.Read.All]
+  default: false

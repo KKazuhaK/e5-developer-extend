@@ -346,3 +346,46 @@ func TestClientSecretFlow(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 }
+
+func TestForceRefreshSkipsCachedToken(t *testing.T) {
+	f := newFakeAAD(t)
+	v := testVaultWithKey(t, t.TempDir(), mustKey(t))
+	tok := loginDelegated(t, f, v)
+	acct := fakeAcct(config.AuthDeviceCode)
+	acct.HomeAccountID = tok.HomeAccountID
+	a, _ := NewWithOptions(acct, v, f.opts())
+
+	before := f.requests()
+	if _, err := a.Token(ctx5(t)); err != nil || f.requests() != before {
+		t.Fatalf("plain Token should be cached: %v, %d requests", err, f.requests()-before)
+	}
+	if _, err := a.Token(ForceRefresh(ctx5(t))); err != nil {
+		t.Fatal(err)
+	}
+	if f.requests() == before {
+		t.Error("delegated: forced Token did not contact the identity service")
+	}
+
+	// Client secret.
+	f.roles = true
+	if err := v.Put(vault.SecretKey("svc"), []byte("s3cret")); err != nil {
+		t.Fatal(err)
+	}
+	sa := fakeAcct(config.AuthClientSecret)
+	sa.Name = "svc"
+	b, _ := NewWithOptions(sa, v, f.opts())
+	if _, err := b.Token(ctx5(t)); err != nil {
+		t.Fatal(err)
+	}
+	hits := f.tokenHits()
+	_, _ = b.Token(ctx5(t))
+	if f.tokenHits() != hits {
+		t.Fatal("cached token not reused")
+	}
+	if _, err := b.Token(ForceRefresh(ctx5(t))); err != nil {
+		t.Fatal(err)
+	}
+	if f.tokenHits() != hits+1 {
+		t.Errorf("client secret: forced Token made %d token requests, want 1", f.tokenHits()-hits)
+	}
+}

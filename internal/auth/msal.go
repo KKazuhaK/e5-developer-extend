@@ -61,7 +61,11 @@ func (d *delegated) Token(ctx context.Context) (Token, error) {
 		if a.HomeAccountID != d.acct.HomeAccountID {
 			continue
 		}
-		res, err := c.AcquireTokenSilent(ctx, scopes, public.WithSilentAccount(a))
+		opts := []public.AcquireSilentOption{public.WithSilentAccount(a)}
+		if Forced(ctx) {
+			opts = append(opts, public.WithClaims(forceClaims))
+		}
+		res, err := c.AcquireTokenSilent(ctx, scopes, opts...)
 		if err != nil {
 			return Token{}, d.wrap(err)
 		}
@@ -162,7 +166,11 @@ func (a *application) Token(ctx context.Context) (Token, error) {
 	if err != nil {
 		return Token{}, err
 	}
-	res, err := c.AcquireTokenByCredential(ctx, scopes)
+	var opts []confidential.AcquireByCredentialOption
+	if Forced(ctx) {
+		opts = append(opts, confidential.WithClaims(forceClaims))
+	}
+	res, err := c.AcquireTokenByCredential(ctx, scopes, opts...)
 	if err != nil {
 		return Token{}, wrapErr(a.acct.Name, err)
 	}

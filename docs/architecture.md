@@ -79,7 +79,7 @@ e5-renew/
 │   ├── secret/             # 系统钥匙串 + 加密文件回退
 │   ├── catalog/            # Graph API 库（内嵌 YAML）、按权限和身份筛选
 │   ├── engine/             # 每账号调度循环、工作时段、随机化、自动暂停
-│   ├── store/              # 运行日志与统计（SQLite，modernc.org/sqlite，无 CGO）
+│   ├── store/              # 状态（state.json）与按天的调用日志（JSONL）
 │   └── ipc/                # 本地 Unix socket 控制接口（JSON-RPC）
 ├── catalog/apis.yaml       # API 库源文件（go:embed）
 ├── packaging/              # systemd unit、launchd plist、AppImage、Homebrew
@@ -143,8 +143,9 @@ loop:
 
 ### 4.5 存储 `internal/store`
 
-- SQLite 单文件，存每次调用的日志和每日统计，按天数或条数滚动清理。
-- 配置用 TOML（人能直接编辑），运行状态和日志放 SQLite，两者分开。
+- 状态存 `state.json`（原子写入），调用日志按天存 JSONL 文件，默认保留 30 天。
+  不用 SQLite：省下 6–8 MB 体积，文件也方便用户直接查看。详见 [design/engine.md](design/engine.md)。
+- 配置用 TOML（人能直接编辑），运行状态和日志单独存放。
 - 目录遵循平台惯例：
   - Linux：`$XDG_CONFIG_HOME/e5renew`、`$XDG_DATA_HOME/e5renew`
   - macOS：`~/Library/Application Support/e5renew`
@@ -202,7 +203,7 @@ e5renew catalog list   # 查看 API 库和每条需要的权限
 **不崩、崩了也能恢复**
 - 每个账号的循环都有 `recover`，一个账号出 panic 只影响它自己，并且会记录日志，过一段时间自动重启这个循环。
 - 进程级的崩溃交给系统托管来重启（见 9.2）。
-- 启动时检查上次是否异常退出；SQLite 用 WAL 模式，断电后不损坏。
+- 启动时检查上次是否异常退出；状态文件原子写入，日志只追加，断电后最多丢最后一行。
 
 **睡眠和唤醒**
 - 不用 `time.Sleep(下次运行 - 现在)` 这种一次性的长时间睡眠。Go 的定时器用单调时钟，在 Linux 上系统挂起期间单调时钟不走，唤醒后会晚很久才触发。

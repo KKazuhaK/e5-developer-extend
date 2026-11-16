@@ -145,3 +145,20 @@ func firstLine(s string) string {
 	}
 	return s
 }
+
+// ErrorCode returns a short, content-free tag for err: an AADSTS code or an
+// HTTP status from the identity service, or "" when there is none. Unlike the
+// error text it never carries tenant names, user names or correlation IDs.
+func ErrorCode(err error) string {
+	if err == nil {
+		return ""
+	}
+	var call msalerrors.CallErr
+	if errors.As(err, &call) && call.Resp != nil && call.Resp.StatusCode > 0 {
+		if c := aadCode(err.Error()); c != "" {
+			return c
+		}
+		return fmt.Sprintf("HTTP %d", call.Resp.StatusCode)
+	}
+	return aadCode(err.Error())
+}

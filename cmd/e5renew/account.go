@@ -20,7 +20,8 @@ import (
 func (a *app) newAccountCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "account", Short: "Manage Microsoft 365 accounts"}
 	cmd.AddCommand(a.newAccountAddCmd(), a.newAccountListCmd(), a.newAccountLoginCmd(),
-		a.newAccountTestCmd(), a.newAccountRemoveCmd(), a.newAccountSetSecretCmd())
+		a.newAccountTestCmd(), a.newAccountRemoveCmd(), a.newAccountSetSecretCmd(),
+		a.newAccountPauseCmd(), a.newAccountResumeCmd())
 	return cmd
 }
 

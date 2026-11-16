@@ -23,10 +23,11 @@ import (
 const testGUID = "11111111-2222-3333-4444-555555555555"
 
 type env struct {
-	t       *testing.T
-	cfgDir  string
-	dataDir string
-	newAuth func(acct config.Account, store auth.Store, c *http.Client) (auth.Authenticator, error)
+	t         *testing.T
+	cfgDir    string
+	dataDir   string
+	newAuth   func(acct config.Account, store auth.Store, c *http.Client) (auth.Authenticator, error)
+	graphBase string
 }
 
 func newEnv(t *testing.T) *env {
@@ -42,7 +43,14 @@ func newEnv(t *testing.T) *env {
 
 func (e *env) run(stdin string, args ...string) (string, string, error) {
 	e.t.Helper()
+	return e.runCtx(context.Background(), stdin, args...)
+}
+
+func (e *env) runCtx(ctx context.Context, stdin string, args ...string) (string, string, error) {
+	e.t.Helper()
 	a := newApp()
+	a.graphBase = e.graphBase
+	a.noCallGap = true
 	if e.newAuth != nil {
 		a.newAuth = e.newAuth
 	}
@@ -52,7 +60,7 @@ func (e *env) run(stdin string, args ...string) (string, string, error) {
 	cmd.SetErr(&errOut)
 	cmd.SetIn(strings.NewReader(stdin))
 	cmd.SetArgs(args)
-	err := cmd.Execute()
+	err := cmd.ExecuteContext(ctx)
 	return out.String(), errOut.String(), err
 }
 

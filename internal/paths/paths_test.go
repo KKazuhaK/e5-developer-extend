@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -130,4 +131,29 @@ func TestLockExcludes(t *testing.T) {
 		t.Fatalf("lock after unlock: %v", err)
 	}
 	unlock2()
+}
+
+func TestRemoveStaleTemp(t *testing.T) {
+	dir := t.TempDir()
+	old := time.Now().Add(-time.Hour)
+	// Old leftovers of atomic writes go; a user's own *.tmp file and other
+	// files stay, and so do fresh temp files that may still be in use.
+	for _, n := range []string{"state.json.tmp-123", "heartbeat.tmp-hb", "notes.tmp", "keep.json"} {
+		p := filepath.Join(dir, n)
+		if err := os.WriteFile(p, nil, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_ = os.Chtimes(p, old, old)
+	}
+	_ = os.WriteFile(filepath.Join(dir, "fresh.tmp-9"), nil, 0o600)
+	RemoveStaleTemp(dir, 10*time.Minute)
+	var left []string
+	ents, _ := os.ReadDir(dir)
+	for _, e := range ents {
+		left = append(left, e.Name())
+	}
+	want := []string{"fresh.tmp-9", "keep.json", "notes.tmp"}
+	if strings.Join(left, ",") != strings.Join(want, ",") {
+		t.Errorf("left %v, want %v", left, want)
+	}
 }
