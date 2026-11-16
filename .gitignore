@@ -1,0 +1,25 @@
+# Build output
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go
+/vendor/
+
+# Frontend
+node_modules/
+gui/frontend/dist/
+gui/frontend/bindings/
+
+# Editors / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Local config and secrets
+*.local.toml
+.env
