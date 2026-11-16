@@ -16,10 +16,18 @@ import (
 	"github.com/KKazuhaK/e5-renew/internal/engine"
 	"github.com/KKazuhaK/e5-renew/internal/ops"
 	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-renew/internal/service"
 )
 
 // autostartArgs are the arguments the login entry starts the app with.
 var autostartArgs = []string{"--tray"}
+
+// autostartID names the login entry: the launchd label on macOS, the Run value
+// on Windows, the .desktop file on Linux. It must differ from service.Label,
+// which is the bundle ID Wails would use by default on macOS: both would write
+// ~/Library/LaunchAgents/<label>.plist, and the login item would replace the
+// background service. The Windows installer removes the Run value by this name.
+const autostartID = "io.github.kkazuhak.e5renew.tray"
 
 // wailsAutostart adapts the Wails autostart manager to services.Autostart.
 type wailsAutostart struct{ app *application.App }
@@ -30,7 +38,14 @@ func (w wailsAutostart) Set(on bool) error {
 	if !on {
 		return w.app.Autostart.Disable()
 	}
-	return w.app.Autostart.EnableWithOptions(application.AutostartOptions{Arguments: autostartArgs})
+	// A login item must point at a path that stays: not the disk image or the
+	// temporary copy macOS runs a quarantined app from.
+	if exe, err := os.Executable(); err == nil {
+		if err := service.CheckExecutable(exe, os.TempDir()); err != nil {
+			return err
+		}
+	}
+	return w.app.Autostart.EnableWithOptions(application.AutostartOptions{Identifier: autostartID, Arguments: autostartArgs})
 }
 
 // handoverFile is how the window asks the tray to give up the engine.

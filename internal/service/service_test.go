@@ -123,12 +123,15 @@ func TestCheckExecutable(t *testing.T) {
 		`C:\Users\u\AppData\Local\Temp\go-build1\e5renew.exe`,
 		`C:\Users\u\AppData\Local\Temp\e5renew.exe`,
 		"/mnt/scratch/e5renew",
+		"/private/var/folders/ab/xyz/T/AppTranslocation/1234/d/E5 Renew.app/Contents/MacOS/e5renew",
+		"/Volumes/E5 Renew/E5 Renew.app/Contents/MacOS/e5renew",
 	} {
 		if err := CheckExecutable(bad, "/mnt/scratch"); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}
-	for _, good := range []string{"/usr/local/bin/e5renew", "/home/u/.local/bin/e5renew", "/home/u/tmpfiles/e5renew", `C:\Program Files\e5renew\e5renew.exe`} {
+	for _, good := range []string{"/usr/local/bin/e5renew", "/home/u/.local/bin/e5renew", "/home/u/tmpfiles/e5renew", `C:\Program Files\e5renew\e5renew.exe`,
+		"/Applications/E5 Renew.app/Contents/MacOS/e5renew", "/Volumes/Backup/bin/e5renew"} {
 		if err := CheckExecutable(good, "/mnt/scratch"); err != nil {
 			t.Errorf("%s refused: %v", good, err)
 		}

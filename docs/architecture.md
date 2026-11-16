@@ -176,6 +176,8 @@ e5renew catalog list   # 查看 API 库和每条需要的权限
 
 ## 7. 构建与发布
 
+> 实际方案以 [design/release.md](design/release.md) 为准：不用 GoReleaser、第一版不做 AppImage 和包管理器清单，原因见该文第 2 节。
+
 - **CLI**：用 GoReleaser 交叉编译 windows/linux/darwin × amd64/arm64，发布到 GitHub Releases；
   另提供 Homebrew tap、winget / Scoop 清单，以及给服务器用的 Docker 镜像。
 - **Windows GUI**：在 GitHub Actions 的 Windows runner 上构建，打 NSIS 安装包（Wails 自带）。

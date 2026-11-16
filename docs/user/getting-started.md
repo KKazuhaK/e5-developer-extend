@@ -12,10 +12,9 @@ e5renew 在后台定时、随机地调用 Microsoft Graph 的**只读**接口（
 ## 你需要准备
 
 1. 一个 E5 开发者租户，以及租户里的一个应用注册（Client ID）。步骤见 [app-registration.md](app-registration.md)。
-2. e5renew 的可执行文件（`e5renew`，Windows 上还有不弹控制台窗口的 `e5renew-bg.exe`），放在一个固定的位置，
-   例如 `~/.local/bin/` 或 `C:\Users\你\bin\`。**不要放在临时目录**，后台服务会拒绝安装。
-   Windows 上建议同时编译不弹控制台窗口的版本，放在同一目录（正式发布包出来之前需要自己编译）：
-   `GOOS=windows go build -ldflags -H=windowsgui -o e5renew-bg.exe ./cmd/e5renew`。
+2. 安装好的 e5renew，见 [install.md](install.md)。桌面版的安装包已经把命令行程序一起装好了；
+   只用命令行时，把 `e5renew`（Windows 上还有不弹控制台窗口的 `e5renew-bg.exe`，两者放同一目录）放在一个固定的位置，
+   例如 `~/.local/bin/` 或 `C:\Users\你\bin\`。**不要放在临时目录或“下载”文件夹**，后台服务会拒绝安装。
 
 ## 最快的方式：向导
 

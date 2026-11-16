@@ -73,3 +73,17 @@ wails3 doctor
 - 托盘和窗口生命周期的内存测试（纯托盘 60 MB；GTK4 下关窗口不释放 WebKit 进程）：见 [architecture.md](architecture.md) 第 2 节。
   测试程序只开托盘，然后按“开窗 15 s → `Close()` → 等 20 s → 再开 15 s → `Close()`”的顺序运行，每 2.5 s 统计一次进程树 PSS。
 - `wails3 init` 会在 `go mod tidy` 时访问 proxy.golang.org，网络超时会导致生成到一半中断（`build/` 目录不完整），重试即可。
+
+## 发布构建（可选）
+
+发布包用 `scripts/release/` 里的脚本构建，CI（`.github/workflows/release.yml`）跑的是同一套脚本，产物在 `dist/release/`：
+
+```bash
+CGO_ENABLED=0 GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0   # nfpm 需要 Go 1.27.4+
+scripts/release/cli.sh            # 各平台命令行压缩包 + 命令行 deb/rpm（Linux 上）
+scripts/release/linux-desktop.sh  # 本机架构的桌面 deb/rpm（Linux 上）
+scripts/release/windows.sh        # Windows 安装包（需要 makensis；Linux 上装 nsis 包即可）
+scripts/release/macos.sh          # dmg（只能在 macOS 上）
+```
+
+版本号默认是 `0.0.0-dev.<提交号>`，可以用 `VERSION=0.1.0` 覆盖。详见 [design/release.md](design/release.md)。

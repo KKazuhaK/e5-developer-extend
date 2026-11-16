@@ -1,5 +1,5 @@
-/** The product display name. The final name is undecided: change it here only. */
-export const AppName = "e5renew";
+/** The product display name; gui/main.go has the same constant. */
+export const AppName = "E5 Renew";
 
 export const PROJECT_URL = "https://github.com/KKazuhaK/e5-renew";
 export const DOCS_URL = `${PROJECT_URL}/blob/main/docs/user/app-registration.md`;

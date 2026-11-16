@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1
-FROM golang:1.26 AS build
+# The build stage runs on the build machine and cross-compiles, so a
+# multi-platform build (linux/amd64, linux/arm64) needs no emulation.
+FROM --platform=$BUILDPLATFORM golang:1.26 AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -7,7 +9,9 @@ COPY . .
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
-RUN CGO_ENABLED=0 go build -trimpath \
+ARG TARGETOS=linux
+ARG TARGETARCH
+RUN CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH go build -trimpath \
     -ldflags="-s -w \
       -X github.com/KKazuhaK/e5-renew/internal/version.Version=${VERSION} \
       -X github.com/KKazuhaK/e5-renew/internal/version.Commit=${COMMIT} \
