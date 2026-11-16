@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -42,6 +43,29 @@ func newRootCmdWith(a *app) *cobra.Command {
 		Short:         "Keep a Microsoft 365 E5 developer tenant active",
 		SilenceUsage:  true,
 		SilenceErrors: false,
+	}
+	var configDir, dataDir string
+	root.PersistentFlags().StringVar(&configDir, "config-dir", "", "configuration folder (same as E5RENEW_CONFIG_DIR)")
+	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data folder (same as E5RENEW_DATA_DIR)")
+	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		// The flags exist for job runners that cannot set environment
+		// variables (Windows scheduled tasks); they simply set them.
+		for _, f := range []struct{ flag, env, val string }{
+			{"config-dir", "E5RENEW_CONFIG_DIR", configDir},
+			{"data-dir", "E5RENEW_DATA_DIR", dataDir},
+		} {
+			if f.val == "" {
+				continue
+			}
+			abs, err := filepath.Abs(f.val)
+			if err != nil {
+				return fmt.Errorf("--%s: %w", f.flag, err)
+			}
+			if err := os.Setenv(f.env, abs); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 	root.AddCommand(newVersionCmd(), a.newConfigCmd(), a.newAccountCmd(), a.newVaultCmd(),
 		a.newRunCmd(), a.newRunNowCmd(), a.newStatusCmd(), a.newLogsCmd(), a.newCatalogCmd(),

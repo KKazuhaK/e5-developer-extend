@@ -127,8 +127,9 @@ type InstallOptions struct {
 	// SystemdVersion (Linux) is the major version of systemd; zero means
 	// unknown, which Install fills in by asking `systemctl --version`.
 	SystemdVersion int
-	// ExplicitDirs (macOS) records ConfigDir and DataDir in the job's
-	// environment; set it when they come from E5RENEW_*_DIR overrides.
+	// ExplicitDirs hands ConfigDir and DataDir to the job when they come from
+	// E5RENEW_*_DIR overrides: as environment on macOS, as --config-dir and
+	// --data-dir arguments on Windows (systemd units always carry them).
 	ExplicitDirs bool
 }
 

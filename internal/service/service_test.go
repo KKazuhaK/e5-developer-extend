@@ -202,3 +202,14 @@ func TestFakeRunnerRepliesAndFailures(t *testing.T) {
 		t.Errorf("calls = %v", got)
 	}
 }
+
+func TestTaskPassesExplicitDirs(t *testing.T) {
+	x := TaskXML(TaskParams{Exe: `C:\e.exe`, UserID: `PC\u`, LogFile: `C:\d d\engine.log`, ConfigDir: `C:\c c`, DataDir: `C:\d d`})
+	want := `--config-dir &quot;C:\c c&quot; --data-dir &quot;C:\d d&quot; run --log-format json --log-file &quot;C:\d d\engine.log&quot;`
+	if !strings.Contains(x, "<Arguments>"+want+"</Arguments>") {
+		t.Errorf("arguments not as expected:\n%s", x)
+	}
+	if plain := TaskXML(TaskParams{Exe: `C:\e.exe`, UserID: `PC\u`, LogFile: `C:\l.log`}); strings.Contains(plain, "--config-dir") {
+		t.Error("dirs passed although none were set")
+	}
+}

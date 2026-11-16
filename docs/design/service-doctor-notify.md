@@ -270,3 +270,4 @@ e5renew service status
 - 读不到 systemd 版本时，也改用 `E5RENEW_MASTER_KEY_FILE` 方式（各版本都支持），并给出警告。
 - 卸载时，unit 里有 `E5RENEW_MASTER_KEY_FILE` 的情况同样提示 `master.key` 被保留。
 - 通过 `E5RENEW_MASTER_KEY_FILE` 读取的密钥文件如果对其他用户可读，会记一条警告并提示 `chmod 600`。
+- Windows 计划任务没法设置环境变量：自定义目录改用新增的全局参数 `--config-dir` / `--data-dir` 传入（它们只是设置对应的环境变量）。macOS 用 plist 的 `EnvironmentVariables`，systemd 用 `Environment=`。

@@ -22,11 +22,22 @@ type TaskParams struct {
 	Exe     string
 	UserID  string // DOMAIN\user
 	LogFile string
+	// ConfigDir and DataDir, when set, are passed as --config-dir and
+	// --data-dir: a task action cannot set environment variables.
+	ConfigDir string
+	DataDir   string
 }
 
 // TaskArguments returns the command line arguments of the task.
-func TaskArguments(logFile string) string {
-	return "run --log-format json --log-file " + winQuote(logFile)
+func TaskArguments(p TaskParams) string {
+	var dirs string
+	if p.ConfigDir != "" {
+		dirs += "--config-dir " + winQuote(p.ConfigDir) + " "
+	}
+	if p.DataDir != "" {
+		dirs += "--data-dir " + winQuote(p.DataDir) + " "
+	}
+	return dirs + "run --log-format json --log-file " + winQuote(p.LogFile)
 }
 
 func winQuote(s string) string {
@@ -95,7 +106,7 @@ func TaskXML(p TaskParams) string {
   <Actions Context="Author">
     <Exec>
       <Command>` + x(p.Exe) + `</Command>
-      <Arguments>` + x(TaskArguments(p.LogFile)) + `</Arguments>
+      <Arguments>` + x(TaskArguments(p)) + `</Arguments>
     </Exec>
   </Actions>
 </Task>
@@ -128,7 +139,11 @@ func (m *schtasks) Plan(o InstallOptions) (Plan, error) {
 	if m.env.User == "" {
 		return Plan{}, errors.New("service: cannot tell which Windows user to register the task for")
 	}
-	xml := TaskXML(TaskParams{Exe: o.Exe, UserID: m.env.User, LogFile: join(Windows, o.DataDir, "engine.log")})
+	tp := TaskParams{Exe: o.Exe, UserID: m.env.User, LogFile: join(Windows, o.DataDir, "engine.log")}
+	if o.ExplicitDirs {
+		tp.ConfigDir, tp.DataDir = o.ConfigDir, o.DataDir
+	}
+	xml := TaskXML(tp)
 	file := m.taskFile(o.DataDir)
 	return Plan{
 		Files: []File{{Path: file, Mode: 0o600, Data: utf16LE(xml), Show: xml}},

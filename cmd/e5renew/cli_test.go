@@ -455,3 +455,17 @@ func TestMFAAndPasswordHints(t *testing.T) {
 		t.Errorf("wrong-key hint: %v", err)
 	}
 }
+
+// Windows scheduled tasks cannot set environment variables, so the job gets
+// --config-dir and --data-dir instead; they must win over the environment.
+func TestDirFlagsOverrideEnvironment(t *testing.T) {
+	e := newEnv(t)
+	cfg, data := t.TempDir(), t.TempDir()
+	out, _, err := e.run("", "--config-dir", cfg, "--data-dir", data, "config", "path")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, filepath.Join(cfg, "config.toml")) || !strings.Contains(out, data) {
+		t.Errorf("flags not applied:\n%s", out)
+	}
+}

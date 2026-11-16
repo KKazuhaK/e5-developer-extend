@@ -200,9 +200,6 @@ func (a *app) installService(cmd *cobra.Command, keyFile, linger bool) error {
 		return err
 	}
 	res.Warnings = append(warns, res.Warnings...)
-	if runtime.GOOS == service.Windows && opts.ExplicitDirs {
-		res.Warnings = append(res.Warnings, "E5RENEW_CONFIG_DIR or E5RENEW_DATA_DIR is set in this shell, but the scheduled task does not inherit it; it will use the default folders")
-	}
 	if hint := keyHint(runtime.GOOS, keyFile, os.Getenv); hint != "" {
 		res.Warnings = append(res.Warnings, hint)
 	}

@@ -100,7 +100,7 @@ e5renew service install
 - 任务没有控制台，运行日志写到 `%LOCALAPPDATA%\e5renew\engine.log`（超过约 5 MB 时转存为 `engine.log.1`）；程序崩溃时的堆栈另外写到同目录的 `engine-crash.log`。
 - 任务定义的 XML 保存在 `%LOCALAPPDATA%\e5renew\service\e5renew-task.xml`。
 - 任务以你自己的身份运行，可以读取凭据管理器里的主密钥。`--key-file` 不适用于 Windows。
-- 任务不继承你 shell 里的 `E5RENEW_CONFIG_DIR` / `E5RENEW_DATA_DIR`，会使用默认目录。
+- 计划任务没法设置环境变量。如果你在安装时用了 `E5RENEW_CONFIG_DIR` / `E5RENEW_DATA_DIR`，安装程序会把这两个目录改成 `--config-dir` / `--data-dir` 参数写进任务，效果相同。
 
 验证：`e5renew service status`、`schtasks /Query /TN e5renew`、`e5renew doctor`。
 Windows 服务（LocalSystem）形式暂未实现。
