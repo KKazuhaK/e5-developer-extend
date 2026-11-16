@@ -587,6 +587,7 @@ func TestEngineStoppedHint(t *testing.T) {
 		"systemctl --user is-active":  {Stdout: "inactive\n", ExitCode: 3},
 	}}
 	e.Runner = fr
+	e.Platform = service.Linux // the fake runner and unit file below are systemd's
 	e.Svc = SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"}
 	if h := e.EngineStoppedHint(); !strings.Contains(h, "e5renew service install") || !strings.Contains(h, "e5renew run") {
 		t.Fatalf("not installed: %q", h)

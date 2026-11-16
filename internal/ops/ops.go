@@ -40,6 +40,9 @@ type Ops struct {
 	Exe func() (string, error)
 	// Svc overrides who the background job is installed for.
 	Svc SvcIdentity
+	// Platform overrides the service manager's platform (runtime.GOOS when
+	// empty); tests use it to exercise one manager on every host.
+	Platform string
 	// WebhookBackoff replaces the retry waits of alert delivery.
 	WebhookBackoff []time.Duration
 }

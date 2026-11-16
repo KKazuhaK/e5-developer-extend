@@ -505,6 +505,7 @@ func TestInstallChecksBeforeHandover(t *testing.T) {
 
 	// The checks pass but the install fails: the handover is withdrawn.
 	r.b.Ops.Exe = func() (string, error) { return "/opt/e5renew/e5renew", nil }
+	r.b.Ops.Platform = service.Linux // make systemctl the command that fails, on every host
 	r.b.Ops.Runner = &service.FakeRunner{FailOn: []string{"systemctl"}}
 	if _, err := h.InstallService(); err == nil {
 		t.Fatal("expected the install to fail")

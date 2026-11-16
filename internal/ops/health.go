@@ -57,7 +57,7 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 
 // ServiceEnv describes this machine for the service manager.
 func (o *Ops) ServiceEnv() (service.Env, error) {
-	env := service.Env{GOOS: runtime.GOOS, Runner: o.Runner}
+	env := service.Env{GOOS: FirstNonEmpty(o.Platform, runtime.GOOS), Runner: o.Runner}
 	if env.Runner == nil {
 		env.Runner = service.ExecRunner{}
 	}
