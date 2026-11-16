@@ -79,7 +79,7 @@ wails3 doctor
 发布包用 `scripts/release/` 里的脚本构建，CI（`.github/workflows/release.yml`）跑的是同一套脚本，产物在 `dist/release/`：
 
 ```bash
-CGO_ENABLED=0 go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0
+CGO_ENABLED=0 GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.49.0   # nfpm 需要 Go 1.27.4+
 scripts/release/cli.sh            # 各平台命令行压缩包 + 命令行 deb/rpm（Linux 上）
 scripts/release/linux-desktop.sh  # 本机架构的桌面 deb/rpm（Linux 上）
 scripts/release/windows.sh        # Windows 安装包（需要 makensis；Linux 上装 nsis 包即可）

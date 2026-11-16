@@ -42,7 +42,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@"$WAILS_VERSION"
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
+          # nfpm needs a newer Go than go.mod; let go fetch that toolchain for this tool only.
+          GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
       - name: Build
         run: scripts/release/cli.sh
       - name: Smoke test
@@ -87,7 +88,8 @@ jobs:
           CGO_ENABLED: "0"
         run: |
           go install github.com/wailsapp/wails/v3/cmd/wails3@"$WAILS_VERSION"
-          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
+          # nfpm needs a newer Go than go.mod; let go fetch that toolchain for this tool only.
+          GOTOOLCHAIN=auto go install github.com/goreleaser/nfpm/v2/cmd/nfpm@"$NFPM_VERSION"
       - name: Build
         run: scripts/release/linux-desktop.sh
       - uses: actions/download-artifact@v8
