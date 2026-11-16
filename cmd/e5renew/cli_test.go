@@ -45,6 +45,10 @@ func newEnv(t *testing.T) *env {
 	t.Setenv("E5RENEW_DATA_DIR", e.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
+	// Results must not depend on whether the tests run over SSH.
+	for _, v := range []string{"SSH_CONNECTION", "SSH_CLIENT", "SSH_TTY"} {
+		t.Setenv(v, "")
+	}
 	return e
 }
 

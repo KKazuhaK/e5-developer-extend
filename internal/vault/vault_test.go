@@ -130,7 +130,17 @@ func TestBadKeyLength(t *testing.T) {
 func clearKeyEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv(EnvMasterKey, "")
+	t.Setenv(EnvMasterKeyFile, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
+	// Results must not depend on whether the tests run over SSH.
+	setRemote(t, false)
+}
+
+func setRemote(t *testing.T, on bool) {
+	t.Helper()
+	old := RemoteSession
+	RemoteSession = func() bool { return on }
+	t.Cleanup(func() { RemoteSession = old })
 }
 
 func TestResolveOrder(t *testing.T) {
@@ -399,5 +409,33 @@ func TestMasterKeyFromFile(t *testing.T) {
 	t.Setenv(EnvMasterKeyFile, p)
 	if _, _, err := ResolveMasterKey(BackendAuto, ""); err == nil {
 		t.Error("damaged key file ignored")
+	}
+}
+
+// Over SSH the keyring may only be out of reach: never create a key there,
+// and never send the user towards wiping the vault.
+func TestRemoteSessionNeverCreatesAKey(t *testing.T) {
+	keyring.MockInit()
+	clearKeyEnv(t)
+	setRemote(t, true)
+	dir := t.TempDir()
+	_, _, err := ResolveMasterKey(BackendAuto, dir)
+	if !errors.Is(err, ErrNoMasterKey) || !errors.Is(err, ErrRemoteSession) {
+		t.Fatalf("got %v", err)
+	}
+	if strings.Contains(err.Error(), "vault reset") {
+		t.Errorf("remote session error suggests a reset: %v", err)
+	}
+	if _, err := keyring.Get(keyringService, keyringUser); !errors.Is(err, keyring.ErrNotFound) {
+		t.Errorf("a key was created from a remote session (err=%v)", err)
+	}
+	if _, _, err := LookupMasterKey(BackendAuto); !errors.Is(err, ErrRemoteSession) {
+		t.Errorf("lookup: got %v", err)
+	}
+	// The environment still works remotely.
+	key, _ := GenerateKey()
+	t.Setenv(EnvMasterKey, EncodeKey(key))
+	if _, src, err := ResolveMasterKey(BackendAuto, dir); err != nil || src != SourceEnv {
+		t.Errorf("env key over SSH: src=%v err=%v", src, err)
 	}
 }

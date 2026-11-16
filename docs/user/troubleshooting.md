@@ -11,8 +11,12 @@
 ## vault
 
 读不出加密数据。
-- “wrong master key”：换了机器或钥匙串被清空。恢复原来的主密钥（`E5RENEW_MASTER_KEY` 或钥匙串），
-  或者 `e5renew vault reset` 后重新输入密钥并登录。
+- **通过 SSH 等远程会话操作时**看到 “may not be reachable from this remote (SSH) session”：
+  主密钥多半没丢，只是这个会话读不到系统钥匙串（Windows 用密钥方式登录 SSH 时不会加载凭据管理器；
+  Linux 没有桌面会话时没有 Secret Service）。到桌面会话里执行，或者只在当前 shell 里设置 `E5RENEW_MASTER_KEY`。
+  **不要因此执行 `vault reset`。** 远程会话里程序也不会自动生成新密钥，以免和桌面会话里的那把冲突。
+- “wrong master key”：换了机器或钥匙串被清空。恢复原来的主密钥（`E5RENEW_MASTER_KEY` 或钥匙串）；
+  实在找不回来，最后才用 `e5renew vault reset`（会删除所有已保存的密钥），然后重新输入密钥并登录。
 - “no master key”：设置 `E5RENEW_MASTER_KEY`（`e5renew vault init --print-key` 生成），或让服务读 key 文件
   （`service install --key-file`）。
 - “the secret is missing”：`e5renew account set-secret <名称>`。

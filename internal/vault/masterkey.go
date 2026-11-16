@@ -48,6 +48,26 @@ const (
 // ErrNoMasterKey means no master key could be found or created.
 var ErrNoMasterKey = errors.New("vault: no master key available")
 
+// ErrRemoteSession marks a missing key that may only be invisible: over SSH
+// (or another remote logon) the user's keyring is often not reachable at all
+// (Windows does not load Credential Manager for key-based SSH logons, Linux
+// has no Secret Service without a desktop session). It is always wrapped
+// together with ErrNoMasterKey.
+var ErrRemoteSession = errors.New("the system keyring may not be reachable from this remote (SSH) session")
+
+// RemoteSession reports whether this process runs in a remote shell session.
+// A variable so tests can override it.
+var RemoteSession = func() bool {
+	return os.Getenv("SSH_CONNECTION") != "" || os.Getenv("SSH_CLIENT") != "" || os.Getenv("SSH_TTY") != ""
+}
+
+// remote wraps a missing or unreachable keyring key when the session is
+// remote, so callers never suggest wiping data that is only out of reach.
+func remote(err error) error {
+	return fmt.Errorf("%w: %w: run this from the desktop session of the same user, "+
+		"or provide the key for this shell with %s (%v)", ErrNoMasterKey, ErrRemoteSession, EnvMasterKey, err)
+}
+
 // GenerateKey returns a new random master key.
 func GenerateKey() ([]byte, error) {
 	key := make([]byte, keySize)
@@ -137,8 +157,8 @@ func checkNoOrphans(vaultDir string) error {
 		return fmt.Errorf("%w: cannot check existing vault data (%v); refusing to create a new key", ErrNoMasterKey, err)
 	}
 	if has {
-		return fmt.Errorf("%w: the vault has data but no master key was found; restore the old key via %s or the system keyring, "+
-			"or run `e5renew vault reset` to wipe the vault", ErrNoMasterKey, EnvMasterKey)
+		return fmt.Errorf("%w: the vault has data but no master key was found; restore the old key via %s or the system keyring "+
+			"(as a last resort, `e5renew vault reset` deletes all stored secrets)", ErrNoMasterKey, EnvMasterKey)
 	}
 	return nil
 }
@@ -171,6 +191,10 @@ func ResolveMasterKey(backend, vaultDir string) ([]byte, Source, error) {
 			return nil, "", fmt.Errorf("vault: master key in the system keyring is invalid: %w", derr)
 		}
 		return key, SourceKeyring, nil
+	case RemoteSession():
+		// Possibly just out of reach: never create a key here, it could
+		// orphan the real one that the desktop session still sees.
+		return nil, "", remote(err)
 	case !errors.Is(err, keyring.ErrNotFound):
 		return nil, "", unavailable("the system keyring is unavailable", err)
 	}
@@ -293,6 +317,8 @@ func LookupMasterKey(backend string) ([]byte, Source, error) {
 			return nil, "", fmt.Errorf("vault: master key in the system keyring is invalid: %w", derr)
 		}
 		return key, SourceKeyring, nil
+	case RemoteSession():
+		return nil, "", remote(err)
 	case errors.Is(err, keyring.ErrNotFound):
 		return nil, "", fmt.Errorf("%w: none found in the environment, credentials or system keyring", ErrNoMasterKey)
 	}

@@ -200,8 +200,11 @@ func hint(err error, name string) string {
 		return "an administrator must grant consent for the app's API permissions (Azure portal > App registrations > API permissions > Grant admin consent)"
 	case errors.Is(err, auth.ErrTransient):
 		return "network or service problem; check connectivity and the proxy setting, then try again"
+	case errors.Is(err, vault.ErrRemoteSession):
+		return "the key is probably fine but out of reach from this remote session: run the command in the desktop session, or set E5RENEW_MASTER_KEY for this shell; do not reset the vault"
 	case errors.Is(err, vault.ErrNoMasterKey):
-		return "if the vault already holds data, restore the old key (E5RENEW_MASTER_KEY or the system keyring entry) or run: e5renew vault reset; otherwise set E5RENEW_MASTER_KEY or run: e5renew vault init"
+		return "if the vault already holds data, restore the old key (E5RENEW_MASTER_KEY or the system keyring entry); if it is empty, run: e5renew vault init; " +
+			"only as a last resort, e5renew vault reset deletes all stored secrets"
 	case errors.Is(err, vault.ErrWrongKey):
 		return "restore the original master key (E5RENEW_MASTER_KEY or the system keyring entry); otherwise re-enter the secret with: e5renew account set-secret " + name
 	}
