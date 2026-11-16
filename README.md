@@ -4,12 +4,12 @@
 让开发者租户保持有开发活动。支持 **Windows、macOS、Linux**，提供 **GUI** 和 **CLI** 两种形态，
 设计目标是**长期在后台稳定运行**。
 
-> **状态：开发中**，即将发布第一版。设计文档见 [`docs/`](docs/)。
+> **状态**：第一版 [v0.1.0](https://github.com/KKazuhaK/e5-renew/releases/tag/v0.1.0) 已发布，变更见 [CHANGELOG.md](CHANGELOG.md)。设计文档见 [`docs/`](docs/)。
 
 *A cross-platform (Windows / macOS / Linux) tool that keeps a Microsoft 365 E5 developer tenant active by
-calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI. Work in progress.*
+calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI.*
 
-## 计划功能
+## 功能
 
 - **登录方式**：浏览器登录、设备码（适合服务器）、Client Secret（应用身份），以及账号密码登录（仅适用于没开 MFA 的账号，不推荐）
 - **API 库**：按分类勾选的 Graph 只读接口，按令牌里实际有的权限自动筛选

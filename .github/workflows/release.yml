@@ -216,6 +216,11 @@ jobs:
           push: false
           build-args: |
             VERSION=0.0.0-dev.g${{ github.sha }}
+        env:
+          # build-push-action uploads a *.dockerbuild build record as a
+          # workflow artifact by default; publish downloads every artifact
+          # into the release, so keep it out.
+          DOCKER_BUILD_RECORD_UPLOAD: false
 
   publish:
     name: Draft release
