@@ -2,9 +2,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/signal"
 	"runtime"
+	"syscall"
 
 	"github.com/spf13/cobra"
 
@@ -12,19 +15,25 @@ import (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	// After the first signal restore default handling, so a second one kills the process.
+	go func() { <-ctx.Done(); stop() }()
+	if err := newRootCmd().ExecuteContext(ctx); err != nil {
+		stop()
 		os.Exit(1)
 	}
 }
 
-func newRootCmd() *cobra.Command {
+func newRootCmd() *cobra.Command { return newRootCmdWith(newApp()) }
+
+func newRootCmdWith(a *app) *cobra.Command {
 	root := &cobra.Command{
 		Use:           "e5renew",
 		Short:         "Keep a Microsoft 365 E5 developer tenant active",
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
-	root.AddCommand(newVersionCmd())
+	root.AddCommand(newVersionCmd(), a.newConfigCmd(), a.newAccountCmd(), a.newVaultCmd())
 	return root
 }
 

@@ -17,7 +17,7 @@ calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI. Wo
 - **多账号**：每个账号单独的状态、日志和统计；连续失败自动暂停（auto-pause）
 - **长期运行**：开机自启、后台服务（systemd / launchd / Windows 服务 / Docker）、健康检查（`e5renew doctor`）、
   令牌和 Secret 到期提醒、桌面通知和 Webhook 告警
-- **体积小**：CLI 预计约 5 MB，单个可执行文件，无运行时依赖
+- **体积小**：CLI 约 10 MB，单个可执行文件，无运行时依赖
 
 ## 文档
 
