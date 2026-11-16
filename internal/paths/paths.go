@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 )
 
 const (
@@ -97,8 +98,9 @@ func resolve(goos string, getenv func(string) string, home string, config bool) 
 		if config {
 			xdg, fallback = "XDG_CONFIG_HOME", ".config"
 		}
-		// XDG requires absolute paths; ignore relative values.
-		if base := getenv(xdg); filepath.IsAbs(base) {
+		// XDG requires absolute paths; ignore relative values. Check with the
+		// Unix rule rather than the host's filepath.IsAbs, which differs on Windows.
+		if base := getenv(xdg); strings.HasPrefix(base, "/") {
 			return filepath.Join(base, appDir), nil
 		}
 		if home == "" {
