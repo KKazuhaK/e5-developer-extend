@@ -12,9 +12,14 @@
 - 自动恢复：因连续失败被自动暂停的账号，在暂停后 6 小时、再过 12 小时、之后每 24 小时用一次轻量调用（`/me`，应用身份用 `/organization` 或最便宜的可用接口）探测；成功就自动恢复并发 `recovered`。手动暂停的账号不会被自动恢复；`invalid_grant`、需要重新登录等仍是 `needs_attention`，不探测。`status`、`doctor` 和桌面版显示下一次探测的时间。
 - 重启后的补跑：启动时如果某个账号的下一轮已经错过很久，只在几分钟内（带抖动）补跑一轮，不补齐错过的轮次，调用日志里有 `catch_up` 事件。
 - 每日摘要：新事件 `daily_summary`（提示级别，默认关闭）。设置 `notify.daily_summary_at = "21:00"` 后每天发一条，列出每个账号过去 24 小时的成功、失败、限流次数，最近成功时间，暂停或需要处理的状态，暂停的 API 数，以及已知时 E5 订阅的剩余天数。免打扰时段内到点的话在时段结束时发。所有渠道类型都有中英文内置模板，`notify test --event daily_summary` 和 `notify preview daily_summary` 可用；通用 Webhook 的请求体多一个 `summary` 数组。桌面版“设置 → 高级设置 → 告警”新增开关和时间。
+- 调用节奏新增两档预设：**密集（同原版强度）**（8 到 17 分钟一轮，每轮 15 到 25 个 API）和**急救（临时）**（5 到 10 分钟一轮，每轮 20 到 30 个 API，只用于订阅到期前的几天，界面上有提示，过后请手动改回“标准”）。某一轮要的 API 数比账号能用的多时，调用能用的全部。
+- API 目录新增只读接口：洞察（热门文档）、相关人员、在线状态（presence）、直属下级、用户设置、OneDrive 驱动器列表、日历组、OneNote 分区，以及 Bookings（业务和货币，默认关闭；货币只有委托身份）。新增三个只读权限，自动创建应用会一并申请：委托身份 `People.Read`、`Presence.Read`、`Bookings.Read.All`，应用身份 `Presence.Read.All`、`Bookings.Read.All`。已有的应用注册没有这些权限时，对应接口只是不会被选中，其他不受影响；要补权限可以重新运行 `e5extend app setup`。没有收 `/me/insights/used` 和 `shared`、`/me/manager`（没有上级的账号会返回 404）、`/me/drive/recent` 和 `sharedWithMe`（微软已停止返回数据）、`/me/settings/regionalAndLanguageSettings`（只在 beta 里）。详见 [docs/graph-api-catalog.md](docs/graph-api-catalog.md)。
+- 按 API 统计调用次数：引擎为每个账号记录每个 API 的成功、失败、总次数和最近一次的结果（存在 state.json 里，每个 API 一条）。命令行 `e5extend stats [账号]`；桌面版“日志”页新增“按 API 统计”，可按列排序。
+- 桌面版概览页新增红色描边的“续期失败？”按钮，打开检查清单（旧版沙盒订阅退役、开发者控制面板、订阅卡片、健康检查、没有保证），清单也写进了 [常见问题](docs/user/faq.md)。
 
 ### 变更
 
+- 默认全天调用（`work_start` 和 `work_end` 都是 `"00:00"`，两者相等表示全天）；以前是 08:00 到 22:00。已有的配置不变。
 - 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
 - 返回 403 的接口现在在第一次就暂停 24 小时（之前连续 3 次后暂停 7 天），404 也一样；`failure_spike` 和“今日失败”不再把 403、404 和限流算作失败。
 - 自动暂停的原因里说明会自动再试一次。

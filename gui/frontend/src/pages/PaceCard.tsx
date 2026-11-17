@@ -33,6 +33,9 @@ export function PaceCard({
               }),
             }))}
           />
+          {pace === "rescue" && (
+            <p role="note" className="rounded-md border border-amber-500/50 bg-amber-500/10 px-3 py-2 text-xs">{t("settings.paceRescueNote")}</p>
+          )}
           {pace === "custom" && (
             <p role="status" className="text-xs text-muted-foreground">
               <span className="mr-1.5 rounded-md border bg-muted px-1.5 py-0.5 font-medium text-foreground">{t("settings.paceCustom")}</span>

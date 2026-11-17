@@ -257,6 +257,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			gone = true
 			return
 		}
+		e.pruneAPIStatsLocked(as)
 		as.GrantedScopes = append([]string(nil), tok.Scopes...)
 		sort.Strings(as.GrantedScopes)
 		for id, until := range as.APISkipUntil {
@@ -308,6 +309,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	// handle books the result of one call; it reports whether the round must stop.
 	throttledRun := 0
 	handle := func(id string, res graph.Result) (stop bool) {
+		e.countAPI(acct.Name, id, res)
 		if res.Class != graph.Throttled {
 			throttledRun = 0
 		}
@@ -440,6 +442,66 @@ func finishCalls(ctx context.Context, out outcome) outcome {
 func (e *Engine) logCall(account, roundID, apiID string, res graph.Result) {
 	e.emit(store.Entry{TS: e.clock.Now(), Account: account, Round: roundID, API: apiID,
 		Status: res.Status, Class: string(res.Class), LatencyMS: res.Latency.Milliseconds()})
+}
+
+// countAPI adds one call to the account's per-API statistics, counted the way
+// Totals counts (a throttled call is not counted, only remembered as the last
+// result). Calls that
+// never got an answer (network error, cancelled) and the user lookup are not
+// counted. The map holds at most one entry per catalog API.
+func (e *Engine) countAPI(account, id string, res graph.Result) {
+	if res.Class == graph.Network || res.Class == graph.Canceled || id == "users.pick" {
+		return
+	}
+	known := false
+	for _, a := range e.apis {
+		if a.ID == id {
+			known = true
+			break
+		}
+	}
+	if !known {
+		return
+	}
+	now := e.clock.Now()
+	e.updateAccount(account, func(as *store.AccountState) {
+		if as.APIStats == nil {
+			as.APIStats = map[string]*store.APIStat{}
+		}
+		st := as.APIStats[id]
+		if st == nil {
+			st = &store.APIStat{}
+			as.APIStats[id] = st
+		}
+		// Like Totals: a throttled call is neither a success nor a failure.
+		switch res.Class {
+		case graph.OK:
+			st.OK++
+		case graph.Throttled:
+		default:
+			st.Failed++
+		}
+		st.LastClass, st.LastStatus, st.LastAt = string(res.Class), res.Status, now
+	})
+}
+
+// pruneAPIStatsLocked drops statistics of APIs that are no longer in the catalog.
+func (e *Engine) pruneAPIStatsLocked(as *store.AccountState) {
+	if len(as.APIStats) == 0 {
+		return
+	}
+	in := make(map[string]bool, len(e.apis))
+	for _, a := range e.apis {
+		in[a.ID] = true
+	}
+	for id := range as.APIStats {
+		if !in[id] {
+			delete(as.APIStats, id)
+		}
+	}
+	if len(as.APIStats) == 0 {
+		as.APIStats = nil
+	}
 }
 
 func (e *Engine) updateAccount(name string, f func(*store.AccountState)) {
