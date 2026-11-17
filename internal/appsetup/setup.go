@@ -410,7 +410,13 @@ func (s *Setup) missingPermissions(a *application, ids map[string]string) []stri
 
 // Plan works out what Apply would do, without changing anything. Every write
 // Apply makes has an action here; no actions means Apply writes nothing.
-func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
+func (s *Setup) Plan(ctx context.Context) (*Plan, error) { return s.PlanFor(ctx, nil) }
+
+// PlanFor is Plan for a decision the user has not confirmed yet: when there
+// are candidates and choice adopts one or asks for a new app, the actions are
+// the ones that option would carry out (choice nil, or neither, keeps the
+// single "adopt_or_create" action). It writes nothing.
+func (s *Setup) PlanFor(ctx context.Context, choice *Choice) (*Plan, error) {
 	c := s.client()
 	g, err := s.resolveGraph(ctx, c)
 	if err != nil {
@@ -441,8 +447,29 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 	p.Missing = s.missingPermissions(app, ids)
 	add := func(code, text string) { p.Actions = append(p.Actions, Action{Code: code, Text: text}) }
 
+	undecided := false
 	switch {
+	case app == nil && len(p.Candidates) > 0 && choice != nil && choice.Adopt != "":
+		var cand *application
+		for i := range d.cands {
+			if matchesApp(&d.cands[i], choice.Adopt) {
+				cand = &d.cands[i]
+			}
+		}
+		if cand == nil {
+			return nil, fmt.Errorf("no existing app registration %q to adopt", choice.Adopt)
+		}
+		if app, err = s.fresh(ctx, c, cand); err != nil {
+			return nil, err
+		}
+		add("adopt_app", fmt.Sprintf("adopt the existing app registration %q (tagging it as managed by E5 Developer Extend)", app.DisplayName))
+		_, acts, missing := s.appChanges(app, ids, true, choice.Rename)
+		p.Actions = append(p.Actions, acts...)
+		p.Missing = missing
+	case app == nil && len(p.Candidates) > 0 && choice != nil && choice.CreateNew:
+		add("create_app", fmt.Sprintf("create the app registration %q", p.DisplayName))
 	case app == nil && len(p.Candidates) > 0:
+		undecided = true
 		add("adopt_or_create", fmt.Sprintf("adopt one of the existing app registrations (%d found; this adds the tags, permissions, settings and note it lacks, and renames it unless you decline) or create %q",
 			len(p.Candidates), p.DisplayName))
 	case app == nil:
@@ -452,7 +479,7 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 		p.Actions = append(p.Actions, acts...)
 	}
 
-	if app == nil && len(p.Candidates) > 0 {
+	if undecided {
 		// What is left depends on which app the user picks.
 		if s.Kind == KindApp {
 			add("create_secret", "create a client secret named for this computer and store it in the vault (12 months)")

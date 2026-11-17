@@ -211,6 +211,12 @@ func (s *AppSetupSession) Plan(ctx context.Context) (*appsetup.Plan, error) {
 	return p, nil
 }
 
+// PlanFor previews the actions of a choice the user has not confirmed yet
+// (see appsetup.Setup.PlanFor); it changes nothing.
+func (s *AppSetupSession) PlanFor(ctx context.Context, choice appsetup.Choice) (*appsetup.Plan, error) {
+	return s.setup.PlanFor(ctx, &choice)
+}
+
 func (s *AppSetupSession) checkPlanTarget(p *appsetup.Plan) error {
 	if p.Existing != nil {
 		return s.checkSecretTarget(*p.Existing)

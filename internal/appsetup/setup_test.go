@@ -590,3 +590,60 @@ func assertNoSecret(t *testing.T, r *rig, res *appsetup.Result) {
 		t.Error("the token appears in the result or progress")
 	}
 }
+
+func codes(p *appsetup.Plan) string {
+	var out []string
+	for _, a := range p.Actions {
+		out = append(out, a.Code)
+	}
+	return strings.Join(out, " ")
+}
+
+func TestPlanForPreviewsEachChoiceWithoutWriting(t *testing.T) {
+	r := newRig(t)
+	id := r.g.AddApp(map[string]any{"displayName": "e5renew", "tags": []string{"keep"}})
+	clientID := r.g.App(id)["appId"].(string)
+	s := r.setup(appsetup.KindDelegated)
+	ctx := context.Background()
+
+	if p, err := s.PlanFor(ctx, nil); err != nil || codes(p) != "adopt_or_create" {
+		t.Fatalf("undecided: %v %v", p, err)
+	}
+	p, err := s.PlanFor(ctx, &appsetup.Choice{Adopt: clientID, Rename: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "adopt_app rename_app set_notes add_tags add_redirect_uri set_public_client add_permissions create_service_principal grant_consent"
+	if codes(p) != want {
+		t.Errorf("adopt+rename: %s", codes(p))
+	}
+	if len(p.Missing) != len(catalog.RecommendedDelegated) {
+		t.Errorf("missing = %v", p.Missing)
+	}
+	p, _ = s.PlanFor(ctx, &appsetup.Choice{Adopt: id})
+	if strings.Contains(codes(p), "rename_app") || !strings.Contains(codes(p), "adopt_app") {
+		t.Errorf("adopt, keep name: %s", codes(p))
+	}
+	p, _ = s.PlanFor(ctx, &appsetup.Choice{CreateNew: true})
+	if codes(p) != "create_app create_service_principal grant_consent" {
+		t.Errorf("create new: %s", codes(p))
+	}
+	if _, err := s.PlanFor(ctx, &appsetup.Choice{Adopt: "nope"}); err == nil {
+		t.Error("an unknown app was accepted")
+	}
+	if len(r.g.Writes()) != 0 {
+		t.Errorf("a preview wrote: %v", r.g.Writes())
+	}
+	// What the preview says is what Apply then does.
+	res := apply(t, s, appsetup.Choice{Adopt: clientID, Rename: true})
+	if !res.AdoptedApp || !res.Renamed || !res.CreatedServicePrincipal || !res.ConsentGranted {
+		t.Errorf("result %+v", res)
+	}
+
+	app := newRig(t)
+	app.g.AddApp(map[string]any{"displayName": "e5extend"})
+	p, _ = app.setup(appsetup.KindApp).PlanFor(ctx, &appsetup.Choice{CreateNew: true})
+	if codes(p) != "create_app create_service_principal assign_roles create_secret" {
+		t.Errorf("app-only create new: %s", codes(p))
+	}
+}
