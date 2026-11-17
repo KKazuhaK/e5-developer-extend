@@ -35,6 +35,8 @@ describe("actionMsg", () => {
     expect(actionMsg({ code: "adopt_app", text: "" }, plan(), "e5renew")?.params).toEqual({ name: "e5renew" });
     expect(actionMsg({ code: "add_tags", text: "add the tags e5extend, e5extend:delegated" }, plan())?.params).toEqual({ tags: "e5extend, e5extend:delegated" });
     expect(actionMsg({ code: "add_permissions", text: "" }, plan({ missing: ["a", "b", "c"] }))?.params).toEqual({ n: 3 });
+    expect(actionMsg({ code: "create_secret", text: "create a client secret; then delete this computer's 2 earlier secret(s) from the app" }, plan())).toEqual({ key: "auto.action.create_secretReplace", params: { n: 2 } });
+    expect(actionMsg({ code: "create_secret", text: "create a client secret" }, plan())?.key).toBe("auto.action.create_secret");
     for (const code of ["rename_app", "set_notes", "add_redirect_uri", "set_public_client", "create_service_principal", "assign_roles", "create_secret"]) {
       expect(actionMsg({ code, text: "" }, plan()), code).not.toBeNull();
     }

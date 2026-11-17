@@ -54,8 +54,11 @@ export function actionMsg(a: AppSetupAction, plan: AppSetupPlan, adoptName?: str
       return { key: "auto.action.grant_consent" };
     case "assign_roles":
       return { key: "auto.action.assign_roles" };
-    case "create_secret":
-      return { key: "auto.action.create_secret" };
+    case "create_secret": {
+      // "...; then delete this computer's N earlier secret(s) from the app"
+      const old = /then delete this computer's (\d+) earlier/i.exec(a.text)?.[1];
+      return old ? { key: "auto.action.create_secretReplace", params: { n: Number(old) } } : { key: "auto.action.create_secret" };
+    }
     default:
       return null;
   }

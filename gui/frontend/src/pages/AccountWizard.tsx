@@ -56,21 +56,25 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
   const toast = useToast();
   // The session of a finished automatic setup, until the account is saved (then it is finished) or the setup is thrown away (then it is cancelled).
   const setupSid = useRef<string | null>(null);
-  const discardSetup = () => {
+  // True while a thrown-away setup is being cleaned up; a new one must not start before that is over.
+  const [cleaning, setCleaning] = useState(false);
+  const discardSetup = (): Promise<void> => {
     const sid = setupSid.current;
     setupSid.current = null;
-    if (!sid) return;
+    if (!sid) return Promise.resolve();
+    setCleaning(true);
     // An unused client secret is deleted again; say what happened.
-    void api.appSetup
+    return api.appSetup
       .cancel(sid)
       .then((r: AppSetupCancelResult) => {
         if (r.secretRemoved) toast.success(t("auto.secretRevoked"));
         else if (r.error) toast.error(t("auto.secretStillLive", { detail: r.error }));
       })
-      .catch(() => undefined);
+      .catch(() => undefined)
+      .finally(() => setCleaning(false));
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => () => discardSetup(), []); // leaving the wizard
+  useEffect(() => () => void discardSetup(), []); // leaving the wizard
 
   const changeAuto = (patch: Partial<AccountInput>) => {
     setErrors({});
@@ -80,7 +84,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
       return next;
     });
     if (setup) {
-      discardSetup();
+      void discardSetup();
       setSetup(null);
       setInput((i) => ({ ...i, tenant: "", clientId: "", secretExpires: "" }));
     }
@@ -194,7 +198,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
 
   return (
     <>
-      <PageHeader title={title} description={t("wizard.subtitle")} actions={step < 6 && <Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>} />
+      <PageHeader title={title} description={t("wizard.subtitle")} actions={step < 6 && <Button variant="ghost" onClick={onClose} disabled={saving}>{t("common.cancel")}</Button>} />
 
       <ol className="mb-5 flex items-center gap-1" aria-label={t("wizard.progress")}>
         {STEPS.map((k, i) => {
@@ -296,7 +300,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
             onRestart={() => setSetupRestart((n) => n + 1)}
             onAbort={() => setStep(1)}
             onManual={() => {
-              discardSetup();
+              void discardSetup();
               setRoute("manual");
               setSetup(null);
               setStep(1);
@@ -399,6 +403,11 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         {step === 6 && <DoneStep name={input.name} />}
       </Card>
 
+      {cleaning && (
+        <p role="status" className="mt-3 flex items-center gap-2 text-[13px] text-muted-foreground">
+          <Spinner /> {t("auto.cleaning")}
+        </p>
+      )}
       {saveError && <ErrorBlock className="mt-3" message={saveError} />}
 
       <div className="mt-4 flex items-center justify-between">
@@ -407,7 +416,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         </Button>
         <div className="flex gap-2">
           {step < 6 ? (
-            <Button onClick={() => void next()} disabled={saving || (step === 4 && !canContinue) || (step === 2 && auto && !setup)}>
+            <Button onClick={() => void next()} disabled={saving || cleaning || (step === 4 && !canContinue) || (step === 2 && auto && !setup)}>
               {saving && <Spinner />}
               {step === 3 ? t("wizard.saveAndLogin") : t("wizard.next")} {!saving && <ArrowRight />}
             </Button>

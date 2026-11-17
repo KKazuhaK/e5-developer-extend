@@ -256,7 +256,7 @@ function mockActions(base: Omit<AppSetupPlan, "actions" | "missing">, choice: Ap
   const tail = (needSP: boolean, needConsent: boolean) => [
     ...(needSP ? [A("create_service_principal", "create the service principal")] : []),
     ...(needConsent ? [app ? A("assign_roles", "grant the application permissions") : A("grant_consent", "grant administrator consent")] : []),
-    ...(app ? [A("create_secret", "create a client secret")] : []),
+    ...(app ? [A("create_secret", setupVariant === "existing" ? "create a client secret; then delete this computer's 1 earlier secret(s) from the app" : "create a client secret")] : []),
   ];
   const adoptSteps = (rename: boolean) => [
     A("adopt_app", "adopt the existing app registration"),

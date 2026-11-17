@@ -322,7 +322,7 @@ function PlanView({ id, plan, adopt, rename, submitting, onAdopt, onRename, onCo
             </li>
           ))}
         </ul>
-        <p className="mt-1.5 text-xs text-muted-foreground">{t("auto.planKeep")}</p>
+        <p className="mt-1.5 text-xs text-muted-foreground">{t(plan.kind === "app" ? "auto.planKeepApp" : "auto.planKeep")}</p>
       </div>
 
       {plan.needsChoice && (
