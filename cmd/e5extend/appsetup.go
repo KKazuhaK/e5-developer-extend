@@ -111,7 +111,9 @@ func (a *app) runAppSetup(cmd *cobra.Command, opts ops.AppSetupOptions, f setupF
 	if err != nil {
 		return nil, nil, err
 	}
-	if !f.yes {
+	// Nothing to change (a repeat run): there is nothing to confirm, and Apply
+	// only reports the IDs.
+	if !f.yes && len(plan.Actions) > 0 {
 		fmt.Fprint(errOut, "Go ahead? [y/N] ")
 		ans, err := readLineCtx(ctx, cmd.InOrStdin())
 		if errors.Is(err, errInterrupted) {
@@ -144,12 +146,13 @@ func printPlan(cmd *cobra.Command, p *appsetup.Plan) {
 	if p.Existing != nil && len(p.Missing) > 0 {
 		fmt.Fprintf(out, "  to add: %s\n", strings.Join(p.Missing, ", "))
 	}
+	if len(p.Actions) == 0 {
+		fmt.Fprintln(out, "Everything is already in place; nothing to change.")
+		return
+	}
 	fmt.Fprintln(out, "Nothing existing is removed. This will:")
 	for _, a := range p.Actions {
 		fmt.Fprintf(out, "  - %s\n", a.Text)
-	}
-	if len(p.Actions) == 0 {
-		fmt.Fprintln(out, "  - nothing: everything is already in place")
 	}
 }
 

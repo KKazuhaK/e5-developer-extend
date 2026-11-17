@@ -328,7 +328,8 @@ func (s *Server) listSPs(w http.ResponseWriter, filter string) {
 func (s *Server) createSP(w http.ResponseWriter, body map[string]any) {
 	if s.SPNotFound > 0 {
 		s.SPNotFound--
-		apiErr(w, 404, "Request_ResourceNotFound", "Resource '"+str(body["appId"])+"' does not exist or one of its queried reference-property objects are not present.")
+		// What a real tenant answers while a new app is still replicating.
+		apiErr(w, 400, "Request_BadRequest", "The appId '"+str(body["appId"])+"' of the service principal does not reference a valid application object.")
 		return
 	}
 	appID := str(body["appId"])

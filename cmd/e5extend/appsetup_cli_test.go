@@ -50,7 +50,7 @@ func TestAppSetupYesCreatesThenIsIdempotent(t *testing.T) {
 	}
 	g.ResetRequests()
 	out, _, err = e.run("", "app", "setup", "--yes")
-	if err != nil || !strings.Contains(out, "everything is already in place") || len(g.Writes()) != 0 || len(g.Apps) != 1 {
+	if err != nil || !strings.Contains(out, "already in place; nothing to change") || len(g.Writes()) != 0 || len(g.Apps) != 1 {
 		t.Fatalf("second run: %v writes %v\n%s", err, g.Writes(), out)
 	}
 }

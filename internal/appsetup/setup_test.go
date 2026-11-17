@@ -371,7 +371,7 @@ func TestReplicationGivesUp(t *testing.T) {
 	r.g.SPNotFound = 100
 	_, err := r.setup(appsetup.KindDelegated).Apply(context.Background(), appsetup.Choice{})
 	var ae *appsetup.APIError
-	if !errors.As(err, &ae) || ae.Status != 404 {
+	if !errors.As(err, &ae) || ae.Status != 400 {
 		t.Fatalf("err = %v", err)
 	}
 	if len(r.sleeps) != 3 {

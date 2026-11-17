@@ -52,9 +52,16 @@ func (e *APIError) Error() string {
 
 // notYetThere reports whether the error looks like replication lag: the object
 // was just created and Graph does not see it everywhere yet.
+//
+// Creating the service principal of a new app answers 400 Request_BadRequest
+// "The appId '…' of the service principal does not reference a valid
+// application object" while the app is still replicating (seen on a real
+// tenant), so that message counts too.
 func (e *APIError) notYetThere() bool {
+	msg := strings.ToLower(e.Message)
 	return e.Status == http.StatusNotFound ||
-		strings.Contains(strings.ToLower(e.Message), "does not exist") ||
+		strings.Contains(msg, "does not exist") ||
+		strings.Contains(msg, "does not reference a valid application object") ||
 		strings.EqualFold(e.Code, "Request_ResourceNotFound")
 }
 
