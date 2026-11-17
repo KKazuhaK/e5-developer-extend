@@ -11,6 +11,7 @@ type claims struct {
 	Roles []string `json:"roles"`
 	AppID string   `json:"appid"`
 	AZP   string   `json:"azp"`
+	TID   string   `json:"tid"`
 }
 
 // parseScopes returns the granted permissions from an access token's scp
