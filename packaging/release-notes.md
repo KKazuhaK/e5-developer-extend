@@ -2,14 +2,19 @@
 
 ## 下载 / Downloads
 
+点链接直接下载。不知道选哪个：Windows 和 Mac 选**桌面版**，服务器选**命令行**。
+Click a link to download. Not sure? Desktop for Windows and Mac, CLI for servers.
+
 | 系统 / OS | 桌面版 / Desktop | 命令行 / CLI |
 |---|---|---|
-| Windows | `E5-Renew_@VERSION@_windows_amd64_setup.exe` (`arm64`) | `e5renew_@VERSION@_windows_amd64.zip` (`arm64`) |
-| macOS 12+ | `E5-Renew_@VERSION@_macos_universal.dmg` | `e5renew_@VERSION@_darwin_universal.tar.gz` |
-| Ubuntu 24.04+ / Debian 13+ | `e5renew_…deb` + `e5renew-desktop_…deb` | `e5renew_…deb` |
-| Fedora 39+ | `e5renew-…rpm` + `e5renew-desktop-…rpm` | `e5renew-…rpm` |
-| Linux (any) | — | `e5renew_@VERSION@_linux_amd64.tar.gz` (`arm64`) |
-| Docker | — | `ghcr.io/kkazuhak/e5-renew:@VERSION@` |
+| Windows 10/11 | [x64 安装包](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/E5-Renew_@VERSION@_windows_amd64_setup.exe) · [ARM64](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/E5-Renew_@VERSION@_windows_arm64_setup.exe) | [x64 zip](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@_windows_amd64.zip) · [ARM64](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@_windows_arm64.zip) |
+| macOS 12+ | [dmg（Intel 和 Apple 芯片通用）](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/E5-Renew_@VERSION@_macos_universal.dmg) | [tar.gz（通用）](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@_darwin_universal.tar.gz) |
+| Ubuntu 24.04+ / Debian 13+ | 两个都装 / install both: [e5renew](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@-1_amd64.deb) + [e5renew-desktop](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-desktop_@VERSION@-1_amd64.deb)（arm64: [1](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@-1_arm64.deb) + [2](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-desktop_@VERSION@-1_arm64.deb)） | [x64 deb](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@-1_amd64.deb) · [ARM64](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@-1_arm64.deb) |
+| Fedora 39+ | 两个都装 / install both: [e5renew](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-@VERSION@-1.x86_64.rpm) + [e5renew-desktop](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-desktop-@VERSION@-1.x86_64.rpm)（aarch64: [1](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-@VERSION@-1.aarch64.rpm) + [2](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-desktop-@VERSION@-1.aarch64.rpm)） | [x64 rpm](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-@VERSION@-1.x86_64.rpm) · [ARM64](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew-@VERSION@-1.aarch64.rpm) |
+| Linux（任意发行版 / any） | — | [x64 tar.gz](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@_linux_amd64.tar.gz) · [ARM64](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/e5renew_@VERSION@_linux_arm64.tar.gz) |
+| Docker | — | `docker pull ghcr.io/kkazuhak/e5-renew:@VERSION@` |
+
+校验和 / Checksums: [SHA256SUMS](https://github.com/KKazuhaK/e5-renew/releases/download/v@VERSION@/SHA256SUMS)
 
 安装说明（含未签名包的打开方法）：[docs/user/install.md](https://github.com/KKazuhaK/e5-renew/blob/v@VERSION@/docs/user/install.md)
 Install guide (including how to open the unsigned packages): same link.
@@ -17,7 +22,7 @@ Install guide (including how to open the unsigned packages): same link.
 > 这些包**没有代码签名**。macOS 需要在“隐私与安全性”里点“仍要打开”；Windows SmartScreen 需要点“更多信息 → 仍要运行”。
 > The packages are **not code-signed** yet.
 
-校验 / Verify: `sha256sum --ignore-missing -c SHA256SUMS`
+校验 / Verify: `sha256sum --ignore-missing -c SHA256SUMS`（下载到同一个文件夹后运行 / run in the download folder）
 
 ## 变更 / Changes
 
