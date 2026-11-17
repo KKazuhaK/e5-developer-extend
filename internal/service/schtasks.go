@@ -8,9 +8,30 @@ import (
 	"strings"
 	"time"
 	"unicode/utf16"
+
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
+// BootDelay is how long after boot the headless task starts (ISO 8601): the
+// network and the profile service get a moment. The engine retries by itself
+// when the network is still down.
+const BootDelay = "PT30S"
+
 type schtasks struct{ env Env }
+
+func (m *schtasks) writeKey(path string, key []byte) error {
+	if m.env.WriteKeyFile != nil {
+		return m.env.WriteKeyFile(path, key)
+	}
+	return vault.WriteDPAPIKeyFile(path, key)
+}
+
+func (m *schtasks) auditKey(path string) vault.KeyFileAudit {
+	if m.env.AuditKeyFile != nil {
+		return m.env.AuditKeyFile(path)
+	}
+	return vault.AuditDPAPIKeyFile(path)
+}
 
 // taskFile is where the imported task definition is kept.
 func (m *schtasks) taskFile(dataDir string) string {
@@ -26,6 +47,11 @@ type TaskParams struct {
 	// --data-dir: a task action cannot set environment variables.
 	ConfigDir string
 	DataDir   string
+	// Headless runs the task whether or not the user is signed in (logon type
+	// S4U, no stored password) and also starts it at boot. KeyFile is then the
+	// DPAPI key file, handed over as --dpapi-key-file.
+	Headless bool
+	KeyFile  string
 }
 
 // TaskArguments returns the command line arguments of the task.
@@ -36,6 +62,9 @@ func TaskArguments(p TaskParams) string {
 	}
 	if p.DataDir != "" {
 		dirs += "--data-dir " + winQuote(p.DataDir) + " "
+	}
+	if p.KeyFile != "" {
+		dirs += "--dpapi-key-file " + winQuote(p.KeyFile) + " "
 	}
 	return dirs + "run --log-format json --log-file " + winQuote(p.LogFile)
 }
@@ -53,15 +82,29 @@ func winQuote(s string) string {
 // process that dies later, so a trigger every 5 minutes (forever) starts it
 // again; MultipleInstancesPolicy IgnoreNew and the engine's own lock stop
 // duplicates.
+//
+// A headless task (p.Headless) differs in two places: the principal's
+// LogonType is S4U ("run whether the user is logged on or not", no password
+// stored) instead of InteractiveToken, and a BootTrigger with a short delay
+// starts it when the machine boots with nobody signed in.
 func TaskXML(p TaskParams) string {
 	x := func(s string) string { return xmlEscape(s) }
+	logonType, boot := "InteractiveToken", ""
+	if p.Headless {
+		logonType = "S4U"
+		boot = `    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>` + BootDelay + `</Delay>
+    </BootTrigger>
+`
+	}
 	return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
     <Description>e5extend - keep a Microsoft 365 E5 developer tenant active</Description>
   </RegistrationInfo>
   <Triggers>
-    <LogonTrigger>
+` + boot + `    <LogonTrigger>
       <Enabled>true</Enabled>
       <UserId>` + x(p.UserID) + `</UserId>
     </LogonTrigger>
@@ -76,7 +119,7 @@ func TaskXML(p TaskParams) string {
   <Principals>
     <Principal id="Author">
       <UserId>` + x(p.UserID) + `</UserId>
-      <LogonType>InteractiveToken</LogonType>
+      <LogonType>` + logonType + `</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>
   </Principals>
@@ -134,7 +177,8 @@ func (m *schtasks) Plan(o InstallOptions) (Plan, error) {
 		return Plan{}, errors.New("service: executable and data directory are required")
 	}
 	if o.KeyFile {
-		return Plan{}, errors.New("--key-file is only for Linux; on Windows the task runs as you and reads Credential Manager")
+		return Plan{}, errors.New("--key-file is only for Linux; on Windows the task runs as you and reads Credential Manager " +
+			"(for a task that runs without anyone signed in, use --headless)")
 	}
 	if m.env.User == "" {
 		return Plan{}, errors.New("service: cannot tell which Windows user to register the task for")
@@ -143,10 +187,32 @@ func (m *schtasks) Plan(o InstallOptions) (Plan, error) {
 	if o.ExplicitDirs {
 		tp.ConfigDir, tp.DataDir = o.ConfigDir, o.DataDir
 	}
+	var files []File
+	if o.Headless {
+		if o.ConfigDir == "" {
+			return Plan{}, errors.New("service: the configuration directory is required for --headless")
+		}
+		if o.MasterKey == nil {
+			return Plan{}, errors.New("service: no way to get the master key for --headless")
+		}
+		tp.Headless = true
+		tp.KeyFile = m.keyFilePath(o.ConfigDir)
+		files = append(files, File{Path: tp.KeyFile, Mode: 0o600, Secret: true,
+			Note: "(the master key, encrypted with DPAPI at machine scope; access limited to you, SYSTEM and Administrators)",
+			Lazy: func() ([]byte, error) {
+				key, err := o.MasterKey()
+				if err != nil {
+					return nil, fmt.Errorf("get the master key for --headless: %w", err)
+				}
+				return key, nil
+			},
+			Write: m.writeKey})
+	}
 	xml := TaskXML(tp)
 	file := m.taskFile(o.DataDir)
+	files = append(files, File{Path: file, Mode: 0o600, Data: utf16LE(xml), Show: xml})
 	return Plan{
-		Files: []File{{Path: file, Mode: 0o600, Data: utf16LE(xml), Show: xml}},
+		Files: files,
 		Commands: []Command{
 			{Args: []string{"schtasks", "/Create", "/TN", TaskName, "/XML", file, "/F"}},
 			// /Create /F replaces the definition but leaves a running instance alone.
@@ -162,11 +228,79 @@ func (m *schtasks) Install(o InstallOptions) (Result, error) {
 	if err != nil {
 		return res, err
 	}
+	keyPath := m.keyFilePath(o.ConfigDir)
+	keyExisted := o.Headless && fileExists(keyPath)
 	if err := apply(context.Background(), m.env.Runner, p, false, &res); err != nil {
+		if o.Headless {
+			// Do not leave a freshly written secret behind for a task that
+			// was never registered.
+			if !keyExisted {
+				_, _ = removeFile(keyPath)
+				res.Files = removeString(res.Files, keyPath)
+				res.Actions = removeString(res.Actions, "wrote "+keyPath)
+			}
+			err = m.headlessFailure(o, &res, err)
+		}
 		return res, err
 	}
 	res.Warnings = append(res.Warnings, "run log: "+join(Windows, o.DataDir, "engine.log")+" (the task has no console)")
+	if o.Headless {
+		res.Actions = append(res.Actions, "the task runs whether or not anyone is signed in (S4U), and starts "+BootDelay+" after boot")
+		res.Warnings = append(res.Warnings, "headless tasks cannot use network resources that need your Windows credentials "+
+			"(file shares, Kerberos); outbound HTTPS to Microsoft Graph is not affected")
+	}
 	return res, nil
+}
+
+func removeString(list []string, s string) []string {
+	out := list[:0]
+	for _, v := range list {
+		if v != s {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// keyFilePath is where a headless install keeps the DPAPI key file.
+func (m *schtasks) keyFilePath(configDir string) string {
+	return join(Windows, configDir, vault.DPAPIKeyFileName)
+}
+
+// consoleExe turns the console-less e5extend-bg.exe into the e5extend.exe next
+// to it, the program to type in an elevated prompt (the other one prints nothing).
+func consoleExe(exe string) string {
+	if strings.EqualFold(winBase(exe), BackgroundExeName) {
+		return join(Windows, winDir(exe), "e5extend.exe")
+	}
+	return exe
+}
+
+// ElevatedInstallCommand is the command to run from a prompt opened with
+// "Run as administrator", as the same user.
+func ElevatedInstallCommand(o InstallOptions) string {
+	var dirs string
+	if o.ExplicitDirs {
+		dirs = " --config-dir " + winQuote(o.ConfigDir) + " --data-dir " + winQuote(o.DataDir)
+	}
+	return winQuote(consoleExe(o.Exe)) + dirs + " service install --headless"
+}
+
+// headlessFailure explains a failed headless install: most often the prompt
+// is not elevated, otherwise the account lacks the batch logon right.
+func (m *schtasks) headlessFailure(o InstallOptions, res *Result, err error) error {
+	low := strings.ToLower(err.Error())
+	notElevated := m.env.Elevated != nil && !m.env.Elevated()
+	switch {
+	case strings.Contains(low, "denied") || notElevated:
+		res.Manual = append(res.Manual,
+			"open a prompt with Run as administrator (as this same user, "+m.env.User+") and run: "+ElevatedInstallCommand(o))
+		return fmt.Errorf("registering a headless task needs an elevated (administrator) prompt: %w", err)
+	case strings.Contains(low, "1385") || strings.Contains(low, "logon failure") || strings.Contains(low, "logon type") || strings.Contains(low, "batch job"):
+		return fmt.Errorf("%w (the account needs the \"Log on as a batch job\" right: Local Security Policy > Local Policies > "+
+			"User Rights Assignment; administrators have it by default)", err)
+	}
+	return err
 }
 
 // Uninstall needs the data directory only to delete the kept XML; it removes
@@ -174,18 +308,27 @@ func (m *schtasks) Install(o InstallOptions) (Result, error) {
 func (m *schtasks) Uninstall() (Result, error) {
 	var res Result
 	ctx := context.Background()
-	if out, err := m.env.Runner.Run(ctx, "schtasks", "/Query", "/TN", TaskName); err != nil {
+	out, err := m.env.Runner.Run(ctx, "schtasks", "/Query", "/TN", TaskName, "/XML")
+	if err != nil {
 		if missing(out, err) {
 			res.Actions = append(res.Actions, "nothing to remove: no scheduled task named "+TaskName)
 			return res, nil
 		}
 		return res, fmt.Errorf("ask Task Scheduler: %w", err)
 	}
+	// Only a task that was installed with --headless has a key file of ours.
+	def := parseTask(decodeConsole(out.Stdout))
 	if _, err := m.env.Runner.Run(ctx, "schtasks", "/End", "/TN", TaskName); err == nil {
 		res.Actions = append(res.Actions, "ran schtasks /End /TN "+TaskName)
 	}
 	if _, err := m.env.Runner.Run(ctx, "schtasks", "/Delete", "/TN", TaskName, "/F"); err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "denied") {
+			res.Manual = append(res.Manual, "from a prompt opened with Run as administrator: schtasks /Delete /TN "+TaskName+" /F")
+		}
 		return res, err
+	}
+	if def.Headless && def.KeyFile != "" {
+		m.removeKeyFile(def.KeyFile, &res)
 	}
 	res.Actions = append(res.Actions, "ran schtasks /Delete /TN "+TaskName+" /F")
 	if m.env.DataDir != "" {
@@ -200,10 +343,59 @@ func (m *schtasks) Uninstall() (Result, error) {
 	return res, nil
 }
 
+// removeKeyFile deletes the DPAPI key file a headless install created. It
+// only touches a file with the name this program gives it, whatever path the
+// task definition holds.
+func (m *schtasks) removeKeyFile(path string, res *Result) {
+	if !strings.EqualFold(winBase(path), vault.DPAPIKeyFileName) {
+		res.Warnings = append(res.Warnings, "the task named a key file that is not "+vault.DPAPIKeyFileName+"; it was left alone")
+		return
+	}
+	switch ok, err := removeFile(path); {
+	case err != nil:
+		res.Warnings = append(res.Warnings, "could not remove the key file "+path+": "+err.Error()+"; delete it yourself")
+	case ok:
+		res.Files = append(res.Files, path)
+		res.Actions = append(res.Actions, "removed the headless key file "+path)
+		res.Warnings = append(res.Warnings, "the key file was only a copy for the headless task: your master key itself "+
+			"(Credential Manager, or wherever you keep "+vault.EnvMasterKey+"), the vault and the configuration were left in place")
+	}
+}
+
 var (
-	settingsRe = regexp.MustCompile(`(?is)<Settings>(.*?)</Settings>`)
-	enabledRe  = regexp.MustCompile(`(?i)<Enabled>\s*(true|false)\s*</Enabled>`)
+	settingsRe  = regexp.MustCompile(`(?is)<Settings>(.*?)</Settings>`)
+	enabledRe   = regexp.MustCompile(`(?i)<Enabled>\s*(true|false)\s*</Enabled>`)
+	logonTypeRe = regexp.MustCompile(`(?i)<LogonType>\s*([A-Za-z0-9]+)\s*</LogonType>`)
+	argumentsRe = regexp.MustCompile(`(?is)<Arguments>(.*?)</Arguments>`)
+	keyArgRe    = regexp.MustCompile(`--dpapi-key-file\s+("(?:[^"\\]|\\.)*"|\S+)`)
 )
+
+// taskDef is what Status needs from the task XML.
+type taskDef struct {
+	Headless bool   // principal logon type S4U
+	KeyFile  string // the --dpapi-key-file argument
+}
+
+func xmlUnescape(s string) string {
+	return strings.NewReplacer("&lt;", "<", "&gt;", ">", "&quot;", `"`, "&apos;", "'", "&amp;", "&").Replace(s)
+}
+
+func parseTask(doc string) taskDef {
+	var d taskDef
+	if mm := logonTypeRe.FindStringSubmatch(doc); mm != nil {
+		d.Headless = strings.EqualFold(mm[1], "S4U")
+	}
+	if mm := argumentsRe.FindStringSubmatch(doc); mm != nil {
+		if k := keyArgRe.FindStringSubmatch(xmlUnescape(mm[1])); k != nil {
+			v := k[1]
+			if strings.HasPrefix(v, `"`) {
+				v = strings.ReplaceAll(v[1:len(v)-1], `\"`, `"`)
+			}
+			d.KeyFile = v
+		}
+	}
+	return d
+}
 
 // decodeConsole turns schtasks output into UTF-8 text: /XML output may be
 // UTF-16 (with a byte order mark, or recognizable by its NUL bytes).
@@ -260,7 +452,14 @@ func (m *schtasks) Status() (Status, error) {
 	}
 	st.Installed = true
 	st.Enabled = Yes
-	if sec := settingsRe.FindStringSubmatch(decodeConsole(out.Stdout)); sec != nil {
+	doc := decodeConsole(out.Stdout)
+	def := parseTask(doc)
+	st.Headless = triOf(def.Headless)
+	if def.Headless {
+		st.KeyFile = def.KeyFile
+		m.auditHeadless(&st)
+	}
+	if sec := settingsRe.FindStringSubmatch(doc); sec != nil {
 		// Only the task-wide Enabled element lives directly under Settings.
 		if mm := enabledRe.FindStringSubmatch(sec[1]); mm != nil && strings.EqualFold(mm[1], "false") {
 			st.Enabled = No
@@ -270,7 +469,36 @@ func (m *schtasks) Status() (Status, error) {
 	// the caller decides from the engine's lock and heartbeat instead.
 	st.Running = Unknown
 	st.Details = append(st.Details, fmt.Sprintf("scheduled task %s is registered", TaskName))
+	if def.Headless {
+		st.Details = append(st.Details, "headless: runs whether or not anyone is signed in, and starts at boot")
+	}
 	return st, nil
+}
+
+// auditHeadless fills in the state of the DPAPI key file a headless task needs.
+func (m *schtasks) auditHeadless(st *Status) {
+	if st.KeyFile == "" {
+		st.KeyFileMissing = true
+		st.Details = append(st.Details, "the task is headless but names no key file ("+vault.DPAPIKeyFileName+"); install again with --headless")
+		return
+	}
+	a := m.auditKey(st.KeyFile)
+	st.KeyFileMissing, st.KeyFileErr, st.KeyFileBroad = a.Missing, a.ReadErr, a.Broad
+	switch {
+	case a.Missing:
+		st.Details = append(st.Details, "the headless key file is missing; install again with --headless")
+	case a.ReadErr != "":
+		st.Details = append(st.Details, "the headless key file cannot be read: "+a.ReadErr)
+	default:
+		st.Details = append(st.Details, "headless key file: present, readable")
+	}
+	if len(a.Broad) > 0 {
+		st.Details = append(st.Details, "WARNING: the key file's access list also admits "+strings.Join(a.Broad, ", ")+
+			"; install again with --headless to reset it")
+	}
+	if a.ACLErr != "" {
+		st.Details = append(st.Details, "could not read the key file's access list: "+a.ACLErr)
+	}
 }
 
 // Start runs the registered task now.

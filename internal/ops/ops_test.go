@@ -591,6 +591,29 @@ func TestServicePlanDoesNotTouchTheSystem(t *testing.T) {
 	}
 }
 
+func TestServiceHeadlessIsWindowsOnly(t *testing.T) {
+	e := newTestEnv(t)
+	fr := &service.FakeRunner{}
+	e.Runner = fr
+	e.Exe = func() (string, error) {
+		return filepath.Join(string(filepath.Separator), "opt", "e5extend", "e5extend"), nil
+	}
+	e.Svc = SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"}
+	plan, _, err := e.ServicePlanWith("windows", InstallFlags{Headless: true})
+	if err != nil || !strings.Contains(plan.Format(), "S4U") {
+		t.Fatalf("windows: %v\n%s", err, plan.Format())
+	}
+	for _, platform := range []string{"linux", "darwin"} {
+		if _, _, err := e.ServicePlanWith(platform, InstallFlags{Headless: true}); err == nil {
+			t.Errorf("%s accepted --headless", platform)
+		}
+	}
+	// The real install on this (non-Windows) host is refused before anything runs.
+	if _, err := e.ServiceInstallWith(InstallFlags{Headless: true}); err == nil || len(fr.Calls) != 0 {
+		t.Errorf("install: %v %v", err, fr.Calls)
+	}
+}
+
 func TestDoctorRunsOffline(t *testing.T) {
 	e := newTestEnv(t)
 	e.Runner = &service.FakeRunner{}

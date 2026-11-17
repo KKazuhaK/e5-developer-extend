@@ -44,6 +44,38 @@ func TestServicePrintShowsAllPlatformsAndTouchesNothing(t *testing.T) {
 	}
 }
 
+func TestServiceHeadlessPlanAndRefusals(t *testing.T) {
+	e := newEnv(t)
+	out := e.mustRun("", "service", "install", "--print", "--platform", "windows", "--headless")
+	for _, m := range []string{"<LogonType>S4U</LogonType>", "<BootTrigger>", "master.key.dpapi", "--dpapi-key-file", "secret content not shown", "machine scope"} {
+		if !strings.Contains(out, m) {
+			t.Errorf("windows --headless plan lacks %q:\n%s", m, out)
+		}
+	}
+	for _, platform := range []string{"linux", "darwin"} {
+		_, _, err := e.run("", "service", "install", "--print", "--platform", platform, "--headless")
+		if err == nil || !strings.Contains(err.Error(), "only for Windows") {
+			t.Errorf("%s: %v", platform, err)
+		}
+		if platform == "linux" && err != nil && !strings.Contains(err.Error(), "--key-file") {
+			t.Errorf("linux message does not point to --key-file: %v", err)
+		}
+	}
+	if calls := e.runner.Commands(); len(calls) != 0 {
+		t.Errorf("--print ran commands: %v", calls)
+	}
+}
+
+func TestDPAPIKeyFileFlagSetsTheEnvironment(t *testing.T) {
+	t.Setenv("E5EXTEND_MASTER_KEY_DPAPI_FILE", "")
+	e := newEnv(t)
+	p := filepath.Join(e.home, "x.dpapi")
+	_, _, _ = e.run("", "--dpapi-key-file", p, "version")
+	if got := os.Getenv("E5EXTEND_MASTER_KEY_DPAPI_FILE"); got != p {
+		t.Errorf("env = %q, want %q", got, p)
+	}
+}
+
 func hostCommandName() string {
 	return map[string]string{"linux": "systemctl", "darwin": "launchctl", "windows": "schtasks"}[runtime.GOOS]
 }
