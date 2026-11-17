@@ -108,8 +108,8 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 | `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
 | `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Apply(id, choice)`、`Cancel(id)`；`id` 由前端生成，好在调用前先订阅事件 |
 | `LogService` | `Read(account, sinceHours, limit)` |
-| `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
-| `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`UninstallService()` |
+| `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
+| `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`StartService()`、`UninstallService()` |
 | `CatalogService` | `List(account)`、`Categories()` |
 
 - 出错时 Go 返回 error，前端得到 rejected promise。错误信息里带上 ops 给出的修复建议。
@@ -141,12 +141,18 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 - **日志**：表格，列为时间、账号、API、状态码、耗时；可按账号和时间范围筛选；失败的行标红。每 5 秒自动刷新，可以关闭。
 - **健康检查**：按 `doctor` 的检查项逐条显示（✓ / ! / ✗、详情、修复建议），有“重新检查”按钮。
   - 后台服务区：显示是否安装；提供“安装为系统后台服务”和“卸载”按钮，旁边说明它和“开机启动托盘”有什么区别。
-- **设置**：分组显示——
-  - 调度：间隔、每轮 API 数、工作日（多选）、工作时段、运行期限；
-  - 网络：代理；
-  - 告警：设置 Webhook（输入框保存后清空，只显示“已设置”）、发送测试、清除；
-  - 界面：语言、主题、开机启动。
-  - 保存时有错误，就在对应字段下面显示后端返回的 `ValidationError`。
+- **设置**：默认只显示最常用的几项，其余收进“高级设置”——
+  - 运行方式：
+    - “开机启动”（托盘开机自启）：和后台服务开关一样立即生效，调用 `SettingsService.SetStartAtLogin(on)`，失败时开关保持原状并弹 toast；它不在草稿里，`Save` 不再处理它；
+    - “在后台保持运行”：就是后台服务有没有安装。打开调用 `HealthService.InstallService`，关闭（先确认）调用 `UninstallService`，立即生效，不经过“保存”；复用健康检查页同一套接口和前置检查，出错用 toast 显示；安装和卸载的结果（需要手动做的事、警告）都用和健康检查页同一个组件显示在卡片里。“已安装但没有运行”时开关保持打开，但显示警告和“启动”按钮（`HealthService.StartService`，只启动、不重写服务文件，和安装一样先请托盘交出引擎）。状态来自 `ServiceInfo`（运行中 / 已安装但没有运行 / 未安装 / 不支持），引擎在运行时附上 `Snapshot` 里最近的下次运行时间；平台不支持时说明原因并禁用开关。
+  - 调用节奏：三个预设加“自定义”，再加“每天 / 仅工作日”。预设只改 `intervalMin/Max` 和 `apisPerRoundMin/Max`，表在 `src/lib/pace.ts`：轻度 2h–4h、每轮 2–5 个；标准 40m–2h、每轮 3–8 个（等于 `config.Default()`）；频繁 20m–1h、每轮 5–12 个。当前值不属于任何预设时显示“自定义”，提示到高级设置里调整；运行日只认“每天”和“周一到周五”，其他组合同样提示。
+  - 界面：语言、主题。
+  - 备份与迁移。
+  - 高级设置（可折叠，默认收起，展开状态按浏览器记在 localStorage，读写出错就不记）：
+    - 调度：间隔、每轮 API 数、工作日（多选）、工作时段、运行期限、随机顺序；
+    - 网络：代理；
+    - 告警：设置 Webhook（输入框保存后清空，只显示“已设置”）、发送测试、清除。
+  - 草稿、校验和保存的做法不变：保存时有错误，就在对应字段下面显示 `ValidationError`；错误在收起的高级设置里时，自动展开并滚动、聚焦到第一个出错的字段（这次展开不写入 localStorage）。
 - **关于**：版本号、项目链接、免责声明（“不保证续期”、“与 Microsoft 无关”）。
 
 数据刷新：页面可见时每 3 秒拉一次 `Snapshot()`，切到后台时停止。
@@ -243,7 +249,7 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
 - `gui.log` 在写入时按大小轮换（2 MB，保留一份旧文件）；“engine did not start” 同一种原因只记一次；日志里去掉 `account`、`detail`，`err` 换成固定文字。
 - `engine.host` 带进程号，托盘启动时先删掉遗留的标记，避免 Windows 上进程号被复用而误判。
 - 窗口进程退出前，如果有安装、卸载或本进程里的一轮正在进行，最多再等 60 秒。
-- `SettingsService.Save` 先校验 `ui`，有错就什么都不保存；“开机启动”设置失败作为 error 返回，不是 `ValidationError`。
+- `SettingsService.Save` 先校验 `ui`，有错就什么都不保存；“开机启动”由 `SetStartAtLogin` 单独设置，失败作为 error 返回，不是 `ValidationError`；`Save` 不碰它。
 - `AccountService.Get` 会返回账号配置里的用户名（编辑表单需要），不返回 secret。`Settings.network.proxy` 发给前端时隐藏用户信息里的密码（`http://user:xxxxx@host`）；保存时如果收到的正好是隐藏后的形式，就保留已存的值。
 - Windows 的 GUI 构建必须加 `-ldflags -H=windowsgui`（发布和 CI 都是），否则会多出一个控制台窗口。Ubuntu 的 CI 还需要 `libx11-dev`。
 

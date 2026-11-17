@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, HeartPulse, Info, RefreshCw, Server, Trash2, Download } from "lucide-react";
+import { HeartPulse, Info, RefreshCw, Server, Trash2, Download } from "lucide-react";
 import { api } from "@/api";
 import type { DoctorCheck, ServiceInfo, ServiceResult } from "@/api";
 import { doctorTitle } from "@/lib/doctor";
@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ServiceResultPanel } from "@/components/ServiceResultPanel";
 import { ErrorBlock, LevelBadge, LoadingBlock, PageHeader, Spinner } from "@/components/common";
 import { cn, errMsg } from "@/lib/utils";
 
@@ -167,28 +168,7 @@ export function Health() {
             <Info className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
             <p>{t("health.serviceVsTray")}</p>
           </div>
-          {result && (
-            <div className="space-y-2" role="status">
-              {result.manual.length > 0 && (
-                <div className="rounded-md border-2 border-warning/60 bg-warning-bg px-3 py-2.5 text-[13px]">
-                  <p className="mb-1 flex items-center gap-1.5 font-semibold text-warning"><AlertTriangle className="size-4" aria-hidden /> {t("health.manual")}</p>
-                  <ul className="list-disc space-y-1 pl-5 break-words">{result.manual.map((m) => <li key={m}>{m}</li>)}</ul>
-                </div>
-              )}
-              {result.warnings.length > 0 && (
-                <div className="rounded-md bg-muted px-3 py-2 text-[13px]">
-                  <p className="mb-1 font-medium">{t("health.warnings")}</p>
-                  <ul className="list-disc space-y-0.5 pl-5 break-words">{result.warnings.map((m) => <li key={m}>{m}</li>)}</ul>
-                </div>
-              )}
-              {result.actions.length > 0 && (
-                <div className="rounded-md bg-muted px-3 py-2 text-[13px]">
-                  <p className="mb-1 font-medium">{t("health.actions")}</p>
-                  <ul className="list-disc space-y-0.5 pl-5 break-words">{result.actions.map((m) => <li key={m}>{m}</li>)}</ul>
-                </div>
-              )}
-            </div>
-          )}
+          {result && <ServiceResultPanel result={result} />}
           <div className="flex gap-2">
             <Button onClick={() => void doService("install")} disabled={!svc || svc.installed || svcBusy !== null}>
               {svcBusy === "install" ? <Spinner /> : <Download />} {t("health.install")}

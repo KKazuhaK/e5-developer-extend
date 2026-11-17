@@ -294,7 +294,8 @@ let settings: Settings = {
   notify: { staleAfter: "72h", events: ["needs_attention", "auto_paused", "stale"], webhookConfigured: false },
   ui: { language: "auto", theme: "system", startAtLogin: false },
 };
-let service: { installed: boolean } = { installed: false };
+// ?service=stopped starts with the service installed but not running
+let service: { installed: boolean } = { installed: q.get("service") === "stopped" };
 /** What the last mock export "wrote"; the mock import reads it back. */
 const emptyExport = { path: "", accounts: [], vaultEntries: 0, includesLogs: false, logFiles: 0, notes: [], noteCodes: [] };
 const emptyImport = {
@@ -304,11 +305,13 @@ const emptyImport = {
 let lastBackup: { passphrase: string; accounts: string[] } | null = null;
 
 function serviceInfo(): ServiceInfo {
+  // ?service=unsupported previews a platform without background job support.
+  if (q.get("service") === "unsupported") return { platform: "unsupported", installed: false, enabled: "unknown", running: "unknown", details: [] };
   return {
     platform: "linux · systemd (user)",
     installed: service.installed,
-    enabled: service.installed ? "enabled" : "not-found",
-    running: service.installed ? (controls.host === "service" ? "active (running)" : "inactive") : "—",
+    enabled: service.installed ? "yes" : "no",
+    running: service.installed ? (controls.host === "service" ? "yes" : "no") : "no",
     details: service.installed
       ? ["单元文件：~/.config/systemd/user/e5extend.service", "可执行文件：~/.local/bin/e5extend run", "日志：journalctl --user -u e5extend"]
       : [],
@@ -568,13 +571,19 @@ export const mockApi: Api = {
       await wait(300);
       const errs = validateSettings(s);
       if (errs.length) return errs;
-      settings = { ...structuredClone(s), notify: { ...s.notify, webhookConfigured: settings.notify.webhookConfigured } };
+      // start at login is applied by setStartAtLogin, never by save
+      settings = { ...structuredClone(s), notify: { ...s.notify, webhookConfigured: settings.notify.webhookConfigured }, ui: { ...s.ui, startAtLogin: settings.ui.startAtLogin } };
       return [];
     },
     async setWebhook(url) {
       await wait(300);
       if (!/^https:\/\//.test(url)) throw new Error("Webhook 地址必须以 https:// 开头");
       settings.notify.webhookConfigured = true;
+    },
+    async setStartAtLogin(on) {
+      await lag();
+      if (q.get("autostart") === "fail") throw new Error("start at login: permission denied");
+      settings.ui.startAtLogin = on;
     },
     async clearWebhook() {
       await lag();
@@ -668,16 +677,28 @@ export const mockApi: Api = {
     async installService() {
       await wait(900);
       service.installed = true;
+      mockControls.set({ host: "service" }); // the tray hands the engine over
       return {
         actions: ["wrote ~/.config/systemd/user/e5extend.service", "enabled and started e5extend.service"],
         warnings: ["the tray app is also running; the service takes over the engine"],
         manual: ["Run once so it survives sign-out: loginctl enable-linger $USER"],
       };
     },
+    async startService() {
+      await wait(700);
+      if (!service.installed) throw new Error("the background service is not installed");
+      mockControls.set({ host: "service" });
+      return { actions: ["ran systemctl --user start e5extend.service"], warnings: [], manual: [] };
+    },
     async uninstallService() {
       await wait(700);
       service.installed = false;
-      return { actions: ["stopped and removed e5extend.service"], warnings: [], manual: [] };
+      if (controls.host === "service") mockControls.set({ host: "gui" });
+      return {
+        actions: ["stopped and removed e5extend.service"],
+        warnings: ["the master key file (master.key in the config directory) was left in place: it may be the only copy of the vault key; delete it yourself if you do not need it"],
+        manual: [],
+      };
     },
   },
   catalog: {

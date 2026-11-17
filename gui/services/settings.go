@@ -86,9 +86,26 @@ func (s *SettingsService) Get() (Settings, error) {
 	return Settings{Schedule: base.Schedule, Network: base.Network, Notify: base.Notify, UI: ui}, nil
 }
 
+// SetStartAtLogin turns the login entry of the tray app on or off at once.
+// Save leaves it alone: the setting lives in the system, not in the files.
+func (s *SettingsService) SetStartAtLogin(on bool) error {
+	if s.b.Autostart == nil {
+		return nil
+	}
+	cur, err := s.b.Autostart.Enabled()
+	if err == nil && cur != on {
+		err = s.b.Autostart.Set(on)
+	}
+	if err != nil {
+		return fmt.Errorf("start at login: %w", err)
+	}
+	return nil
+}
+
 // Save checks and stores the settings. When a value is not valid nothing is
 // saved and the problems are returned, one per field. The webhook is not
-// part of it; it has its own methods. A proxy address that still has the
+// part of it; it has its own methods. Start at login is not either: it is
+// applied at once by SetStartAtLogin. A proxy address that still has the
 // hidden password Get showed is taken to mean "unchanged".
 func (s *SettingsService) Save(in Settings) ([]ValidationError, error) {
 	var bad []ValidationError
@@ -129,15 +146,6 @@ func (s *SettingsService) Save(in Settings) ([]ValidationError, error) {
 	}
 	if err := paths.WriteFileAtomic(p, append(data, '\n')); err != nil {
 		return nil, err
-	}
-	if s.b.Autostart != nil {
-		on, err := s.b.Autostart.Enabled()
-		if err == nil && on != in.UI.StartAtLogin {
-			err = s.b.Autostart.Set(in.UI.StartAtLogin)
-		}
-		if err != nil {
-			return nil, fmt.Errorf("start at login: %w", err)
-		}
 	}
 	return nil, nil
 }

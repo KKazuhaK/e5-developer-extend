@@ -271,3 +271,26 @@ func (m *systemd) Status() (Status, error) {
 	}
 	return st, nil
 }
+
+// Start starts the installed unit. A unit that is not enabled will not come
+// back after a logout or reboot, and without lingering it stops at logout;
+// both are reported as warnings.
+func (m *systemd) Start() (Result, error) {
+	var res Result
+	if !fileExists(m.unitPath()) {
+		return res, ErrNotInstalled
+	}
+	ctx := context.Background()
+	if out, err := m.env.Runner.Run(ctx, "systemctl", "--user", "start", UnitName); err != nil {
+		if strings.Contains(out.Stderr+err.Error(), "masked") {
+			return res, fmt.Errorf("%s is masked, so it cannot be started; run: systemctl --user unmask %s", UnitName, UnitName)
+		}
+		return res, fmt.Errorf("start %s: %w\n%s", UnitName, err, busHint)
+	}
+	res.Actions = append(res.Actions, "ran systemctl --user start "+UnitName)
+	if out, _ := m.env.Runner.Run(ctx, "systemctl", "--user", "is-enabled", UnitName); strings.TrimSpace(out.Stdout) != "enabled" {
+		res.Warnings = append(res.Warnings, "the service is not enabled, so it will not start again after you log out or reboot; run: systemctl --user enable "+UnitName)
+	}
+	m.linger(ctx, InstallOptions{}, &res)
+	return res, nil
+}
