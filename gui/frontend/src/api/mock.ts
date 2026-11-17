@@ -277,6 +277,7 @@ const CATALOG: { id: string; category: string; name: string; scopes: string[] }[
   { id: "user.me", category: "user", name: "我的资料", scopes: ["User.Read"] },
   { id: "user.list", category: "user", name: "用户列表", scopes: ["User.ReadBasic.All"] },
   { id: "user.memberof", category: "user", name: "我所在的组", scopes: ["User.Read"] },
+  { id: "user.directreports", category: "user", name: "直属下级", scopes: ["User.Read.All", "Directory.Read.All"] },
   { id: "mail.messages", category: "mail", name: "最近邮件", scopes: ["Mail.ReadBasic", "Mail.Read"] },
   { id: "mail.folders", category: "mail", name: "邮件文件夹", scopes: ["Mail.ReadBasic", "Mail.Read"] },
   { id: "mail.rules", category: "mail", name: "收件箱规则", scopes: ["MailboxSettings.Read"] },
@@ -307,6 +308,7 @@ function catalogFor(account: string): CatalogEntry[] {
   const chosen = a ? new Set(a.input.categories) : null;
   return CATALOG.filter((c) => !chosen || chosen.has(c.category)).map((c) => ({
     ...c,
+    scopeSets: c.id === "user.directreports" ? [["User.Read", "User.ReadBasic.All"]] : [],
     usable: a?.status === "not_signed_in" || a?.status === "needs_attention" ? false : hash(account + c.id) % 7 !== 0,
   }));
 }

@@ -23,9 +23,14 @@ func (s *CatalogService) List(account string) ([]CatalogEntry, error) {
 	}
 	out := make([]CatalogEntry, 0, len(res.Entries))
 	for _, e := range res.Entries {
+		sets := [][]string{}
+		if all := e.API.AllScopesFor(kind); len(all) > 0 {
+			sets = append(sets, append([]string{}, all...))
+		}
 		out = append(out, CatalogEntry{
 			ID: e.API.ID, Category: e.API.Category, Name: e.API.Name, Usable: e.Usable,
-			Scopes: append([]string{}, e.API.ScopesFor(kind)...),
+			Scopes:    append([]string{}, e.API.ScopesFor(kind)...),
+			ScopeSets: sets,
 		})
 	}
 	return out, nil

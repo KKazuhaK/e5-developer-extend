@@ -254,7 +254,10 @@ export interface CatalogEntry {
   category: string;
   name: string;
   usable: boolean;
+  /** Permissions of which any one is enough. */
   scopes: string[];
+  /** Combinations that must all be granted together: another way in besides `scopes`. */
+  scopeSets: string[][];
 }
 export interface ServiceInfo {
   platform: string;

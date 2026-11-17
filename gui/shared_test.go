@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 func TestSaveDialogOptions(t *testing.T) {
@@ -34,9 +36,10 @@ func TestRestartScriptWaitsForTheOldProcess(t *testing.T) {
 	done := make(chan struct{})
 	go func() { _ = sleeper.Wait(); close(done) }()
 	defer func() { _ = sleeper.Process.Kill(); <-done }()
+	old := procRef{sleeper.Process.Pid, ops.ProcStart(sleeper.Process.Pid)}
 
 	out := filepath.Join(t.TempDir(), "started")
-	script := restartScript([]int{0, sleeper.Process.Pid}, 30, false)
+	script := restartScript([]procRef{{}, old}, 30, false)
 	start := time.Now()
 	// $0 is "touch", "$@" its argument: the "start" of the app.
 	if err := exec.Command("sh", "-c", script, "touch", out).Run(); err != nil {
@@ -48,33 +51,62 @@ func TestRestartScriptWaitsForTheOldProcess(t *testing.T) {
 	if _, err := os.Stat(out); err != nil {
 		t.Errorf("the app was not started: %v", err)
 	}
-
-	// With nothing to wait for it starts at once; a process that never exits
-	// is waited for no longer than the limit.
-	if s := restartScript([]int{0}, 30, false); strings.Contains(s, "kill") {
+	if s := restartScript([]procRef{{}}, 30, false); strings.Contains(s, "kill") {
 		t.Errorf("waits for nothing: %s", s)
-	}
-	start = time.Now()
-	if err := exec.Command("sh", "-c", restartScript([]int{os.Getpid()}, 2, false), "true").Run(); err != nil {
-		t.Fatal(err)
-	}
-	if d := time.Since(start); d < 1500*time.Millisecond || d > 6*time.Second {
-		t.Errorf("gave up after %v, want about 2 s", d)
 	}
 }
 
-func TestReadTrayPID(t *testing.T) {
-	f := filepath.Join(t.TempDir(), "gui-tray.pid")
-	alive := func(p int) bool { return p == 42 }
-	if got := readTrayPID(f, alive); got != 0 {
-		t.Errorf("no file: %d", got)
+func TestRestartScriptGivesUpOnlyOnTheVerifiedProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the helper is a shell script")
 	}
-	for content, want := range map[string]int{"42\n": 42, "43\n": 0, "junk": 0, "-1": 0} {
+	self := os.Getpid()
+	run := func(p procRef, wait int) (time.Duration, bool, error) {
+		out := filepath.Join(t.TempDir(), "started")
+		start := time.Now()
+		err := exec.Command("sh", "-c", restartScript([]procRef{p}, wait, false), "touch", out).Run()
+		_, serr := os.Stat(out)
+		return time.Since(start), serr == nil, err
+	}
+	// A running process that is verifiably the tray is waited for, then left alone.
+	if st := ops.ProcStart(self); st != "" {
+		d, started, err := run(procRef{self, st}, 2)
+		if err == nil || started || d < 1500*time.Millisecond {
+			t.Errorf("verified process: err=%v started=%v after %v", err, started, d)
+		}
+		// The same id with another start time is a reused id: start at once.
+		d, started, err = run(procRef{self, "1"}, 30)
+		if err != nil || !started || d > 5*time.Second {
+			t.Errorf("reused pid: err=%v started=%v after %v", err, started, d)
+		}
+	}
+	// Without a start time the process cannot be verified: wait the limit, then start anyway.
+	d, started, err := run(procRef{self, ""}, 2)
+	if err != nil || !started || d < 1500*time.Millisecond || d > 6*time.Second {
+		t.Errorf("unverifiable process: err=%v started=%v after %v", err, started, d)
+	}
+}
+
+func TestReadTray(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "gui-tray.pid")
+	alive := func(p int, start string) bool { return p == 42 && (start == "" || start == "777") }
+	if got := readTray(f, alive); got.pid != 0 {
+		t.Errorf("no file: %v", got)
+	}
+	cases := map[string]procRef{
+		"42\n":     {42, ""},
+		"42 777\n": {42, "777"},
+		"42 888\n": {},
+		"43\n":     {},
+		"junk":     {},
+		"-1":       {},
+	}
+	for content, want := range cases {
 		if err := os.WriteFile(f, []byte(content), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if got := readTrayPID(f, alive); got != want {
-			t.Errorf("%q: got %d, want %d", content, got, want)
+		if got := readTray(f, alive); got != want {
+			t.Errorf("%q: got %v, want %v", content, got, want)
 		}
 	}
 }

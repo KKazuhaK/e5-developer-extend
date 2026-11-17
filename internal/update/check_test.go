@@ -145,12 +145,32 @@ func TestCheckStableIgnoresPrereleaseAnswer(t *testing.T) {
 
 func TestCheckStableIgnoresPrereleaseTag(t *testing.T) {
 	// GitHub's flag is not set, but the tag has a pre-release part.
-	c, _ := fakeGitHub(t, func(w http.ResponseWriter, _ *http.Request) {
+	c, _ := fakeGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			_, _ = w.Write([]byte(`[{"tag_name":"v0.4.0-rc.1"}]`)) // nothing proper to fall back to
+			return
+		}
 		_, _ = w.Write([]byte(`{"tag_name":"v0.4.0-rc.1","prerelease":false}`))
 	})
 	cache, rel, err := c.Check(context.Background(), ChannelStable, Cache{}, time.Now())
 	if err != nil || rel != nil || cache.Latest != nil {
 		t.Fatalf("a pre-release tag was offered on the stable channel: %+v %v %v", cache.Latest, rel, err)
+	}
+}
+
+func TestCheckStableFallsBackToProperStable(t *testing.T) {
+	// The newest release has a pre-release tag but no flag: the newest proper
+	// stable release is offered instead.
+	c, _ := fakeGitHub(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/releases/latest") {
+			_, _ = w.Write([]byte(`{"tag_name":"v0.4.0-rc.1","prerelease":false}`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"tag_name":"v0.4.0-rc.1","html_url":"u"},{"tag_name":"v0.3.0","html_url":"u2"},{"tag_name":"v0.2.5","html_url":"u3"}]`))
+	})
+	cache, rel, err := c.Check(context.Background(), ChannelStable, Cache{}, time.Now())
+	if err != nil || rel == nil || cache.Latest == nil || cache.Latest.Version != "0.3.0" {
+		t.Fatalf("fallback: %+v %v %v", cache.Latest, rel, err)
 	}
 }
 
