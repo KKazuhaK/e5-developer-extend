@@ -36,7 +36,8 @@ type LoginUI interface {
 
 // Authenticator gets tokens for one account.
 type Authenticator interface {
-	// Token returns a valid access token. It never prompts.
+	// Token returns a valid access token. It never prompts, and signs a
+	// password account in again only when ctx allows it (AllowPasswordFallback).
 	Token(ctx context.Context) (Token, error)
 	// Login runs the interactive sign-in (device code, browser) or the first
 	// verification (client_secret, password).

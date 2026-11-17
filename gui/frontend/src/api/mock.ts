@@ -94,6 +94,11 @@ function seedAccounts() {
       fix: "重新登录该账号以获取新的令牌",
       lastRunAt: now0 - 5 * 3_600_000, lastSuccessAt: now0 - 31 * 3_600_000, todayFailed: 6,
     }),
+    mk("e5-dev", "device_code", "e5dev.onmicrosoft.com", "needs_attention", {
+      reason: "sign-in is cut off by a Conditional Access sign-in frequency policy (AADSTS70043); ways out, in order: (a) use the app identity ...",
+      fix: "",
+      lastRunAt: now0 - 2 * 3_600_000, lastSuccessAt: now0 - 4 * 3_600_000, todayFailed: 2,
+    }),
     mk("archive", "password", "old-corp.onmicrosoft.com", "paused", {
       reason: "已手动暂停", lastRunAt: now0 - 3 * 86_400_000, lastSuccessAt: now0 - 3 * 86_400_000, todayOk: 0,
     }),

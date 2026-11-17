@@ -220,6 +220,9 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 			return err
 		}
 	}
+	if identityChanged || in.Secret != "" {
+		o.resetPasswordBlock(next.Name)
+	}
 	return nil
 }
 
@@ -265,10 +268,19 @@ func (o *Ops) SetSecret(ctx context.Context, name, secret, expires string) error
 	if err := v.Put(vault.SecretKey(name), []byte(secret)); err != nil {
 		return WithHint(fmt.Errorf("store secret: %w", err), name)
 	}
+	o.resetPasswordBlock(name)
 	if expires != "" {
 		return o.updateAccount(ctx, name, func(ac *config.Account) { ac.SecretExpires = expires })
 	}
 	return nil
+}
+
+// resetPasswordBlock lets the engine try automatic password sign-in again for
+// an account whose password or identity changed, or that a person signed in.
+func (o *Ops) resetPasswordBlock(name string) {
+	if dir, err := paths.DataDir(); err == nil {
+		_ = engine.TriggerPasswordReset(dir, name)
+	}
 }
 
 // updateAccount reloads the config under the lock, applies change to the named
@@ -442,6 +454,9 @@ func (o *Ops) Login(ctx context.Context, name string, ui auth.LoginUI) (LoginRes
 		if err != nil {
 			return LoginResult{}, fmt.Errorf("signed in, but saving the config failed: %w", err)
 		}
+	}
+	if acct.Auth == config.AuthPassword {
+		o.resetPasswordBlock(name)
 	}
 	return LoginResult{TokenInfo: tokenInfo(tok), Delegated: acct.Delegated()}, nil
 }

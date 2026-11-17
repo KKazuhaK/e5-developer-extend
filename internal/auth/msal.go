@@ -24,6 +24,8 @@ type delegated struct {
 
 	mu     sync.Mutex
 	client *public.Client
+
+	reauth sync.Mutex // one password sign-in at a time
 }
 
 func (d *delegated) msal() (public.Client, error) {
@@ -45,7 +47,93 @@ func (d *delegated) msal() (public.Client, error) {
 	return c, nil
 }
 
+// Token returns an access token silently. Only when ctx carries a
+// PasswordGate (AllowPasswordFallback; the background engine sets it) does a
+// password account whose refresh token no longer works (expired, revoked, or
+// cut off by a Conditional Access sign-in frequency policy) sign in again with
+// its stored password, so a background job keeps running without a person.
+// Everyone else, and device code and browser accounts, get ErrLoginRequired.
 func (d *delegated) Token(ctx context.Context) (Token, error) {
+	tok, err := d.silentToken(ctx)
+	if err == nil || d.acct.Auth != config.AuthPassword || !errors.Is(err, ErrLoginRequired) || ctx.Err() != nil {
+		return tok, err
+	}
+	gate := FallbackGate(ctx)
+	if gate == nil {
+		return tok, err
+	}
+	return d.passwordSignIn(ctx, gate, err)
+}
+
+// passwordSignIn is the non-interactive re-authentication for password
+// accounts. The password is read from the vault for this call only and never
+// logged. silentErr is what the silent refresh returned; it is the answer
+// whenever the password must not be tried. A credential failure blocks further
+// attempts through the gate, so a wrong password or a policy that needs MFA is
+// not retried until the person has acted.
+func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silentErr error) (Token, error) {
+	d.reauth.Lock()
+	defer d.reauth.Unlock()
+	// Signing in the first time is an explicit step, not something to do on the side.
+	if _, err := d.store.Get(vault.TokenCacheKey(d.acct.Name)); err != nil {
+		return Token{}, silentErr
+	}
+	pw, err := d.store.Get(vault.SecretKey(d.acct.Name))
+	if errors.Is(err, vault.ErrNotFound) {
+		return Token{}, fmt.Errorf("%w: account %q has no stored password to sign in again", ErrLoginRequired, d.acct.Name)
+	}
+	if err != nil {
+		return Token{}, fmt.Errorf("account %q: read password from vault: %w", d.acct.Name, err)
+	}
+	ok, blocked := gate.Allow()
+	if blocked != "" {
+		return Token{}, d.pausedErr(blocked, "paused after")
+	}
+	if !ok {
+		// Inside the interval: say what the last password sign-in ran into, which is the real cause.
+		if last := gate.LastCode(); last != "" {
+			return Token{}, d.pausedErr(last, "last failed with")
+		}
+		return Token{}, silentErr
+	}
+	c, err := d.msal()
+	if err != nil {
+		return Token{}, err
+	}
+	res, err := c.AcquireTokenByUsernamePassword(withRecovery(ctx), scopes, d.acct.Username, string(pw))
+	if err != nil {
+		err = d.wrap(err)
+		gate.Result(aadCode(err.Error()))
+		if code := CredentialFailure(err); code != "" {
+			gate.Failed(code)
+		}
+		if errors.Is(err, ErrLoginRequired) || errors.Is(err, ErrTransient) || errors.Is(err, ErrInvalidClient) || errors.Is(err, ErrConsentRequired) {
+			return Token{}, err
+		}
+		// Any other refusal means the stored password cannot sign in without a person.
+		return Token{}, fmt.Errorf("%w: %s", ErrLoginRequired, describe(err.Error()))
+	}
+	// The same user signs in again, so the home account id stays stable; a
+	// different one would mean the stored user name changed, which is a login.
+	if d.acct.HomeAccountID != "" && res.Account.HomeAccountID != d.acct.HomeAccountID {
+		return Token{}, fmt.Errorf("%w: the password signs in as a different account than the one set up for %q", ErrLoginRequired, d.acct.Name)
+	}
+	gate.Result("")
+	return fromResult(res.AccessToken, res.ExpiresOn, res.Account.PreferredUsername, res.Account.HomeAccountID, d.acct), nil
+}
+
+// pausedErr is the error for a password sign-in that is not tried now because
+// of an earlier failure with code. It keeps the code in its text so the hint
+// for that failure applies, and keeps the consent class for a missing consent.
+func (d *delegated) pausedErr(code, what string) error {
+	kind := ErrLoginRequired
+	if code == "AADSTS65001" {
+		kind = ErrConsentRequired
+	}
+	return fmt.Errorf("%w: automatic password sign-in %s %s; fix the cause, then run: e5extend account set-secret %s (or account login)", kind, what, code, d.acct.Name)
+}
+
+func (d *delegated) silentToken(ctx context.Context) (Token, error) {
 	if d.acct.HomeAccountID == "" {
 		return Token{}, fmt.Errorf("%w: account %q has not signed in yet", ErrLoginRequired, d.acct.Name)
 	}

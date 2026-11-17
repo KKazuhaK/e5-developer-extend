@@ -137,6 +137,7 @@ export function Overview() {
                 onResume: (n) => void act.resume(n),
                 onEdit: (n) => navigate("accounts", { wizard: { mode: "edit", name: n } }),
                 onLogin: (n) => navigate("accounts", { wizard: { mode: "edit", name: n, step: 3 } }),
+                onSwitchToApp: (n) => navigate("accounts", { wizard: { mode: "add", from: n } }),
               }}
             />
           ))}
