@@ -15,8 +15,12 @@ type Host = "gui" | "service" | "none";
 // ---- controls (used by MockPanel and by ?host=none&empty=1 in the URL) ----
 interface Controls { host: Host; empty: boolean; slow: boolean }
 const q = new URLSearchParams(typeof location === "undefined" ? "" : location.search);
+// ?demo=1 is a clean, made-up data set (a Contoso tenant, healthy accounts, one alert channel, the
+// background service running) used to take the screenshots in docs/images (see scripts/screenshots).
+// ?theme=light|dark picks the theme instead of following the system.
+const demo = q.get("demo") === "1";
 let controls: Controls = {
-  host: (["gui", "service", "none"].includes(q.get("host") ?? "") ? q.get("host") : "gui") as Host,
+  host: (["gui", "service", "none"].includes(q.get("host") ?? "") ? q.get("host") : demo ? "service" : "gui") as Host,
   empty: q.get("empty") === "1",
   slow: q.get("slow") === "1",
 };
@@ -95,6 +99,13 @@ function mk(
 
 let accounts: MockAccount[] = [];
 function seedAccounts() {
+  if (demo) {
+    accounts = [
+      mk("contoso", "device_code", "contoso.onmicrosoft.com", "ok", { categories: CATS_ALL.slice(0, 10), todayOk: 27 }),
+      mk("contoso-app", "client_secret", "contoso.onmicrosoft.com", "ok", { categories: CATS_ALL.slice(0, 9), todayOk: 31, secretExpires: day(331) }),
+    ];
+    return;
+  }
   accounts = [
     mk("main", "device_code", "contoso.onmicrosoft.com", "ok", { categories: CATS_ALL.slice(0, 10), todayFailed: 1 }),
     mk("dev-app", "client_secret", "7d3f2a10-55c1-4c88-b1d4-0a3e9c61f2b8", "ok", { secretExpires: day(12), categories: CATS_ALL }),
@@ -158,7 +169,7 @@ function mockTenants(): TenantSubscriptions[] {
     if (subVariantNow === "nopermission" || subVariantNow === "manual") {
       t = { ...base, access: "no_permission", checkedAt: null, subscriptions: [] };
     } else {
-      const days = first ? (subVariantNow === "expiring" ? 5 : subVariantNow === "warning" ? 20 : 89) : 60 + i * 37;
+      const days = first ? (subVariantNow === "expiring" ? 5 : subVariantNow === "warning" ? 20 : demo ? 80 : 89) : 60 + i * 37;
       const status = first && subVariantNow === "warning" ? "Warning" : "Enabled";
       const subs = [mockSub(`s-${i}`, "DEVELOPERPACK_E5", status, days, first ? {
         renewals: [
@@ -166,7 +177,7 @@ function mockTenants(): TenantSubscriptions[] {
           { from: day(days - 90), to: day(days), seenAt: iso(now0 - 2 * 86_400_000) },
         ],
       } : {})];
-      if (first) subs.push(mockSub("s-x", "POWER_BI_STANDARD", "Enabled", 400, { licenses: 1_000_000, isTrial: true }));
+      if (first && !demo) subs.push(mockSub("s-x", "POWER_BI_STANDARD", "Enabled", 400, { licenses: 1_000_000, isTrial: true }));
       t = { ...base, access: "ok", checkedAt: iso(checked), subscriptions: subs.map((x) => ({ ...x, checkedAt: iso(checked) })) };
     }
     if (t.manualExpires) {
@@ -218,7 +229,7 @@ const logs: LogEntry[] = [];
 function logCall(a: MockAccount, t: number) {
   const c = CATALOG[rand(0, CATALOG.length - 1)];
   const r = Math.random();
-  const failed = a.status === "needs_attention" ? true : r < 0.06;
+  const failed = a.status === "needs_attention" ? true : !demo && r < 0.06;
   const status = failed ? (a.status === "needs_attention" ? 401 : [429, 403, 503][rand(0, 2)]) : 200;
   const cls = status === 200 ? "ok" : status === 401 ? "auth" : status === 429 ? "throttled" : status === 403 ? "forbidden" : "server";
   logs.push({ ts: iso(t), account: a.input.name, api: c.id, status, class: cls, latencyMs: rand(90, failed ? 2600 : 780) });
@@ -232,7 +243,7 @@ function seedLogs() {
     if (a.status === "paused" && t > now0 - 3 * 86_400_000 + 0) continue;
     logCall(a, t);
   }
-  if (accounts.length) {
+  if (accounts.length && !demo) {
     logs.push({ ts: iso(now0 - 5 * 3_600_000), account: "lab", api: "", status: 0, class: "", latencyMs: 0, event: "needs_attention", detail: "invalid_grant: refresh token revoked" });
     logs.push({ ts: iso(now0 - 3 * 86_400_000), account: "archive", api: "", status: 0, class: "", latencyMs: 0, event: "paused", detail: "手动暂停" });
   }
@@ -308,8 +319,8 @@ const APP_PERMS = [
   "User.Read.All", "Organization.Read.All", "Group.Read.All", "Mail.ReadBasic.All", "MailboxSettings.Read", "Calendars.Read", "Contacts.Read",
   "Files.Read.All", "Sites.Read.All", "Tasks.Read.All", "Team.ReadBasic.All",
 ];
-const MOCK_TENANT = "7d3f2a10-55c1-4c88-b1d4-0a3e9c61f2b8";
-const MOCK_CLIENT = "3c9e41b7-8a0d-4f62-b5e1-2d7a60c4e9f3";
+const MOCK_TENANT = "b6f0a3c1-2d94-4e57-8a1b-90c7e5d4f812";
+const MOCK_CLIENT = "e41d7a92-6b30-4c58-9f0a-1c85d3b7a6e2";
 const MOCK_CANDIDATES = [{ clientId: MOCK_CLIENT, displayName: "e5renew" }, { clientId: "a1b2c3d4-0000-4b6e-9d11-77aa55cc33ee", displayName: "e5extend" }];
 function setupEmit(id: string, e: AppSetupEvent) {
   setupListeners.get(id)?.forEach((cb) => cb(e));
@@ -413,10 +424,11 @@ let settings: Settings = {
     staleAfter: "72h", events: ["needs_attention", "auto_paused", "stale"], webhookConfigured: false, channels: 0,
     cooldown: "6h", quietHours: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5,
   },
-  ui: { language: (["zh", "en"].includes(q.get("lang") ?? "") ? q.get("lang") : "auto") as "auto" | "zh" | "en", theme: "system", startAtLogin: false },
+  ui: { language: (["zh", "en"].includes(q.get("lang") ?? "") ? q.get("lang") : "auto") as "auto" | "zh" | "en", theme: (["light", "dark"].includes(q.get("theme") ?? "") ? q.get("theme") : "system") as "light" | "dark" | "system", startAtLogin: demo },
 };
+if (demo) Object.assign(settings.schedule, { intervalMin: "40m", intervalMax: "2h", apisPerRoundMin: 3, apisPerRoundMax: 8 });
 // ?service=stopped starts with the service installed but not running
-let service: { installed: boolean } = { installed: q.get("service") === "stopped" };
+let service: { installed: boolean } = { installed: demo || q.get("service") === "stopped" };
 /** What the last mock export "wrote"; the mock import reads it back. */
 const emptyExport = { path: "", accounts: [], vaultEntries: 0, includesLogs: false, logFiles: 0, notes: [], noteCodes: [] };
 const emptyImport = {
@@ -472,7 +484,7 @@ const SECRETS: Record<ChannelType, [string, boolean][]> = {
   ntfy: [["token", false]], serverchan: [["sendkey", true]], webhook: [["url", true]],
 };
 interface MockChannel { view: ChannelView; secrets: Record<string, string> }
-let mockChannels: MockChannel[] = q.get("channels") === "some" ? seedChannels() : [];
+let mockChannels: MockChannel[] = q.get("channels") === "some" ? seedChannels() : demo ? seedChannels().slice(0, 1) : [];
 function seedChannels(): MockChannel[] {
   const base = (c: Partial<ChannelView> & Pick<ChannelInput, "id" | "type">): ChannelView => ({
     minLevel: "", events: [], language: "", template: "", chatId: "", apiBase: "", smtpHost: "", smtpPort: 0, security: "", username: "",
@@ -991,6 +1003,13 @@ export const mockApi: Api = {
               dx("account.main.apis", "Account main APIs", "ok", [["apis.ok", { count: "3" }]]),
             ]
           : []),
+        ...(demo
+          ? accounts.flatMap((a): DoctorCheck[] => [
+              dx(`account.${a.input.name}.token`, `Account ${a.input.name} sign-in`, "ok", [["token.ok", { seconds: "3300" }]]),
+              dx(`account.${a.input.name}.scopes`, `Account ${a.input.name} permissions`, "ok", [["scopes.ok", { count: String(catalogFor(a.input.name).filter((c) => c.usable).length) }]]),
+              dx(`account.${a.input.name}.activity`, `Account ${a.input.name} activity`, "ok", [["activity.last", { seconds: "1140" }]]),
+            ])
+          : []),
         ...(accounts.some((a) => a.input.name === "dev-app")
           ? [dx("account.dev-app.secret", "Account dev-app client secret", "warn", [["secret.warn", { count: "12", date: day(12) }]], [["fix.newSecret", { account: "dev-app" }]])]
           : []),
@@ -1000,8 +1019,8 @@ export const mockApi: Api = {
         on
           ? dx("notify", "Alerts", "ok", [[settings.notify.channels === 1 ? "notify.one" : "notify.many", { count: String(settings.notify.channels) }]])
           : dx("notify", "Alerts", "warn", [["notify.none"]], [["fix.channelAdd"]]),
-        // A code this version has no text for: the English text is shown.
-        { id: "future.check", title: "Some future check", level: "ok", detail: "unknown codes fall back to the backend text", fix: "", parts: [{ code: "future.thing", params: {} }], fixParts: [] },
+        // A code this version has no text for: the English text is shown (hidden in the clean demo data set).
+        ...(demo ? [] : [{ id: "future.check", title: "Some future check", level: "ok", detail: "unknown codes fall back to the backend text", fix: "", parts: [{ code: "future.thing", params: {} }], fixParts: [] } as DoctorCheck]),
       ];
       if (offline) return checks.filter((c) => c.id !== "clock" && c.id !== "network" && !c.id.endsWith(".token"));
       return checks;
