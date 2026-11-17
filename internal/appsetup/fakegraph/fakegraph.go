@@ -96,7 +96,8 @@ func (s *Server) addApp(app map[string]any) string {
 	id := s.newID("obj")
 	app["id"] = id
 	if app["appId"] == nil {
-		app["appId"] = s.newID("client")
+		s.n++
+		app["appId"] = fmt.Sprintf("%08d-0000-4000-8000-000000000000", s.n)
 	}
 	s.Apps = append(s.Apps, app)
 	return id

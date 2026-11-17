@@ -260,11 +260,21 @@ func (w *wizard) stepAccount() ([]string, error) {
 	if ok, err := w.confirm("Add a Microsoft 365 account now?", true); err != nil || !ok {
 		return nil, err
 	}
-	w.say("  You need an app registration in your developer tenant (Microsoft Entra admin center):")
+	w.say("  The account needs an app registration in your developer tenant (Microsoft Entra).")
+	regPick, err := w.choose("App registration", []string{
+		"create it automatically (recommended; you sign in once as an administrator of the tenant)",
+		"I already have one (manual guide: " + docsURL + "app-registration.md)",
+	}, 0)
+	if err != nil {
+		return nil, err
+	}
+	if regPick == 0 {
+		return w.stepAccountAuto()
+	}
+	w.say("  Manual setup:")
 	w.say("    - delegated sign-in: platform \"Mobile and desktop\", redirect URI http://localhost,")
 	w.say("      \"Allow public client flows\" on, plus read-only Graph permissions (Mail.Read, Calendars.Read, ...)")
 	w.say("    - app identity: a client secret and application permissions with admin consent")
-	w.say("  Step-by-step guide: %sapp-registration.md", docsURL)
 
 	name, err := w.ask("Account name (letters, digits, - and _)", "main")
 	if err != nil {
@@ -312,6 +322,40 @@ func (w *wizard) stepAccount() ([]string, error) {
 		return nil, nil
 	}
 	return []string{name}, nil
+}
+
+// stepAccountAuto adds an account whose app registration is created for the
+// user. `account add --auto` also signs the account in, so it is not reported
+// as freshly added (which would offer a second sign-in).
+func (w *wizard) stepAccountAuto() ([]string, error) {
+	name, err := w.ask("Account name (letters, digits, - and _)", "main")
+	if err != nil {
+		return nil, err
+	}
+	modes := []string{config.AuthDeviceCode, config.AuthBrowser, config.AuthClientSecret}
+	pick, err := w.choose("Sign-in method", []string{
+		"device code (works anywhere, also on servers)",
+		"browser",
+		"client secret (app identity, no user sign-in)",
+	}, 0)
+	if err != nil {
+		return nil, err
+	}
+	args := []string{"account", "add", name, "--auto", "--auth", modes[pick]}
+	if modes[pick] == config.AuthClientSecret {
+		user, err := w.ask("User whose mailbox and files it reads (sign-in name; empty to pick a random user)", "")
+		if err != nil {
+			return nil, err
+		}
+		if user != "" {
+			args = append(args, "--username", user)
+		}
+	}
+	w.say("  Next you sign in as an administrator of the tenant, check the plan and confirm.")
+	if !w.try(args...) {
+		w.say("  The account was not added. Fix the problem above and run e5extend init again, or choose \"I already have one\".")
+	}
+	return nil, nil
 }
 
 func (w *wizard) stepLogin(added []string) error {

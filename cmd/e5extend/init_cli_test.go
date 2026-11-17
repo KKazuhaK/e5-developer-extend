@@ -39,6 +39,7 @@ func TestInitScriptedHappyPath(t *testing.T) {
 	answers := strings.Join([]string{
 		"1",         // master key: system keyring
 		"y",         // add an account
+		"2",         // I already have an app registration
 		"main",      // name
 		"1",         // device code
 		"t.example", // tenant

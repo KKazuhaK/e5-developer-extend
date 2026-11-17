@@ -29,6 +29,7 @@ type env struct {
 	dataDir   string
 	newAuth   func(acct config.Account, store auth.Store, c *http.Client) (auth.Authenticator, error)
 	graphBase string
+	bootstrap func(ctx context.Context, method, tenant, clientID string, scopes []string, ui auth.LoginUI, c *http.Client) (auth.Token, error)
 
 	runner      *service.FakeRunner // never a real systemctl, launchctl, schtasks or loginctl
 	exe         string
@@ -67,6 +68,9 @@ func (e *env) runCtx(ctx context.Context, stdin string, args ...string) (string,
 	a.svc = svcIdentity{Home: e.home, UID: "501", User: "tester"}
 	a.interactive = func(io.Reader) bool { return e.interactive }
 	a.webhookBackoff = []time.Duration{time.Millisecond}
+	a.bootstrap = e.bootstrap
+	a.setupBackoff = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
+	a.setupHost = "dev-box"
 	if e.newAuth != nil {
 		a.newAuth = e.newAuth
 	}

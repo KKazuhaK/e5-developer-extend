@@ -181,8 +181,8 @@ func (s *AppSetupSession) Apply(ctx context.Context, choice appsetup.Choice) (*a
 // without changing anything, so automatic setup fails before it creates anything.
 func (o *Ops) PrepareAddAccount(in AccountInput) error {
 	acct := in.Account()
-	if acct.Tenant == "" {
-		acct.Tenant = "organizations"
+	if acct.Tenant == "" || acct.Tenant == "organizations" || acct.Tenant == "common" {
+		acct.Tenant = "tenant.example" // the real tenant ID is only known after sign-in
 	}
 	if acct.ClientID == "" {
 		acct.ClientID = testClientID
