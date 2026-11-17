@@ -85,6 +85,9 @@ type Options struct {
 	Hooks Hooks
 	// Notifier receives alerts; nil turns alerts off.
 	Notifier Notifier
+	// NoSubscriptionCheck turns the daily subscription check off; tests that
+	// count token requests use it.
+	NoSubscriptionCheck bool
 
 	Tick             time.Duration // how often the main loop wakes
 	ConfigCheckEvery int           // ticks between config file checks
@@ -138,11 +141,16 @@ type Engine struct {
 	rt    map[string]*accountRT
 	// unsaved is set when the state in memory differs from state.json because a save failed.
 	unsaved bool
+	// roundsDone is set when the first round has finished; the subscription
+	// checks wait for it. subRunning marks tenants being checked now.
+	roundsDone bool
+	subRunning map[string]bool
 
 	// Touched by the tick goroutine only.
 	lastTick  time.Time
 	ticks     int
 	lastPrune string
+	forceSub  map[string]bool // tenants a trigger asked to check now
 	cfgMod    time.Time
 	started   time.Time // engine start, for the stale-alert grace period
 
@@ -424,6 +432,7 @@ func (e *Engine) evalNotify() {
 		evs, changed = notify.Evaluate(notify.Input{
 			Now: e.clock.Now(), Start: e.started, Config: e.cfg.Notify,
 			Accounts: e.cfg.Accounts, State: e.state, Calls: calls, APIs: e.apis,
+			Subscription: e.cfg.Subscription,
 		})
 		if changed {
 			e.saveLocked()
@@ -527,6 +536,7 @@ func (e *Engine) init() {
 		now := e.clock.Now()
 		e.started = now
 		e.syncAccountsLocked(now, true)
+		e.pruneTenantsLocked()
 		fixed = e.fixFarFutureLocked(now)
 		e.saveLocked()
 	})
@@ -655,6 +665,7 @@ func (e *Engine) tick(ctx context.Context) {
 		e.adoptPending() // also when the reload trigger of the import was lost, or a round was in flight
 	}
 
+	e.forceSub = map[string]bool{}
 	manual := e.processTriggers(now)
 
 	var fixed []string
@@ -705,6 +716,7 @@ func (e *Engine) tick(ctx context.Context) {
 	})
 	e.reportClockFix(fixed)
 
+	e.subscriptionTick(ctx, now, e.forceSub)
 	e.evalNotify()
 
 	if day := now.Format("2006-01-02"); day != e.lastPrune {
@@ -743,6 +755,8 @@ func (e *Engine) processTriggers(now time.Time) map[string]bool {
 			e.reloadConfig()
 		case strings.HasSuffix(name, passwordSuffix):
 			e.resetPasswordGate(strings.TrimSuffix(name, passwordSuffix))
+		case strings.HasSuffix(name, subscriptionSuffix):
+			e.handleSubscriptionTrigger(name, e.forceSub)
 		case strings.HasSuffix(name, ".resume"):
 			e.resumeAccount(strings.TrimSuffix(name, ".resume"), now)
 		default:
@@ -806,6 +820,7 @@ func (e *Engine) reloadConfig() {
 		restart = cfg.Network.Proxy != e.cfg.Network.Proxy || cfg.Vault.Backend != e.cfg.Vault.Backend
 		e.cfg, e.sched = cfg, sc
 		e.syncAccountsLocked(e.clock.Now(), false)
+		e.pruneTenantsLocked()
 		e.saveLocked()
 	})
 	e.adoptPending()

@@ -78,6 +78,7 @@ func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
 			return
 		}
 		skipped, msg, follow = e.bookLocked(as, acct, out, now)
+		e.roundsDone = true
 		e.saveLocked()
 	})
 	if !found {
