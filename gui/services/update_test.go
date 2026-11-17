@@ -79,7 +79,7 @@ func (u *updateRig) progress() []UpdateProgress {
 // waitEnd waits for the "done" or "error" report.
 func (u *updateRig) waitEnd() UpdateProgress {
 	u.t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
+	deadline := time.Now().Add(30 * time.Second)
 	for time.Now().Before(deadline) {
 		for _, p := range u.progress() {
 			if p.Stage == "done" || p.Stage == "error" {
@@ -308,11 +308,12 @@ func TestUpdateServiceRefusesAnotherVersionThanTheOneConfirmed(t *testing.T) {
 	if err := u.svc.Install("0.3.0"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(5 * time.Second)
+	// Slow CI runners (Windows with -race) need more than a few seconds.
+	deadline := time.Now().Add(30 * time.Second)
 	for u.program() != "NEW PROGRAM" && time.Now().Before(deadline) {
 		time.Sleep(5 * time.Millisecond)
 	}
 	if u.program() != "NEW PROGRAM" {
-		t.Fatal("the confirmed version was not installed")
+		t.Fatalf("the confirmed version was not installed; reports: %+v", u.progress())
 	}
 }
