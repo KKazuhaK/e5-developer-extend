@@ -11,11 +11,12 @@ import (
 
 func TestSubscriptionServiceListRefreshAndSetExpires(t *testing.T) {
 	r := newRig(t)
+	r.fa.tok.Scopes = append(r.fa.tok.Scopes, "Organization.Read.All")
 	if err := r.b.Ops.AddAccount(t.Context(), AccountInput{Name: "main", Auth: config.AuthDeviceCode, Tenant: "t.example", ClientID: testGUID}); err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-		_, _ = w.Write([]byte(`{"value":[{"id":"s1","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T00:00:00Z","totalLicenses":25,"ownerTenantId":"tid"}]}`))
+		_, _ = w.Write([]byte(`{"value":[{"id":"s1","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T12:00:00Z","totalLicenses":25,"ownerTenantId":"tid"}]}`))
 	}))
 	defer srv.Close()
 	r.b.Ops.GraphBase = srv.URL

@@ -114,7 +114,7 @@ if (!controls.empty) seedAccounts();
 // ?subscription=ok|expiring|warning|nopermission|manual picks what the check found for the first tenant
 // (nopermission and manual apply to every tenant; manual also has a hand-written date on the first).
 type SubVariant = "ok" | "expiring" | "warning" | "nopermission" | "manual";
-const subVariant = (["ok", "expiring", "warning", "nopermission", "manual"].includes(q.get("subscription") ?? "") ? q.get("subscription") : "ok") as SubVariant;
+let subVariantNow = (["ok", "expiring", "warning", "nopermission", "manual"].includes(q.get("subscription") ?? "") ? q.get("subscription") : "ok") as SubVariant;
 const subManual = new Map<string, string>(); // tenant -> hand-written date
 const subCheckedAt = new Map<string, number>();
 const daysFrom = (iso: string) => Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) / 86_400_000);
@@ -130,20 +130,26 @@ function mockTenants(): TenantSubscriptions[] {
     const key = a.input.tenant.toLowerCase();
     groups.set(key, [...(groups.get(key) ?? []), a.input.name]);
   }
-  if (subVariant === "manual" && groups.size > 0 && !subManual.has([...groups.keys()][0])) subManual.set([...groups.keys()][0], day(40));
+  if (subVariantNow === "manual" && groups.size > 0 && !subManual.has([...groups.keys()][0])) subManual.set([...groups.keys()][0], day(40));
   return [...groups.entries()].map(([tenant, names], i) => {
     const first = i === 0;
     const checked = subCheckedAt.get(tenant) ?? now0 - 3 * 3_600_000;
     const base = {
       tenant, label: tenant, tenantId: first ? MOCK_TENANT : "", accounts: names, detail: "", attemptedAt: iso(checked), nextCheckAt: iso(checked + 86_400_000),
       manualExpires: subManual.get(tenant) ?? "", manualDaysLeft: null as number | null, manualInUse: false, manualRedundant: false,
+      fixAccount: names[0],
+      fixKind: (accounts.find((a) => a.input.name === names[0])?.input.auth === "client_secret" ? "app" : "delegated") as "app" | "delegated",
+      fixCommand: accounts.find((a) => a.input.name === names[0])?.input.auth === "client_secret"
+        ? `e5extend app setup --app-only --account ${names[0]} --no-new-secret`
+        : `e5extend app setup --tenant ${tenant} --adopt ${accounts.find((a) => a.input.name === names[0])?.input.clientId ?? ""}`,
+      watchedSkus: ["DEVELOPERPACK"],
     };
     let t: TenantSubscriptions;
-    if (subVariant === "nopermission" || subVariant === "manual") {
+    if (subVariantNow === "nopermission" || subVariantNow === "manual") {
       t = { ...base, access: "no_permission", checkedAt: null, subscriptions: [] };
     } else {
-      const days = first ? (subVariant === "expiring" ? 5 : subVariant === "warning" ? 20 : 89) : 60 + i * 37;
-      const status = first && subVariant === "warning" ? "Warning" : "Enabled";
+      const days = first ? (subVariantNow === "expiring" ? 5 : subVariantNow === "warning" ? 20 : 89) : 60 + i * 37;
+      const status = first && subVariantNow === "warning" ? "Warning" : "Enabled";
       const subs = [mockSub(`s-${i}`, "DEVELOPERPACK_E5", status, days, first ? {
         renewals: [
           { from: day(days - 180), to: day(days - 90), seenAt: iso(now0 - 91 * 86_400_000) },
@@ -306,7 +312,7 @@ function setupClear(id: string) {
   (setupTimers.get(id) ?? []).forEach((t) => clearTimeout(t));
   setupTimers.delete(id);
 }
-interface MockSetup { start: AppSetupStart; plan: AppSetupPlan; result: AppSetupResult | null }
+interface MockSetup { start: AppSetupStart; plan: AppSetupPlan; result: AppSetupResult | null; repair?: boolean }
 const setups = new Map<string, MockSetup>();
 
 /** The actions and missing permissions for the app the plan is about; choice is the user's decision when candidates exist. */
@@ -675,6 +681,30 @@ export const mockApi: Api = {
       setupAt(id, 6000, () => setupEmit(id, { kind: "signed_in", message: "signed in" }));
       setupAt(id, 7200, () => setupEmit(id, { kind: "plan", message: "", plan }));
     },
+    async repair(id, account, method) {
+      const a = accounts.find((x) => x.input.name === account);
+      if (!a) throw new Error(`no account named "${account}"`);
+      if (setups.size > 0) throw new Error("an app setup is already in progress");
+      setupClear(id);
+      const app = a.input.auth === "client_secret";
+      const displayName = app ? "E5 Developer Extend (app-only)" : "E5 Developer Extend";
+      const plan: AppSetupPlan = {
+        kind: app ? "app" : "delegated", tenantId: MOCK_TENANT, displayName, tags: ["e5extend", app ? "e5extend:app" : "e5extend:delegated"],
+        permissions: app ? APP_PERMS : DELEGATED_PERMS, missing: ["Organization.Read.All"], existing: { clientId: a.input.clientId, displayName },
+        candidates: [], needsChoice: false,
+        actions: [{ code: "add_permissions", text: "add 1 permission(s)" }, app ? { code: "assign_roles", text: "grant the application permissions" } : { code: "grant_consent", text: "grant administrator consent" }],
+      };
+      setups.set(id, { start: { name: account, appOnly: app, auth: "device_code", username: "", method }, plan, result: null, repair: true });
+      await wait(150);
+      if (!setups.has(id)) return;
+      if (method === "device_code") {
+        setupAt(id, 400, () => setupEmit(id, { kind: "device_code", message: "To sign in, open https://microsoft.com/devicelogin and enter the code to authenticate.", userCode: "K4PD-82MQ", verificationUri: "https://microsoft.com/devicelogin" }));
+      } else {
+        setupAt(id, 400, () => setupEmit(id, { kind: "browser_opened", message: "complete the sign-in in your browser" }));
+      }
+      setupAt(id, 2000, () => setupEmit(id, { kind: "signed_in", message: "signed in" }));
+      setupAt(id, 2600, () => setupEmit(id, { kind: "plan", message: "", plan }));
+    },
     async preview(id, choice) {
       await wait(250);
       const st = setups.get(id);
@@ -686,6 +716,21 @@ export const mockApi: Api = {
       await wait(100);
       const st = setups.get(id);
       if (!st) throw new Error("this app setup is not running any more");
+      if (st.repair) {
+        setupAt(id, 500, () => setupEmit(id, { kind: "progress", message: `updating the app registration "${st.plan.displayName}"...` }));
+        setupAt(id, 1400, () => setupEmit(id, { kind: "progress", message: st.plan.kind === "app" ? `granting ${st.plan.missing[0]}...` : "granting administrator consent..." }));
+        setupAt(id, 2300, () => {
+          st.result = {
+            kind: st.plan.kind, tenantId: st.plan.tenantId, clientId: st.plan.existing?.clientId ?? MOCK_CLIENT, displayName: st.plan.displayName,
+            createdApp: false, adoptedApp: false, renamed: false, consentGranted: true, adminConsentUrl: "", consentError: "",
+            secretExpires: "", secretCreated: false, removedSecrets: 0, notRemovedSecrets: 0,
+          };
+          // The permission is there now: the next subscription check reads the subscription.
+          subVariantNow = "ok";
+          setupEmit(id, { kind: "result", message: "done", result: st.result });
+        });
+        return;
+      }
       if (st.plan.needsChoice && !choice.adopt && !choice.createNew) throw new Error("choose whether to adopt an existing app registration or create a new one");
       const { actions } = mockActions(st.plan, st.plan.needsChoice ? choice : null);
       const steps = mockProgress(st.plan, actions, st.start.name, st.plan.candidates.find((c) => c.clientId === choice.adopt)?.displayName);

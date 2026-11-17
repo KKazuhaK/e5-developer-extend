@@ -1,4 +1,4 @@
-import type { AccountSummary, SubscriptionView, TenantSubscriptions } from "@/api/types";
+import type { SubscriptionView, TenantSubscriptions } from "@/api/types";
 import type { DictKey } from "@/i18n";
 
 export type Tone = "success" | "warning" | "danger" | "muted" | "info";
@@ -30,19 +30,6 @@ export function daysTone(days: number | null): Tone {
 
 /** The subscriptions the settings watch (the ones that alert), in the order the backend sent them. */
 export const watched = (tv: TenantSubscriptions): SubscriptionView[] => tv.subscriptions.filter((s) => s.watched);
-
-/**
- * The account to start the automatic app setup from, to give the tenant a
- * sign-in that can read the subscriptions: any account that is not already an
- * application identity (those get the permission from `e5extend app setup`).
- */
-export function fixPermissionsFrom(tv: TenantSubscriptions, accounts: AccountSummary[]): string | null {
-  for (const name of tv.accounts) {
-    const a = accounts.find((x) => x.name === name);
-    if (a && a.auth !== "client_secret") return name;
-  }
-  return null;
-}
 
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 

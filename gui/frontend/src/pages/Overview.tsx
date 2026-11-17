@@ -105,7 +105,7 @@ export function Overview() {
       )}
 
       {accounts.length > 0 && (
-        <SubscriptionCard accounts={accounts} onFix={(name) => navigate("accounts", { wizard: { mode: "add", from: name } })} />
+        <SubscriptionCard accounts={accounts} />
       )}
 
       {eng === "stopped" && (

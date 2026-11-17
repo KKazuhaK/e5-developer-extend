@@ -365,6 +365,12 @@ export interface TenantSubscriptions {
   manualInUse: boolean;
   /** Real data exists, so the hand-written date can be removed. */
   manualRedundant: boolean;
+  /** The account whose app registration lacks the permission, its identity and the command line that repairs it. */
+  fixAccount: string;
+  fixKind: "delegated" | "app";
+  fixCommand: string;
+  /** SKU prefixes that alert (subscription.skus; the default is DEVELOPERPACK). */
+  watchedSkus: string[];
 }
 export interface SubscriptionRefresh {
   tenants: TenantSubscriptions[];

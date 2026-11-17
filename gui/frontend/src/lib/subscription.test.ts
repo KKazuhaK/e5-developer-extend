@@ -1,13 +1,12 @@
 import { describe, expect, it } from "vitest";
-import type { AccountSummary, TenantSubscriptions } from "@/api/types";
+import type { TenantSubscriptions } from "@/api/types";
 import { dictionaries } from "@/i18n";
-import { daysTone, dateOwner, fixPermissionsFrom, statusBadge, validDate, watched } from "./subscription";
+import { daysTone, dateOwner, statusBadge, validDate, watched } from "./subscription";
 
 const tenant = (p: Partial<TenantSubscriptions> = {}): TenantSubscriptions => ({
   tenant: "contoso.onmicrosoft.com", label: "contoso.onmicrosoft.com", tenantId: "", accounts: ["app", "main"], access: "ok", detail: "",
-  checkedAt: null, attemptedAt: null, nextCheckAt: null, subscriptions: [], manualExpires: "", manualDaysLeft: null, manualInUse: false, manualRedundant: false, ...p,
+  checkedAt: null, attemptedAt: null, nextCheckAt: null, subscriptions: [], manualExpires: "", manualDaysLeft: null, manualInUse: false, manualRedundant: false, fixAccount: "app", fixKind: "delegated", fixCommand: "", watchedSkus: ["DEVELOPERPACK"], ...p,
 });
-const acct = (name: string, auth: AccountSummary["auth"]) => ({ name, auth }) as AccountSummary;
 
 describe("statusBadge", () => {
   it("has a translated label for every Graph status", () => {
@@ -40,17 +39,6 @@ describe("watched", () => {
   it("keeps only the subscriptions that alert", () => {
     const sub = (id: string, w: boolean) => ({ id, sku: id, watched: w, status: "Enabled", isTrial: false, licenses: 1, expires: "", daysLeft: null, checkedAt: "", renewals: [] });
     expect(watched(tenant({ subscriptions: [sub("a", true), sub("b", false)] })).map((s) => s.id)).toEqual(["a"]);
-  });
-});
-
-describe("fixPermissionsFrom", () => {
-  it("starts from an account that is not an application identity", () => {
-    const accounts = [acct("app", "client_secret"), acct("main", "device_code")];
-    expect(fixPermissionsFrom(tenant(), accounts)).toBe("main");
-  });
-  it("has none when every account is an application identity", () => {
-    expect(fixPermissionsFrom(tenant({ accounts: ["app"] }), [acct("app", "client_secret")])).toBeNull();
-    expect(fixPermissionsFrom(tenant({ accounts: ["gone"] }), [])).toBeNull();
   });
 });
 

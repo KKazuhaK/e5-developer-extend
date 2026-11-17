@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, CalendarClock, ChevronDown, ChevronRight, Info, RefreshCw, ShieldCheck } from "lucide-react";
 import { api } from "@/api";
 import type { AccountSummary, SubscriptionView, TenantSubscriptions } from "@/api";
+import { AppSetupStep, type AdminMethod } from "@/pages/AppSetupFlow";
+import { DOCS_URL } from "@/config";
 import { useI18n } from "@/i18n";
 import { useToast } from "@/components/toast";
 import { Badge } from "@/components/ui/badge";
@@ -9,7 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Field, Spinner, fieldAria } from "@/components/common";
-import { dateOwner, daysTone, fixPermissionsFrom, statusBadge, validDate, watched } from "@/lib/subscription";
+import { dateOwner, daysTone, statusBadge, validDate, watched } from "@/lib/subscription";
 import { formatRelative } from "@/lib/time";
 import { errMsg } from "@/lib/utils";
 
@@ -126,13 +128,10 @@ function ManualDate({ tv, onSaved }: { tv: TenantSubscriptions; onSaved: () => v
   );
 }
 
-function Tenant({ tv, accounts, onFix, onChanged }: {
-  tv: TenantSubscriptions; accounts: AccountSummary[]; onFix: (account: string) => void; onChanged: () => void;
-}) {
+function Tenant({ tv, onFix, onChanged }: { tv: TenantSubscriptions; onFix: (account: string) => void; onChanged: () => void }) {
   const { t, lang } = useI18n();
   const subs = watched(tv);
   const others = tv.subscriptions.length - subs.length;
-  const from = fixPermissionsFrom(tv, accounts);
   return (
     <section className="py-3 first:pt-0 last:pb-0" aria-label={tv.label}>
       <div className="flex flex-wrap items-baseline justify-between gap-x-3">
@@ -149,10 +148,11 @@ function Tenant({ tv, accounts, onFix, onChanged }: {
           <div className="min-w-0 flex-1">
             <p className="font-medium">{t("sub.noPermission")}</p>
             <p className="mt-0.5 text-muted-foreground">{t("sub.noPermissionHow")}</p>
-            {from ? <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.fixHint")}</p> : <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.fixCli")}</p>}
+            <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.fixHint", { account: tv.fixAccount })}</p>
+            {tv.fixCommand && <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.fixCli")} <code className="rounded bg-muted px-1 py-0.5 font-mono select-all">{tv.fixCommand}</code></p>}
           </div>
-          {from && (
-            <Button size="sm" onClick={() => onFix(from)}>
+          {tv.fixAccount && (
+            <Button size="sm" onClick={() => onFix(tv.fixAccount)}>
               <ShieldCheck /> {t("sub.fix")}
             </Button>
           )}
@@ -178,13 +178,59 @@ function Tenant({ tv, accounts, onFix, onChanged }: {
   );
 }
 
+/**
+ * Repairs the app registration of an account (only the missing permissions are added; no account,
+ * no client secret, no other app), then asks the subscription to be read again.
+ */
+function RepairPanel({ account, onClose, onRepaired }: { account: string; onClose: () => void; onRepaired: () => void }) {
+  const { t } = useI18n();
+  const [method, setMethod] = useState<AdminMethod | null>(null);
+  const [restart, setRestart] = useState(0);
+  const [finished, setFinished] = useState(false);
+  return (
+    <div className="space-y-3">
+      <div>
+        <h3 className="text-[14px] font-semibold">{t("sub.repair.title", { account })}</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.repair.desc", { account })}</p>
+      </div>
+      {method === null ? (
+        <div className="space-y-2">
+          <p className="text-[13px] font-medium">{t("auto.method")}</p>
+          <div className="flex gap-2" role="radiogroup" aria-label={t("auto.method")}>
+            {(["device_code", "browser"] as const).map((m) => (
+              <Button key={m} type="button" role="radio" aria-checked={false} size="sm" variant="outline" onClick={() => setMethod(m)}>
+                {t(`auto.method.${m}`)}
+              </Button>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground">{t("auto.methodHint")}</p>
+          <Button variant="ghost" size="sm" onClick={onClose}>{t("common.cancel")}</Button>
+        </div>
+      ) : (
+        <AppSetupStep
+          key={restart}
+          method={method}
+          done={null}
+          repair={account}
+          onResult={(_r, sid) => { void api.appSetup.finish(sid).catch(() => undefined); setFinished(true); onRepaired(); }}
+          onManual={() => void api.system.openExternal(DOCS_URL)}
+          onRestart={() => { setMethod(null); setRestart((n) => n + 1); }}
+          onAbort={onClose}
+        />
+      )}
+      {finished && <Button size="sm" onClick={onClose}>{t("sub.repair.close")}</Button>}
+    </div>
+  );
+}
+
 /** The "E5 subscription" card of the overview: one block per tenant. */
-export function SubscriptionCard({ accounts, onFix }: { accounts: AccountSummary[]; onFix: (account: string) => void }) {
+export function SubscriptionCard({ accounts }: { accounts: AccountSummary[] }) {
   const { t } = useI18n();
   const toast = useToast();
   const [tenants, setTenants] = useState<TenantSubscriptions[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [repair, setRepair] = useState<string | null>(null);
   // The tenants follow the accounts: a new or removed account changes what is listed.
   const accountKey = accounts.map((a) => `${a.name}@${a.tenant}`).join("|");
 
@@ -218,7 +264,7 @@ export function SubscriptionCard({ accounts, onFix }: { accounts: AccountSummary
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 id="sub-title" className="text-[15px] font-semibold">{t("sub.title")}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.desc")}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.desc", { skus: (tenants?.[0]?.watchedSkus ?? ["DEVELOPERPACK"]).join("、") })}</p>
         </div>
         <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={refreshing || !tenants?.length}>
           {refreshing ? <Spinner /> : <RefreshCw />} {t("sub.refresh")}
@@ -226,9 +272,15 @@ export function SubscriptionCard({ accounts, onFix }: { accounts: AccountSummary
       </div>
       {error && <p role="alert" className="text-[13px] text-danger">{error}</p>}
       {!tenants && !error && <p className="text-[13px] text-muted-foreground">{t("common.loading")}</p>}
-      {tenants && (
+      {repair ? (
+        <RepairPanel
+          account={repair}
+          onClose={() => setRepair(null)}
+          onRepaired={() => { void api.subscription.refresh(repair).then((r) => setTenants(r.tenants)).catch((e) => setError(errMsg(e))); }}
+        />
+      ) : tenants && (
         <div className="divide-y">
-          {tenants.map((tv) => <Tenant key={tv.tenant} tv={tv} accounts={accounts} onFix={onFix} onChanged={() => void load()} />)}
+          {tenants.map((tv) => <Tenant key={tv.tenant} tv={tv} onFix={setRepair} onChanged={() => void load()} />)}
         </div>
       )}
     </Card>

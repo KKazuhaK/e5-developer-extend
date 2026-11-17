@@ -42,6 +42,12 @@ export interface Api {
    */
   appSetup: {
     begin(id: string, start: AppSetupStart): Promise<void>;
+    /**
+     * Repairs an existing account: adds the missing permissions to the app registration the account signs in
+     * with (no new account, no new client secret; any other app is refused). Same events as begin; the caller
+     * ends it with finish after "result".
+     */
+    repair(id: string, account: string, method: "device_code" | "browser"): Promise<void>;
     /** The plan as it would be for this choice (actions and missing permissions); changes nothing. */
     preview(id: string, choice: AppSetupChoice): Promise<AppSetupPlan>;
     apply(id: string, choice: AppSetupChoice): Promise<void>;

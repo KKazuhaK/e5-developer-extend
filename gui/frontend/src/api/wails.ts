@@ -23,6 +23,7 @@ const normTenants = (ts: unknown): TenantSubscriptions[] =>
   arr(cast<TenantSubscriptions[] | null>(ts)).map((t) => ({
     ...t,
     accounts: arr(t.accounts),
+    watchedSkus: arr(t.watchedSkus),
     subscriptions: arr(t.subscriptions).map((s) => ({ ...s, renewals: arr(s.renewals) })),
   }));
 
@@ -61,6 +62,7 @@ export const wailsApi: Api = {
   },
   appSetup: {
     begin: (id, s) => AppSetupService.Begin(id, cast(s)),
+    repair: (id, account, method) => AppSetupService.Repair(id, account, method),
     preview: async (id, c) => planOf(cast<AppSetupPlan>(await AppSetupService.Preview(id, cast(c)))),
     apply: (id, c) => AppSetupService.Apply(id, cast(c)),
     finish: (id) => AppSetupService.Finish(id),
