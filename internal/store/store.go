@@ -101,6 +101,8 @@ type State struct {
 	// single account (all_failing).
 	Notified map[string]Notice    `json:"notified,omitempty"`
 	LastSent map[string]time.Time `json:"last_sent,omitempty"`
+	// Tenants holds what the subscription check saw, per tenant (see config.Account.TenantKey).
+	Tenants map[string]*TenantState `json:"tenants,omitempty"`
 }
 
 // NewState returns an empty state.
@@ -310,4 +312,59 @@ func (s *Store) Prune(now time.Time, keepDays int) (int, error) {
 		}
 	}
 	return n, errors.Join(errs...)
+}
+
+// Access says what the last subscription check of a tenant could do.
+const (
+	AccessOK           = "ok"            // the subscriptions were read
+	AccessNoPermission = "no_permission" // Graph refused: Organization.Read.All is missing
+	AccessError        = "error"         // could not be checked (network, sign-in, server)
+)
+
+// MaxRenewals is how many renewals a subscription keeps.
+const MaxRenewals = 20
+
+// Renewal records that a subscription's next lifecycle date moved later.
+type Renewal struct {
+	From   time.Time `json:"from"`
+	To     time.Time `json:"to"`
+	SeenAt time.Time `json:"seen_at"`
+}
+
+// SubscriptionState is the last thing seen of one subscription of a tenant.
+type SubscriptionState struct {
+	SKU           string    `json:"sku,omitempty"`
+	Status        string    `json:"status"`
+	NextLifecycle time.Time `json:"next_lifecycle,omitzero"`
+	CheckedAt     time.Time `json:"checked_at"`
+	IsTrial       bool      `json:"is_trial,omitempty"`
+	TotalLicenses int       `json:"total_licenses,omitempty"`
+	History       []Renewal `json:"history,omitempty"`
+
+	// AnnouncedStatus is the status the alerts have caught up with ("" before
+	// the first evaluation); RenewalNotified is the SeenAt of the newest
+	// renewal that was announced. Only the alert evaluation writes them.
+	AnnouncedStatus string    `json:"announced_status,omitempty"`
+	RenewalNotified time.Time `json:"renewal_notified,omitzero"`
+	// Notified and LastSent are the alert notices of this subscription.
+	Notified map[string]Notice    `json:"notified,omitempty"`
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
+}
+
+// TenantState is the subscription knowledge of one tenant.
+type TenantState struct {
+	// TenantID is the tenant's GUID when a token or Graph told it.
+	TenantID string `json:"tenant_id,omitempty"`
+	// Access is the outcome of the last check; Detail explains AccessError
+	// without secrets. Checked is the last successful read, Attempted the last try.
+	Access    string    `json:"access,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	Checked   time.Time `json:"checked_at,omitzero"`
+	Attempted time.Time `json:"attempted_at,omitzero"`
+	// Failures counts the failed checks in a row, for the backoff.
+	Failures      int                           `json:"failures,omitempty"`
+	Subscriptions map[string]*SubscriptionState `json:"subscriptions,omitempty"`
+	// Notified and LastSent are the notices of the manual expiry date.
+	Notified map[string]Notice    `json:"notified,omitempty"`
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
 }

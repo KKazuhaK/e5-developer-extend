@@ -21,6 +21,10 @@ const (
 	PeriodEnded    = "period_ended"
 	FailureSpike   = "failure_spike"
 	AllFailing     = "all_failing"
+
+	SubscriptionExpiring = "subscription_expiring"
+	SubscriptionStatus   = "subscription_status"
+	SubscriptionRenewed  = "subscription_renewed"
 	// Test is only sent by `e5extend notify test`.
 	Test = "test"
 	// Digest is the summary of alerts that were held during the quiet hours.
@@ -30,13 +34,36 @@ const (
 // LevelOf is the level of an event kind: critical, warning or info.
 func LevelOf(kind string) string {
 	switch kind {
-	case NeedsAttention, AutoPaused, AllFailing:
+	case NeedsAttention, AutoPaused, AllFailing, SubscriptionStatus:
 		return config.LevelCritical
-	case Stale, SecretExpiring, FailureSpike:
+	case Stale, SecretExpiring, FailureSpike, SubscriptionExpiring:
 		return config.LevelWarning
 	}
 	return config.LevelInfo
 }
+
+// LevelOfKey is the level of one alert of a kind, given the key its decision
+// was based on: a subscription expiring in 30 days is a warning, one expiring
+// within 7 days is critical; a subscription falling into a worse status is
+// critical, its recovery is info. The other kinds have one level.
+func LevelOfKey(kind, key string) string {
+	switch kind {
+	case SubscriptionExpiring:
+		if lv, _, _ := strings.Cut(key, "@"); lv == "30" {
+			return config.LevelWarning
+		}
+		return config.LevelCritical
+	case SubscriptionStatus:
+		if key == StatusEnabled {
+			return config.LevelInfo
+		}
+		return config.LevelCritical
+	}
+	return LevelOf(kind)
+}
+
+// StatusEnabled is the healthy status of a subscription.
+const StatusEnabled = "Enabled"
 
 // Event is one alert.
 type Event struct {
@@ -59,11 +86,20 @@ type Event struct {
 	FailRate         float64
 	// Items are the held events of a Digest.
 	Items []Event
+	// Subscription is the ID of the subscription of a subscription_* event
+	// ("manual" for the date entered by hand); Account is empty for them
+	// because a subscription belongs to the tenant.
+	Subscription string
+	// Severity overrides the level of the kind (see LevelOfKey).
+	Severity string
 }
 
 // Level is the level of the event; a digest has the highest of its items.
 func (e Event) Level() string {
 	if e.Event != Digest {
+		if e.Severity != "" {
+			return e.Severity
+		}
 		return LevelOf(e.Event)
 	}
 	lv := config.LevelInfo

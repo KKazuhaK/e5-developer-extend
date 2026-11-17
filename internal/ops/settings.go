@@ -40,17 +40,23 @@ proxy = ""                  # empty uses HTTPS_PROXY and friends
 # Their tokens and addresses are kept in the vault, not here.
 webhook_url = ""            # legacy plaintext address; set-webhook moves it into the vault
 stale_after = "72h"         # alert when an account has had no successful call for this long
-events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended, failure_spike, all_failing
+events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended, failure_spike, all_failing,
+                            # subscription_expiring, subscription_status, subscription_renewed
 cooldown = "6h"             # the same alert for the same account is not repeated within this time (critical: half); empty means the default, only "0" turns it off
 quiet_hours = ""            # for example "23:00-08:00": only critical alerts, the rest is sent as one summary afterwards
 spike_rounds = 3            # failure_spike: look at this many recent rounds ...
 spike_rate = 0.5            # ... alert when this share of the calls failed ...
 spike_min_failures = 5      # ... and at least this many calls failed (calls that found nothing do not count)
 
+[subscription]
+skus = []                   # SKU part numbers to watch (each matches by prefix); empty means DEVELOPERPACK, the E5 developer subscription
+
 [vault]
 backend = "auto"            # auto | keyring | file
 
 # Add accounts with: e5extend account add <name> --auth ... --tenant ... --client-id ...
+# If the subscription cannot be read from Microsoft (Organization.Read.All is missing), the end date can be
+# written on one account of the tenant:  subscription_expires = "2027-02-14"
 `
 
 // ConfigPaths returns the config file and the data directory.

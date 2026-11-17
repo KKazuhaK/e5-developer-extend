@@ -88,6 +88,45 @@ func (c *Client) ListUserIDs(ctx context.Context, token string) ([]string, Resul
 	return ids, res
 }
 
+// Subscription is a companySubscription of the tenant, reduced to what the
+// expiry check reads.
+type Subscription struct {
+	ID                    string    `json:"id"`
+	SKUPartNumber         string    `json:"skuPartNumber"`
+	Status                string    `json:"status"`
+	NextLifecycleDateTime time.Time `json:"nextLifecycleDateTime"`
+	IsTrial               bool      `json:"isTrial"`
+	TotalLicenses         int       `json:"totalLicenses"`
+	OwnerTenantID         string    `json:"ownerTenantId"`
+}
+
+// ListSubscriptions reads GET /directory/subscriptions. Its least privilege
+// is Organization.Read.All, delegated or application.
+func (c *Client) ListSubscriptions(ctx context.Context, token string) ([]Subscription, Result) {
+	var subs []Subscription
+	bad := false
+	res := c.do(ctx, token, "/directory/subscriptions", url.Values{
+		"$select": {"id,skuPartNumber,status,nextLifecycleDateTime,isTrial,totalLicenses,ownerTenantId"},
+	}, func(r io.Reader) {
+		var body struct {
+			Value []Subscription `json:"value"`
+		}
+		if json.NewDecoder(r).Decode(&body) != nil {
+			bad = true
+			return
+		}
+		subs = body.Value
+	})
+	if res.Class == OK && bad {
+		res.Class = ClientError
+		res.Err = errors.New("the subscription list could not be read")
+	}
+	if res.Class != OK {
+		return nil, res
+	}
+	return subs, res
+}
+
 func (c *Client) do(ctx context.Context, token, path string, query url.Values, sink func(io.Reader)) Result {
 	base := c.Base
 	if base == "" {
