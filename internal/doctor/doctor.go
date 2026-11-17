@@ -615,7 +615,7 @@ func checkSubscription(d Deps, cfg *config.Config, tv subscription.TenantView) C
 		return c
 	case store.AccessNoPermission:
 		c.Level = OK
-		c.Detail = "cannot read the subscription: Organization.Read.All is needed (run: e5extend app setup --account <name> to add it)"
+		c.Detail = "cannot read the subscription: Organization.Read.All is needed (run: e5extend app setup to add it)"
 		if tv.ManualExpires != "" {
 			c.Detail = "cannot read the subscription (Organization.Read.All is needed)"
 			manual()
