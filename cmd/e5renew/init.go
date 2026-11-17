@@ -41,8 +41,8 @@ func (a *app) newInitCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if !a.isInteractive(cmd.InOrStdin()) {
 				return errors.New("init needs an interactive terminal. In scripts run the steps yourself:\n" +
-					"  e5renew config init\n  e5renew account add <name> --auth ... --tenant ... --client-id ...\n" +
-					"  e5renew account login <name>\n  e5renew service install\n  e5renew doctor")
+					"  e5extend config init\n  e5extend account add <name> --auth ... --tenant ... --client-id ...\n" +
+					"  e5extend account login <name>\n  e5extend service install\n  e5extend doctor")
 			}
 			w := &wizard{a: a, cmd: cmd, ctx: contextOrBackground(cmd), in: cmd.InOrStdin(), out: cmd.OutOrStdout()}
 			return w.run()
@@ -74,7 +74,7 @@ func (w *wizard) ask(prompt, def string) (string, error) {
 		if errors.Is(err, errInterrupted) {
 			return "", err
 		}
-		return "", errors.New("the input ended; run e5renew init again to continue where you stopped")
+		return "", errors.New("the input ended; run e5extend init again to continue where you stopped")
 	}
 	if ans = strings.TrimSpace(ans); ans == "" {
 		return def, nil
@@ -151,7 +151,7 @@ func (w *wizard) try(args ...string) bool {
 }
 
 func (w *wizard) run() error {
-	w.say("e5renew setup. Answer with an empty line to take the default; every step can be skipped.")
+	w.say("e5extend setup. Answer with an empty line to take the default; every step can be skipped.")
 
 	if err := w.stepConfig(); err != nil {
 		return err
@@ -254,7 +254,7 @@ func (w *wizard) stepAccount() ([]string, error) {
 		return nil, err
 	}
 	if n := len(cfg.Accounts); n > 0 {
-		w.say("  %d account(s) already configured; skipped (add more with: e5renew account add)", n)
+		w.say("  %d account(s) already configured; skipped (add more with: e5extend account add)", n)
 		return nil, nil
 	}
 	if ok, err := w.confirm("Add a Microsoft 365 account now?", true); err != nil || !ok {
@@ -308,7 +308,7 @@ func (w *wizard) stepAccount() ([]string, error) {
 		w.say("  The next prompt asks for the secret (hidden while typing).")
 	}
 	if !w.try(args...) {
-		w.say("  The account was not added. Fix the problem above and run e5renew init again.")
+		w.say("  The account was not added. Fix the problem above and run e5extend init again.")
 		return nil, nil
 	}
 	return []string{name}, nil
@@ -386,7 +386,7 @@ func hintOrEmpty(err error, name string) string {
 	if h := hint(err, name); h != "" {
 		return h
 	}
-	return "see: e5renew doctor"
+	return "see: e5extend doctor"
 }
 
 func firstLine(s string) string {
@@ -450,7 +450,7 @@ func (w *wizard) stepService() error {
 		w.say("  already installed; skipped")
 		return nil
 	}
-	ok, err := w.confirm("Install e5renew as a background job that starts at login?", true)
+	ok, err := w.confirm("Install e5extend as a background job that starts at login?", true)
 	if err != nil || !ok {
 		return err
 	}

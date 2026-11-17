@@ -23,7 +23,7 @@ func (a *app) newVaultInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create the vault master key",
 		Long: "Create the vault master key and store it in the system keyring, or with --print-key\n" +
-			"print a new one for E5RENEW_MASTER_KEY or a systemd credential (nothing is stored).",
+			"print a new one for E5EXTEND_MASTER_KEY or a systemd credential (nothing is stored).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if printKey {

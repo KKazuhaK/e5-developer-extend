@@ -28,7 +28,7 @@ type Autostart interface {
 // Backend is what every service shares.
 type Backend struct {
 	Ops *ops.Ops
-	// ConfigDir holds gui.json; it is the e5renew config directory.
+	// ConfigDir holds gui.json; it is the e5extend config directory.
 	ConfigDir string
 	Emit      Emitter
 	Autostart Autostart

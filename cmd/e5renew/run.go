@@ -60,7 +60,7 @@ func (a *app) newRunCmd() *cobra.Command {
 				err = a.runEngine(cmd, log)
 			}
 			if err != nil && logFile != "" {
-				log.Error("e5renew run failed", "err", err.Error())
+				log.Error("e5extend run failed", "err", err.Error())
 			}
 			return err
 		},
@@ -81,13 +81,13 @@ func (a *app) runEngine(cmd *cobra.Command, log *slog.Logger) error {
 		return err
 	}
 	if len(cfg.Accounts) == 0 {
-		log.Warn("no accounts configured; add one with: e5renew account add")
+		log.Warn("no accounts configured; add one with: e5extend account add")
 	}
 	ctx := contextOrBackground(cmd)
 	reloadOnSIGHUP(ctx, e.Reload)
 	if err := e.Run(ctx); err != nil {
 		if errors.Is(err, engine.ErrRunning) {
-			return errors.New("an engine is already running for this data directory (see: e5renew status)")
+			return errors.New("an engine is already running for this data directory (see: e5extend status)")
 		}
 		return err
 	}
@@ -127,7 +127,7 @@ func (a *app) newRunNowCmd() *cobra.Command {
 				return err
 			}
 			if res.Queued {
-				fmt.Fprintf(out, "the engine is running; asked it to run: %s\nit starts within about 30 seconds (see: e5renew logs --follow)\n", strings.Join(res.Targets, ", "))
+				fmt.Fprintf(out, "the engine is running; asked it to run: %s\nit starts within about 30 seconds (see: e5extend logs --follow)\n", strings.Join(res.Targets, ", "))
 			}
 			return nil
 		},

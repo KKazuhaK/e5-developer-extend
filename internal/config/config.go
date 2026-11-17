@@ -67,7 +67,7 @@ type Network struct {
 
 // Notify holds notification settings.
 type Notify struct {
-	// WebhookURL is the legacy plaintext location; `e5renew notify set-webhook`
+	// WebhookURL is the legacy plaintext location; `e5extend notify set-webhook`
 	// stores the address in the vault instead.
 	WebhookURL string `toml:"webhook_url"`
 	// StaleAfter is how long an account may go without a successful call
@@ -185,7 +185,7 @@ func parse(data []byte, override *Vault) (*Config, error) {
 		return nil, decodeError(err)
 	}
 	if head.Version != nil && *head.Version > Version {
-		return nil, fmt.Errorf("config version %d is newer than this e5renew supports (%d); upgrade e5renew", *head.Version, Version)
+		return nil, fmt.Errorf("config version %d is newer than this e5extend supports (%d); upgrade e5extend", *head.Version, Version)
 	}
 
 	cfg := Default()
@@ -236,8 +236,8 @@ func Load(path string) (*Config, error) {
 }
 
 // Header is written at the top of every saved file.
-const Header = "# Managed by e5renew: this file is rewritten when accounts change, so comments are not kept.\n" +
-	"# Print the commented template with: e5renew config init --print-template\n\n"
+const Header = "# Managed by e5extend: this file is rewritten when accounts change, so comments are not kept.\n" +
+	"# Print the commented template with: e5extend config init --print-template\n\n"
 
 // Save writes the configuration atomically with mode 0600, preceded by Header.
 func (c *Config) Save(path string) error {

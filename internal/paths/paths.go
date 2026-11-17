@@ -11,9 +11,9 @@ import (
 )
 
 const (
-	appDir       = "e5renew"
-	envConfigDir = "E5RENEW_CONFIG_DIR"
-	envDataDir   = "E5RENEW_DATA_DIR"
+	appDir       = "e5extend"
+	envConfigDir = "E5EXTEND_CONFIG_DIR"
+	envDataDir   = "E5EXTEND_DATA_DIR"
 	configFile   = "config.toml"
 )
 

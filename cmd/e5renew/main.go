@@ -1,4 +1,4 @@
-// Command e5renew is the command-line interface and background engine of e5-renew.
+// Command e5extend is the command-line interface and background engine of e5-renew.
 package main
 
 import (
@@ -39,20 +39,20 @@ func newRootCmd() *cobra.Command { return newRootCmdWith(newApp()) }
 
 func newRootCmdWith(a *app) *cobra.Command {
 	root := &cobra.Command{
-		Use:           "e5renew",
+		Use:           "e5extend",
 		Short:         "Keep a Microsoft 365 E5 developer tenant active",
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
 	var configDir, dataDir string
-	root.PersistentFlags().StringVar(&configDir, "config-dir", "", "configuration folder (same as E5RENEW_CONFIG_DIR)")
-	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data folder (same as E5RENEW_DATA_DIR)")
+	root.PersistentFlags().StringVar(&configDir, "config-dir", "", "configuration folder (same as E5EXTEND_CONFIG_DIR)")
+	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data folder (same as E5EXTEND_DATA_DIR)")
 	root.PersistentPreRunE = func(*cobra.Command, []string) error {
 		// The flags exist for job runners that cannot set environment
 		// variables (Windows scheduled tasks); they simply set them.
 		for _, f := range []struct{ flag, env, val string }{
-			{"config-dir", "E5RENEW_CONFIG_DIR", configDir},
-			{"data-dir", "E5RENEW_DATA_DIR", dataDir},
+			{"config-dir", "E5EXTEND_CONFIG_DIR", configDir},
+			{"data-dir", "E5EXTEND_DATA_DIR", dataDir},
 		} {
 			if f.val == "" {
 				continue
@@ -78,7 +78,7 @@ func newVersionCmd() *cobra.Command {
 		Use:   "version",
 		Short: "Print version information",
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Fprintf(cmd.OutOrStdout(), "e5renew %s (commit %s, built %s, %s/%s)\n",
+			fmt.Fprintf(cmd.OutOrStdout(), "e5extend %s (commit %s, built %s, %s/%s)\n",
 				version.Version, version.Commit, version.Date, runtime.GOOS, runtime.GOARCH)
 		},
 	}

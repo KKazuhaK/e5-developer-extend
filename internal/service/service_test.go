@@ -32,33 +32,33 @@ func golden(t *testing.T, name, got string) {
 }
 
 func TestSystemdUnitGolden(t *testing.T) {
-	base := SystemdParams{Exe: "/home/u/.local/bin/e5renew", ConfigDir: "/home/u/.config/e5renew", DataDir: "/home/u/.local/share/e5renew"}
+	base := SystemdParams{Exe: "/home/u/.local/bin/e5extend", ConfigDir: "/home/u/.config/e5extend", DataDir: "/home/u/.local/share/e5extend"}
 	golden(t, "systemd", SystemdUnit(base))
 
 	withKey := base
-	withKey.KeyFile = "/home/u/.config/e5renew/master.key"
+	withKey.KeyFile = "/home/u/.config/e5extend/master.key"
 	golden(t, "systemd_keyfile", SystemdUnit(withKey))
 
 	old := withKey
 	old.KeyFileEnv = true
 	golden(t, "systemd_keyfile_env", SystemdUnit(old))
 
-	odd := SystemdParams{Exe: "/opt/my apps/e5renew", ConfigDir: "/home/u/my config/100%", DataDir: "/data"}
+	odd := SystemdParams{Exe: "/opt/my apps/e5extend", ConfigDir: "/home/u/my config/100%", DataDir: "/data"}
 	golden(t, "systemd_quoting", SystemdUnit(odd))
 }
 
 func TestLaunchdPlistGolden(t *testing.T) {
-	p := LaunchdParams{Exe: "/usr/local/bin/e5renew", LogFile: "/Users/u/Library/Application Support/e5renew/engine.log", LogPath: "/Users/u/Library/Logs/e5renew/engine.log"}
+	p := LaunchdParams{Exe: "/usr/local/bin/e5extend", LogFile: "/Users/u/Library/Application Support/e5extend/engine.log", LogPath: "/Users/u/Library/Logs/e5extend/engine.log"}
 	golden(t, "launchd", LaunchdPlist(p))
-	p.Env = map[string]string{"E5RENEW_DATA_DIR": "/Volumes/x/data & more", "E5RENEW_CONFIG_DIR": "/Volumes/x/cfg"}
+	p.Env = map[string]string{"E5EXTEND_DATA_DIR": "/Volumes/x/data & more", "E5EXTEND_CONFIG_DIR": "/Volumes/x/cfg"}
 	golden(t, "launchd_env", LaunchdPlist(p))
 }
 
 func TestTaskXMLGolden(t *testing.T) {
 	golden(t, "task_bg", TaskXML(TaskParams{
-		Exe: `C:\Users\u\bin\e5renew-bg.exe`, UserID: `PC\u`, LogFile: `C:\Users\u\AppData\Local\e5renew\engine.log`}))
+		Exe: `C:\Users\u\bin\e5extend-bg.exe`, UserID: `PC\u`, LogFile: `C:\Users\u\AppData\Local\e5extend\engine.log`}))
 	golden(t, "task_console", TaskXML(TaskParams{
-		Exe: `C:\Program Files\e5renew\e5renew.exe`, UserID: `PC\u`, LogFile: `C:\Users\u\My Data\engine.log`}))
+		Exe: `C:\Program Files\e5extend\e5extend.exe`, UserID: `PC\u`, LogFile: `C:\Users\u\My Data\engine.log`}))
 }
 
 func TestTaskXMLKeyDefaults(t *testing.T) {
@@ -116,22 +116,22 @@ func TestUTF16LE(t *testing.T) {
 
 func TestCheckExecutable(t *testing.T) {
 	for _, bad := range []string{
-		"/tmp/go-build123/b001/exe/e5renew",
-		"/home/u/.cache/go-build/ab/exe/e5renew",
-		"/tmp/e5renew",
-		"/var/folders/xx/T/e5renew",
-		`C:\Users\u\AppData\Local\Temp\go-build1\e5renew.exe`,
-		`C:\Users\u\AppData\Local\Temp\e5renew.exe`,
-		"/mnt/scratch/e5renew",
-		"/private/var/folders/ab/xyz/T/AppTranslocation/1234/d/E5 Renew.app/Contents/MacOS/e5renew",
-		"/Volumes/E5 Renew/E5 Renew.app/Contents/MacOS/e5renew",
+		"/tmp/go-build123/b001/exe/e5extend",
+		"/home/u/.cache/go-build/ab/exe/e5extend",
+		"/tmp/e5extend",
+		"/var/folders/xx/T/e5extend",
+		`C:\Users\u\AppData\Local\Temp\go-build1\e5extend.exe`,
+		`C:\Users\u\AppData\Local\Temp\e5extend.exe`,
+		"/mnt/scratch/e5extend",
+		"/private/var/folders/ab/xyz/T/AppTranslocation/1234/d/E5 Renew.app/Contents/MacOS/e5extend",
+		"/Volumes/E5 Renew/E5 Renew.app/Contents/MacOS/e5extend",
 	} {
 		if err := CheckExecutable(bad, "/mnt/scratch"); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}
-	for _, good := range []string{"/usr/local/bin/e5renew", "/home/u/.local/bin/e5renew", "/home/u/tmpfiles/e5renew", `C:\Program Files\e5renew\e5renew.exe`,
-		"/Applications/E5 Renew.app/Contents/MacOS/e5renew", "/Volumes/Backup/bin/e5renew"} {
+	for _, good := range []string{"/usr/local/bin/e5extend", "/home/u/.local/bin/e5extend", "/home/u/tmpfiles/e5extend", `C:\Program Files\e5extend\e5extend.exe`,
+		"/Applications/E5 Renew.app/Contents/MacOS/e5extend", "/Volumes/Backup/bin/e5extend"} {
 		if err := CheckExecutable(good, "/mnt/scratch"); err != nil {
 			t.Errorf("%s refused: %v", good, err)
 		}
@@ -149,16 +149,16 @@ func TestPickWindowsExe(t *testing.T) {
 			return false
 		}
 	}
-	got, warn := PickWindowsExe(`C:\app\e5renew.exe`, exists(`C:\app\e5renew-bg.exe`))
-	if got != `C:\app\e5renew-bg.exe` || warn != "" {
+	got, warn := PickWindowsExe(`C:\app\e5extend.exe`, exists(`C:\app\e5extend-bg.exe`))
+	if got != `C:\app\e5extend-bg.exe` || warn != "" {
 		t.Errorf("with bg: %q %q", got, warn)
 	}
-	got, warn = PickWindowsExe(`C:\app\e5renew.exe`, exists())
-	if got != `C:\app\e5renew.exe` || !strings.Contains(warn, "console window") {
+	got, warn = PickWindowsExe(`C:\app\e5extend.exe`, exists())
+	if got != `C:\app\e5extend.exe` || !strings.Contains(warn, "console window") {
 		t.Errorf("without bg: %q %q", got, warn)
 	}
-	got, warn = PickWindowsExe(`C:\app\E5RENEW-BG.EXE`, exists())
-	if got != `C:\app\E5RENEW-BG.EXE` || warn != "" {
+	got, warn = PickWindowsExe(`C:\app\E5EXTEND-BG.EXE`, exists())
+	if got != `C:\app\E5EXTEND-BG.EXE` || warn != "" {
 		t.Errorf("already bg: %q %q", got, warn)
 	}
 }

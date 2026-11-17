@@ -51,7 +51,7 @@ func (a *app) newStatusCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", snap.StateErr)
 			}
 			if len(snap.Accounts) == 0 {
-				fmt.Fprintln(out, "no accounts; add one with: e5renew account add")
+				fmt.Fprintln(out, "no accounts; add one with: e5extend account add")
 				return nil
 			}
 

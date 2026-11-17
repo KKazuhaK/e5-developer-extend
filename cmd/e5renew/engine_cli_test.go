@@ -109,7 +109,7 @@ func TestRunNowWithoutEngineReportsLoginProblem(t *testing.T) {
 	addDelegated(e, "main")
 	useAuth(e, &fakeAuth{err: fmt.Errorf("refresh: %w", auth.ErrLoginRequired)})
 	out, _, err := e.run("", "run-now")
-	if err == nil || !strings.Contains(err.Error(), "e5renew account login main") {
+	if err == nil || !strings.Contains(err.Error(), "e5extend account login main") {
 		t.Fatalf("err = %v\nout = %s", err, out)
 	}
 	if !strings.Contains(out, "no engine is running") {
@@ -120,7 +120,7 @@ func TestRunNowWithoutEngineReportsLoginProblem(t *testing.T) {
 	if !strings.Contains(out, "needs_attention") || !strings.Contains(out, "engine: not running") {
 		t.Errorf("status:\n%s", out)
 	}
-	if !strings.Contains(out, "e5renew service install") || !strings.Contains(out, "e5renew run") {
+	if !strings.Contains(out, "e5extend service install") || !strings.Contains(out, "e5extend run") {
 		t.Errorf("status must say how to start the engine:\n%s", out)
 	}
 }
@@ -327,7 +327,7 @@ func TestRunStartupErrorsGoToTheLogFile(t *testing.T) {
 		t.Fatal("run without a config succeeded")
 	}
 	b, rerr := os.ReadFile(logPath)
-	if rerr != nil || !strings.Contains(string(b), "e5renew run failed") || !strings.Contains(string(b), "config file not found") {
+	if rerr != nil || !strings.Contains(string(b), "e5extend run failed") || !strings.Contains(string(b), "config file not found") {
 		t.Errorf("log file: %v\n%s", rerr, b)
 	}
 	if strings.Contains(errOut, "run failed") {

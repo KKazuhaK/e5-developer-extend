@@ -46,7 +46,7 @@ func (a *app) newDoctorCmd() *cobra.Command {
 // asciiConsole reports whether the check marks should be plain letters: the
 // classic Windows console cannot show them.
 func asciiConsole() bool {
-	if os.Getenv("E5RENEW_ASCII") != "" {
+	if os.Getenv("E5EXTEND_ASCII") != "" {
 		return true
 	}
 	return runtime.GOOS == "windows" && os.Getenv("WT_SESSION") == ""

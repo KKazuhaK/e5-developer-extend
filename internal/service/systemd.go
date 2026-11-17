@@ -25,7 +25,7 @@ type SystemdParams struct {
 	ConfigDir string
 	DataDir   string
 	KeyFile   string // path of the key file; empty for none
-	// KeyFileEnv hands the key file over as E5RENEW_MASTER_KEY_FILE instead of
+	// KeyFileEnv hands the key file over as E5EXTEND_MASTER_KEY_FILE instead of
 	// LoadCredential=, for systemd versions that predate credentials in user units.
 	KeyFileEnv bool
 }
@@ -33,14 +33,14 @@ type SystemdParams struct {
 // MinCredentialVersion is the first systemd release whose NEWS names
 // credentials for user services (v258, encrypted ones); the plain
 // LoadCredential= case is confirmed on v259. Older versions get the
-// E5RENEW_MASTER_KEY_FILE fallback.
+// E5EXTEND_MASTER_KEY_FILE fallback.
 const MinCredentialVersion = 258
 
 // SystemdUnit renders the user unit.
 func SystemdUnit(p SystemdParams) string {
 	var sb strings.Builder
 	sb.WriteString("[Unit]\n")
-	sb.WriteString("Description=e5renew - keep a Microsoft 365 E5 developer tenant active\n")
+	sb.WriteString("Description=e5extend - keep a Microsoft 365 E5 developer tenant active\n")
 	// There is no network-online.target in the user manager; the engine
 	// retries by itself when the network is down.
 	sb.WriteString("# No network ordering: the user manager has no network-online.target and\n")
@@ -58,8 +58,8 @@ func SystemdUnit(p SystemdParams) string {
 	case p.KeyFile != "":
 		sb.WriteString("LoadCredential=" + vault.CredentialName + ":" + specifiers(p.KeyFile) + "\n")
 	}
-	sb.WriteString(unitEnv("E5RENEW_CONFIG_DIR", p.ConfigDir))
-	sb.WriteString(unitEnv("E5RENEW_DATA_DIR", p.DataDir))
+	sb.WriteString(unitEnv("E5EXTEND_CONFIG_DIR", p.ConfigDir))
+	sb.WriteString(unitEnv("E5EXTEND_DATA_DIR", p.DataDir))
 	sb.WriteString("\n[Install]\n")
 	sb.WriteString("WantedBy=default.target\n")
 	return sb.String()

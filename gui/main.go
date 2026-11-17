@@ -1,4 +1,4 @@
-// Command e5renew-gui is the desktop app of e5-renew. It starts in one of two
+// Command e5extend-gui is the desktop app of e5-renew. It starts in one of two
 // modes (docs/design/gui.md, section 1):
 //
 //	--tray    (default) tray icon and menu, runs the engine; never creates a web view
@@ -13,31 +13,31 @@ import (
 )
 
 // AppName is the product name shown in titles and the tray. The packages use
-// the same name (packaging/, scripts/release/); the command stays "e5renew".
+// the same name (packaging/, scripts/release/); the command stays "e5extend".
 const AppName = "E5 Renew"
 
 // Single-instance IDs of the two modes.
 const (
-	trayID   = "io.github.kkazuhak.e5renew.tray"
-	windowID = "io.github.kkazuhak.e5renew.window"
+	trayID   = "io.github.kkazuhak.e5extend.tray"
+	windowID = "io.github.kkazuhak.e5extend.window"
 )
 
 func main() {
 	var tray, window bool
 	var page string
 	var configDir, dataDir string
-	fs := flag.NewFlagSet("e5renew-gui", flag.ExitOnError)
+	fs := flag.NewFlagSet("e5extend-gui", flag.ExitOnError)
 	fs.BoolVar(&tray, "tray", false, "run the tray icon and the engine (default)")
 	fs.BoolVar(&window, "window", false, "open the main window")
 	fs.StringVar(&page, "page", "", "first page of the window (with --window): overview, accounts, logs, health, settings or about")
-	fs.StringVar(&configDir, "config-dir", "", "configuration folder (same as E5RENEW_CONFIG_DIR)")
-	fs.StringVar(&dataDir, "data-dir", "", "data folder (same as E5RENEW_DATA_DIR)")
+	fs.StringVar(&configDir, "config-dir", "", "configuration folder (same as E5EXTEND_CONFIG_DIR)")
+	fs.StringVar(&dataDir, "data-dir", "", "data folder (same as E5EXTEND_DATA_DIR)")
 	_ = fs.Parse(os.Args[1:])
 	if tray && window {
 		fmt.Fprintln(os.Stderr, "choose one of --tray and --window")
 		os.Exit(2)
 	}
-	for _, f := range []struct{ env, val string }{{"E5RENEW_CONFIG_DIR", configDir}, {"E5RENEW_DATA_DIR", dataDir}} {
+	for _, f := range []struct{ env, val string }{{"E5EXTEND_CONFIG_DIR", configDir}, {"E5EXTEND_DATA_DIR", dataDir}} {
 		if f.val == "" {
 			continue
 		}
@@ -56,7 +56,7 @@ func main() {
 		err = runTray()
 	}
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "e5renew-gui:", err)
+		fmt.Fprintln(os.Stderr, "e5extend-gui:", err)
 		os.Exit(1)
 	}
 }

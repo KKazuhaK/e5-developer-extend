@@ -134,7 +134,7 @@ func (o *Ops) RunNow(ctx context.Context, names []string, opts RunNowOptions) (R
 		}
 	}
 	if len(cfg.Accounts) == 0 {
-		return RunNowResult{}, errors.New("no accounts configured; add one with: e5renew account add")
+		return RunNowResult{}, errors.New("no accounts configured; add one with: e5extend account add")
 	}
 	targets := names
 	if len(targets) == 0 {

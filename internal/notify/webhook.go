@@ -110,7 +110,7 @@ func (w *Webhook) deliver(ctx context.Context, raw string, ev Event) error {
 		return &DeliveryError{msg: "invalid webhook address: " + redact(err.Error(), raw)}
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("User-Agent", "e5renew/"+version.Version)
+	req.Header.Set("User-Agent", "e5extend/"+version.Version)
 
 	hc := http.DefaultClient
 	if w.HTTP != nil {

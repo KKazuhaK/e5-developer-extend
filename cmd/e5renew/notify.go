@@ -50,7 +50,7 @@ func (a *app) newNotifySetCmd() *cobra.Command {
 			if cleared {
 				fmt.Fprintln(out, "removed notify.webhook_url from config.toml")
 			}
-			fmt.Fprintln(out, "next: e5renew notify test")
+			fmt.Fprintln(out, "next: e5extend notify test")
 			return nil
 		},
 	}

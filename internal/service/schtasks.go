@@ -14,7 +14,7 @@ type schtasks struct{ env Env }
 
 // taskFile is where the imported task definition is kept.
 func (m *schtasks) taskFile(dataDir string) string {
-	return join(Windows, dataDir, "service", "e5renew-task.xml")
+	return join(Windows, dataDir, "service", "e5extend-task.xml")
 }
 
 // TaskParams are the inputs of the scheduled task definition.
@@ -58,7 +58,7 @@ func TaskXML(p TaskParams) string {
 	return `<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>e5renew - keep a Microsoft 365 E5 developer tenant active</Description>
+    <Description>e5extend - keep a Microsoft 365 E5 developer tenant active</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>

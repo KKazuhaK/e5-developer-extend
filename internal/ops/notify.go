@@ -225,7 +225,7 @@ func (o *Ops) TestWebhook(ctx context.Context) error {
 	ev := notify.Event{Event: notify.Test, Message: "this is a test alert; alerts are working", Time: time.Now()}
 	if err := w.Send(ctx, ev); err != nil {
 		if errors.Is(err, notify.ErrNotConfigured) {
-			return errors.New("no webhook is set; run: e5renew notify set-webhook <url>")
+			return errors.New("no webhook is set; run: e5extend notify set-webhook <url>")
 		}
 		return WithHint(fmt.Errorf("the test alert was not delivered: %w", err), "")
 	}

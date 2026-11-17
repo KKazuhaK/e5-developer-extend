@@ -64,7 +64,7 @@ func TestNeedsAttentionAnnouncedOnceThenRecovered(t *testing.T) {
 	if evs := r.eval(); len(evs) != 0 {
 		t.Fatalf("healthy account: %v", kinds(evs))
 	}
-	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "login required; run: e5renew account login main"
+	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "login required; run: e5extend account login main"
 	evs := r.eval()
 	if kinds(evs) != "needs_attention" || !strings.Contains(evs[0].Message, "login required") || evs[0].Account != "main" {
 		t.Fatalf("first: %+v", evs)

@@ -14,7 +14,7 @@ func TestVersionCommand(t *testing.T) {
 	if err := cmd.Execute(); err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	if !strings.HasPrefix(out.String(), "e5renew dev") {
+	if !strings.HasPrefix(out.String(), "e5extend dev") {
 		t.Fatalf("unexpected output: %q", out.String())
 	}
 }

@@ -830,9 +830,9 @@ func RunOnce(ctx context.Context, o Options, names []string) error {
 			}
 			switch as := e.state.Accounts[a.Name]; {
 			case a.Paused:
-				skip[a.Name] = "account is paused; run: e5renew account resume " + a.Name
+				skip[a.Name] = "account is paused; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPaused:
-				skip[a.Name] = "account was paused automatically; run: e5renew account resume " + a.Name
+				skip[a.Name] = "account was paused automatically; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPeriodEnded:
 				skip[a.Name] = "the run period has ended"
 			}

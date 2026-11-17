@@ -21,7 +21,7 @@ const backupExt = ".e5backup"
 
 // defaultBackupName is the file name the save dialog starts with, for the day now.
 func defaultBackupName(now time.Time) string {
-	return "e5renew-backup-" + now.Format("20060102") + backupExt
+	return "e5extend-backup-" + now.Format("20060102") + backupExt
 }
 
 // TargetHasData reports whether this machine already has accounts or vault

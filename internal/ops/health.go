@@ -155,7 +155,7 @@ func (o *Ops) installOptions(cfgBackend string, keyFile, linger, strict bool) (s
 	}
 	opts := service.InstallOptions{
 		Exe: exe, ConfigDir: cfgDir, DataDir: dataDir, KeyFile: keyFile, EnableLinger: linger,
-		ExplicitDirs: os.Getenv("E5RENEW_CONFIG_DIR") != "" || os.Getenv("E5RENEW_DATA_DIR") != "",
+		ExplicitDirs: os.Getenv("E5EXTEND_CONFIG_DIR") != "" || os.Getenv("E5EXTEND_DATA_DIR") != "",
 	}
 	if keyFile {
 		if cfgBackend == vault.BackendKeyring {
@@ -218,9 +218,9 @@ func (o *Ops) CheckServiceInstall() error {
 // on whether a background service is installed.
 func (o *Ops) EngineStoppedHint() string {
 	if st, err := o.ServiceStatus(); err == nil && st.Installed {
-		return "the background service is installed but its engine is not running; check: e5renew service status (and e5renew doctor)"
+		return "the background service is installed but its engine is not running; check: e5extend service status (and e5extend doctor)"
 	}
-	return "start it with: e5renew service install (background) or e5renew run (foreground)"
+	return "start it with: e5extend service install (background) or e5extend run (foreground)"
 }
 
 // KeyHint explains why the service may not find the master key.
@@ -284,18 +284,18 @@ func (o *Ops) ServicePlan(platform string, keyFile, linger bool) (plan service.P
 		}
 	case platform == service.Linux:
 		env = service.Env{GOOS: platform, Home: "/home/you", User: "you"}
-		opts = service.InstallOptions{Exe: "/home/you/.local/bin/e5renew", ConfigDir: "/home/you/.config/e5renew",
-			DataDir: "/home/you/.local/share/e5renew", KeyFile: keyFile, EnableLinger: linger,
+		opts = service.InstallOptions{Exe: "/home/you/.local/bin/e5extend", ConfigDir: "/home/you/.config/e5extend",
+			DataDir: "/home/you/.local/share/e5extend", KeyFile: keyFile, EnableLinger: linger,
 			MasterKey: func() ([]byte, error) { return nil, nil }}
 	case platform == service.Darwin:
 		env = service.Env{GOOS: platform, Home: "/Users/you", UID: "501", User: "you"}
-		dir := "/Users/you/Library/Application Support/e5renew"
-		opts = service.InstallOptions{Exe: "/usr/local/bin/e5renew", ConfigDir: dir, DataDir: dir, KeyFile: keyFile}
+		dir := "/Users/you/Library/Application Support/e5extend"
+		opts = service.InstallOptions{Exe: "/usr/local/bin/e5extend", ConfigDir: dir, DataDir: dir, KeyFile: keyFile}
 	case platform == service.Windows:
-		env = service.Env{GOOS: platform, Home: `C:\Users\you`, User: `DESKTOP-PC\you`, DataDir: `C:\Users\you\AppData\Local\e5renew`}
-		exe, _ := service.PickWindowsExe(`C:\Users\you\bin\e5renew.exe`, func(string) bool { return true })
-		opts = service.InstallOptions{Exe: exe, ConfigDir: `C:\Users\you\AppData\Roaming\e5renew`,
-			DataDir: `C:\Users\you\AppData\Local\e5renew`, KeyFile: keyFile}
+		env = service.Env{GOOS: platform, Home: `C:\Users\you`, User: `DESKTOP-PC\you`, DataDir: `C:\Users\you\AppData\Local\e5extend`}
+		exe, _ := service.PickWindowsExe(`C:\Users\you\bin\e5extend.exe`, func(string) bool { return true })
+		opts = service.InstallOptions{Exe: exe, ConfigDir: `C:\Users\you\AppData\Roaming\e5extend`,
+			DataDir: `C:\Users\you\AppData\Local\e5extend`, KeyFile: keyFile}
 	default:
 		return service.Plan{}, nil, fmt.Errorf("--platform must be linux, darwin or windows, got %q", platform)
 	}

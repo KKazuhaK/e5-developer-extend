@@ -17,7 +17,7 @@ func (m *launchd) plistPath() string {
 }
 
 func (m *launchd) logPath() string {
-	return join(Darwin, m.env.Home, "Library", "Logs", "e5renew", "engine.log")
+	return join(Darwin, m.env.Home, "Library", "Logs", "e5extend", "engine.log")
 }
 
 func (m *launchd) domain() string { return "gui/" + m.env.UID }
@@ -97,10 +97,10 @@ func (m *launchd) Plan(o InstallOptions) (Plan, error) {
 	}
 	params := LaunchdParams{Exe: o.Exe, LogPath: m.logPath(), LogFile: join(Darwin, o.DataDir, "engine.log")}
 	if o.ExplicitDirs {
-		params.Env = map[string]string{"E5RENEW_CONFIG_DIR": o.ConfigDir, "E5RENEW_DATA_DIR": o.DataDir}
+		params.Env = map[string]string{"E5EXTEND_CONFIG_DIR": o.ConfigDir, "E5EXTEND_DATA_DIR": o.DataDir}
 	}
 	return Plan{
-		Dirs:  []string{join(Darwin, m.env.Home, "Library", "Logs", "e5renew")},
+		Dirs:  []string{join(Darwin, m.env.Home, "Library", "Logs", "e5extend")},
 		Files: []File{{Path: m.plistPath(), Mode: 0o644, Data: []byte(LaunchdPlist(params))}},
 		Commands: []Command{
 			{Args: []string{"launchctl", "bootout", m.target()}, Optional: true, IfInstalled: true, Settle: settleWait, Why: "replace the loaded job"},

@@ -92,7 +92,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		// so the next occurrence is announced again.
 		if as.Status == store.StatusNeedsAttention {
 			if _, ok := get(NeedsAttention); !ok {
-				raise(NeedsAttention, as.Reason, "needs attention: "+orDefault(as.Reason, "see: e5renew status"))
+				raise(NeedsAttention, as.Reason, "needs attention: "+orDefault(as.Reason, "see: e5extend status"))
 			}
 		} else {
 			del(NeedsAttention)
@@ -230,13 +230,13 @@ func secretLevel(days int) int {
 func secretMessage(days int, date string) string {
 	switch {
 	case days < 0:
-		return fmt.Sprintf("client secret expired on %s; create a new one and run: e5renew account set-secret", date)
+		return fmt.Sprintf("client secret expired on %s; create a new one and run: e5extend account set-secret", date)
 	case days == 0:
-		return fmt.Sprintf("client secret expires today (%s); create a new one and run: e5renew account set-secret", date)
+		return fmt.Sprintf("client secret expires today (%s); create a new one and run: e5extend account set-secret", date)
 	case days == 1:
-		return fmt.Sprintf("client secret expires tomorrow (%s); create a new one and run: e5renew account set-secret", date)
+		return fmt.Sprintf("client secret expires tomorrow (%s); create a new one and run: e5extend account set-secret", date)
 	}
-	return fmt.Sprintf("client secret expires in %d days (%s); create a new one and run: e5renew account set-secret", days, date)
+	return fmt.Sprintf("client secret expires in %d days (%s); create a new one and run: e5extend account set-secret", days, date)
 }
 
 // daysLeft counts calendar days from now's local date to the YYYY-MM-DD date.

@@ -27,7 +27,7 @@ var autostartArgs = []string{"--tray"}
 // which is the bundle ID Wails would use by default on macOS: both would write
 // ~/Library/LaunchAgents/<label>.plist, and the login item would replace the
 // background service. The Windows installer removes the Run value by this name.
-const autostartID = "io.github.kkazuhak.e5renew.tray"
+const autostartID = "io.github.kkazuhak.e5extend.tray"
 
 // wailsAutostart adapts the Wails autostart manager to services.Autostart.
 type wailsAutostart struct{ app *application.App }
@@ -120,8 +120,8 @@ func requestHandover(ctx context.Context) error {
 	return nil
 }
 
-// cliPath finds the e5renew command-line binary next to this program. The
-// background service has to run the CLI (`e5renew run`), not the app.
+// cliPath finds the e5extend command-line binary next to this program. The
+// background service has to run the CLI (`e5extend run`), not the app.
 func cliPath() (string, error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -130,13 +130,13 @@ func cliPath() (string, error) {
 	if r, err := filepath.EvalSymlinks(self); err == nil {
 		self = r
 	}
-	name := "e5renew"
+	name := "e5extend"
 	if strings.HasSuffix(strings.ToLower(self), ".exe") {
 		name += ".exe"
 	}
 	p := filepath.Join(filepath.Dir(self), name)
 	if _, err := os.Stat(p); err != nil {
-		return "", errors.New("the background service needs the e5renew command-line program next to this app; it was not found in " + filepath.Dir(self))
+		return "", errors.New("the background service needs the e5extend command-line program next to this app; it was not found in " + filepath.Dir(self))
 	}
 	return p, nil
 }
@@ -171,7 +171,7 @@ func openMainWindow(log *slog.Logger, page string) {
 // passThroughArgs are the folder flags this process was started with.
 func passThroughArgs() []string {
 	var out []string
-	for _, a := range []struct{ flag, env string }{{"--config-dir", "E5RENEW_CONFIG_DIR"}, {"--data-dir", "E5RENEW_DATA_DIR"}} {
+	for _, a := range []struct{ flag, env string }{{"--config-dir", "E5EXTEND_CONFIG_DIR"}, {"--data-dir", "E5EXTEND_DATA_DIR"}} {
 		if v := os.Getenv(a.env); v != "" {
 			out = append(out, a.flag, v)
 		}
@@ -199,7 +199,7 @@ func saveDialogOptions(title, defaultName string) *application.SaveFileDialogOpt
 		Message:              title,
 		Filename:             defaultName,
 		CanCreateDirectories: true,
-		Filters:              []application.FileFilter{{DisplayName: "e5renew backup", Pattern: backupFilter}},
+		Filters:              []application.FileFilter{{DisplayName: "e5extend backup", Pattern: backupFilter}},
 	}
 }
 
@@ -218,7 +218,7 @@ func pickSaveFile(app *application.App, win *application.WebviewWindow, title, d
 // pickOpenFile asks which backup to open. It returns "" when the user cancels.
 func pickOpenFile(app *application.App, win *application.WebviewWindow, title string) (string, error) {
 	d := app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).CanChooseDirectories(false).
-		AddFilter("e5renew backup", backupFilter).AddFilter("All files", "*")
+		AddFilter("e5extend backup", backupFilter).AddFilter("All files", "*")
 	if win != nil {
 		d.AttachToWindow(win)
 	}

@@ -66,8 +66,8 @@ func (m *machine) vault(key []byte) *vault.Vault {
 // use points the process at this machine's directories.
 func (m *machine) use() {
 	m.t.Helper()
-	m.t.Setenv("E5RENEW_CONFIG_DIR", m.cfgDir)
-	m.t.Setenv("E5RENEW_DATA_DIR", m.dataDir)
+	m.t.Setenv("E5EXTEND_CONFIG_DIR", m.cfgDir)
+	m.t.Setenv("E5EXTEND_DATA_DIR", m.dataDir)
 	m.t.Setenv(vault.EnvMasterKey, "")
 	m.t.Setenv("CREDENTIALS_DIRECTORY", "")
 }
@@ -678,7 +678,7 @@ func TestRollbackFailedAdviceDependsOnTheMode(t *testing.T) {
 		if !errors.As(err, &be) || be.Code != CodeRollbackFailed || strings.Join(be.Names, ",") != "secret/a" {
 			t.Fatalf("%s: %#v", mode, err)
 		}
-		if !strings.Contains(err.Error(), "e5renew doctor") || !strings.Contains(err.Error(), "--replace") || strings.Contains(err.Error(), "merge again") {
+		if !strings.Contains(err.Error(), "e5extend doctor") || !strings.Contains(err.Error(), "--replace") || strings.Contains(err.Error(), "merge again") {
 			t.Errorf("%s advice: %v", mode, err)
 		}
 	}
@@ -686,7 +686,7 @@ func TestRollbackFailedAdviceDependsOnTheMode(t *testing.T) {
 	if !errors.As(err, &be) || be.Code != CodeRollbackFailedMerge || strings.Join(be.Names, ",") != "a,b" {
 		t.Fatalf("merge: %#v", err)
 	}
-	for _, want := range []string{"a, b", "e5renew account remove", "merge again"} {
+	for _, want := range []string{"a, b", "e5extend account remove", "merge again"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("merge advice lacks %q: %v", want, err)
 		}

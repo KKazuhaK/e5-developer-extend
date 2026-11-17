@@ -23,7 +23,7 @@ func firstNonEmpty(vals ...string) string { return ops.FirstNonEmpty(vals...) }
 func (a *app) newServiceCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "service",
-		Short: "Run e5renew in the background at login (systemd, launchd or Task Scheduler)",
+		Short: "Run e5extend in the background at login (systemd, launchd or Task Scheduler)",
 	}
 	cmd.AddCommand(a.newServiceInstallCmd(), a.newServiceUninstallCmd(), a.newServiceStatusCmd())
 	return cmd
@@ -35,8 +35,8 @@ func (a *app) newServiceInstallCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "install",
 		Short: "Install and start the background job for the current user",
-		Long: "Install e5renew as a background job that starts at login and restarts after failures:\n" +
-			"  Linux    a systemd user unit (~/.config/systemd/user/e5renew.service)\n" +
+		Long: "Install e5extend as a background job that starts at login and restarts after failures:\n" +
+			"  Linux    a systemd user unit (~/.config/systemd/user/e5extend.service)\n" +
 			"  macOS    a LaunchAgent (~/Library/LaunchAgents)\n" +
 			"  Windows  a scheduled task that runs at logon\n\n" +
 			"With --print nothing is written or run; the files and commands are shown instead.",
@@ -69,7 +69,7 @@ func (a *app) installService(cmd *cobra.Command, keyFile, linger bool) error {
 	}
 	fmt.Fprintln(out, "background job installed and started")
 	printResult(out, res)
-	fmt.Fprintln(out, "next: e5renew service status   (and: e5renew doctor)")
+	fmt.Fprintln(out, "next: e5extend service status   (and: e5extend doctor)")
 	return nil
 }
 
@@ -166,7 +166,7 @@ func (a *app) newServiceStatusCmd() *cobra.Command {
 				fmt.Fprintln(out, "engine:    not running")
 			}
 			if !st.Installed {
-				fmt.Fprintln(out, "install it with: e5renew service install")
+				fmt.Fprintln(out, "install it with: e5extend service install")
 			} else if st.Platform == service.Linux && st.Linger == service.No {
 				fmt.Fprintln(out, "WARNING: lingering is off, so the service stops when you log out; run: loginctl enable-linger "+firstNonEmpty(os.Getenv("USER"), "$USER"))
 			}
