@@ -722,6 +722,19 @@ func checkNotify(d Deps, cfg *config.Config) Check {
 	}
 	// The webhook of older versions, when it has not been saved as a channel yet.
 	if _, ok := cfg.Notify.FindChannel(notify.LegacyChannelID); !ok {
+		// Older versions accepted http addresses; they still work, but the token travels unencrypted.
+		insecure := func(raw string) bool {
+			u, err := url.Parse(strings.TrimSpace(raw))
+			return err == nil && u.Scheme == "http" && !notify.IsLoopback(u.Hostname())
+		}
+		if has(notify.VaultKey) && !unreadable(notify.VaultKey) {
+			if b, err := v.Get(notify.VaultKey); err == nil && insecure(string(b)) {
+				add("the stored webhook address is http, so it travels unencrypted", "set an https address: e5extend notify set-webhook <url>")
+			}
+		}
+		if insecure(cfg.Notify.WebhookURL) {
+			add("the webhook address is http, so it travels unencrypted", "set an https address: e5extend notify set-webhook <url>")
+		}
 		switch {
 		case unreadable(notify.VaultKey):
 			channels++

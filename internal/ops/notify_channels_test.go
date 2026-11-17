@@ -420,3 +420,24 @@ func TestBackupKnowsChannelSecretKeys(t *testing.T) {
 }
 
 func tNow() time.Time { return time.Now() }
+
+func TestLegacyWebhookKeepsAcceptingHTTPButNewChannelsDoNot(t *testing.T) {
+	e := newTestEnv(t)
+	cfg := config.Default()
+	cfg.Notify.WebhookURL = "http://nas.lan/hook/PLAINTOKEN"
+	if err := cfg.Save(filepath.Join(e.cfgDir, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	c, p, _ := e.LoadConfigOrDefault()
+	targets, err := e.channelSource(c, p).Targets()
+	if err != nil || len(targets) != 1 || !targets[0].AllowHTTP || targets[0].Secrets["url"] != "http://nas.lan/hook/PLAINTOKEN" {
+		t.Fatalf("legacy target: %+v %v", targets, err)
+	}
+	// A channel saved in the current format must be https.
+	if bad, _ := e.SaveChannel(context.Background(), slackInput("n", "http://nas.lan/hook"), true); len(bad) == 0 {
+		t.Error("a new channel accepted an http address")
+	}
+	if _, err := e.SetWebhook(context.Background(), "http://nas.lan/hook"); err == nil {
+		t.Error("set-webhook accepted an http address")
+	}
+}

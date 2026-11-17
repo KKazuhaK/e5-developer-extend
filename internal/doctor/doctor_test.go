@@ -420,6 +420,21 @@ func TestNotifyChannelChecks(t *testing.T) {
 	expect(t, r.run(true), "notify", OK, "2 notification channels")
 }
 
+func TestNotifyWarnsAboutAnHTTPLegacyWebhook(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.WebhookURL = "http://nas.lan/hook/SECRETTOKEN"
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "http")
+	if strings.Contains(got["notify"].Detail+got["notify"].Fix, "SECRETTOKEN") {
+		t.Error("address shown")
+	}
+	r.cfg.Notify.WebhookURL = "http://127.0.0.1:9000/hook"
+	got = r.run(true)
+	if strings.Contains(got["notify"].Detail, "unencrypted") {
+		t.Errorf("a local address was flagged: %s", got["notify"].Detail)
+	}
+}
+
 func TestOutputAndExitCodes(t *testing.T) {
 	checks := []Check{{ID: "a", Title: "A", Level: OK, Detail: "fine"}, {ID: "b", Title: "B", Level: Warn, Detail: "hmm", Fix: "do x"}}
 	if ExitCode(checks) != 1 {

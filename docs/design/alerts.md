@@ -100,3 +100,16 @@ e5extend notify preview <event> [--type … --language …]   # 用示例数据�
 - 每种渠道：用 `httptest` 假服务器校验请求方法、路径、头、请求体（含飞书/钉钉签名）；邮件用假 SMTP 服务器校验 MIME。
 - 模板：每个内置模板都能用示例数据渲染；自定义模板错误在保存时报出；渲染结果不含密钥。
 - 旧配置 `notify/webhook` 的兼容。
+
+## 8. 实现时的取舍
+
+- **“已知不可用”的判定**放在 `internal/callstat`，`doctor` 的 `account.<name>.apis` 和 `failure_spike` 共用 `IsMissing`、`CategoryIndex`、`EnabledCategories`。`failure_spike` 把这类调用从失败数和总数里都去掉；日志里不足 `spike_rounds` 轮时既不触发也不解除。
+- **日志读取**：引擎在评估告警前读最近 48 小时的调用记录（`Input.Calls`）；读不出时传 nil，`failure_spike` 本次不判断。
+- **冷却**只管会反复出现的事件：`needs_attention`、`auto_paused`、`failure_spike`、`all_failing`（严重级别减半）。`stale` 有自己的 24 小时规则，`secret_expiring` 按档位只发一次，`recovered`、`period_ended` 是一次性的。上次发送时间记在 `LastSent`（账号状态里，全局事件记在 `state.json` 顶层），条件消失后也保留；被冷却吞掉的问题不再发 `recovered`。
+- **免打扰**：被压下的告警在 `Notice` 里带 `Held`，结束后合并成一个 `digest` 事件（`Items` 是原事件）；只压下一条时按原样发。每个渠道按自己的级别和事件过滤裁剪汇总。
+- **多渠道的送达语义**：各渠道并发发送；至少一个渠道送达（或没有渠道需要这条）就算已发送，全部失败才在 `RetryAfter` 后重发，避免已送达的渠道收到重复消息。每个渠道最近一次结果记在数据目录的 `notify-status.json`，供渠道列表显示（只有状态和不含密钥的错误文字）。
+- **https**：渠道地址要求 https；指向本机（`localhost`、回环地址）的 http 也接受。旧格式的 Webhook（`notify/webhook` 或 `config.toml` 里的明文）保持原来对 http 的宽容，`doctor` 警告。
+- **租户 ID**：事件带 `Tenant`，只有自定义模板能用 `.Tenant`；内置模板从不显示。
+- **`.Hint`** 由 `notify.Hint(事件, 账号, 语言)` 给出；`ops.Hint` 的输入是登录错误，不适用于事件，且 `ops` 依赖 `notify`，所以没有复用。
+- **邮件**只用标准库：`net/smtp`（STARTTLS、隐式 TLS、AUTH PLAIN/LOGIN），`mime/quotedprintable`，`multipart/alternative`；SMTP 不走 HTTP 代理。
+

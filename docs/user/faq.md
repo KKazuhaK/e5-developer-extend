@@ -28,7 +28,7 @@ e5extend doctor          # 全面检查
 ```
 
 数据目录里还有 `heartbeat` 文件，引擎每 30 秒更新一次，可以接到 Uptime Kuma 之类的外部监控。
-再配上 Webhook 告警（`e5extend notify set-webhook`），出问题时会主动通知你。
+再配上通知渠道（`e5extend notify channel add`，见 [notifications.md](notifications.md)），出问题时会主动通知你。
 
 ## 为什么有的 API 一直是 403？
 
@@ -48,6 +48,6 @@ e5extend doctor          # 全面检查
 
 ## 我的数据安全吗？
 
-- 配置文件里不放 Client Secret、密码和令牌；它们和令牌缓存、Webhook 地址一起放在 AES-256-GCM 加密的 vault 里。唯一的例外是旧版本的 `notify.webhook_url`：它可能还以明文留在 `config.toml` 里，`doctor` 会警告，`notify set-webhook` 会把它迁进 vault 并清掉。
+- 配置文件里不放 Client Secret、密码和令牌；它们和令牌缓存、通知渠道的令牌与地址一起放在 AES-256-GCM 加密的 vault 里。唯一的例外是旧版本的 `notify.webhook_url`：它可能还以明文留在 `config.toml` 里，`doctor` 会警告，`notify set-webhook` 会把它迁进 vault 并清掉。
 - 只调用只读接口，不保存响应内容；日志里只有接口名、状态码和耗时。
 - 主密钥丢失后 vault 无法读取，需要 `e5extend vault reset` 并重新输入密钥、重新登录。

@@ -108,7 +108,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 | `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Recommend(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
 | `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Preview(id, choice)`（列出所选选项的具体事项，不写任何东西）、`Apply(id, choice)`、`Finish(id)`（向导已保存账号，结束会话）、`Cancel(id): { secretRemoved, error }`；`id` 由前端生成，好在调用前先订阅事件 |
 | `LogService` | `Read(account, sinceHours, limit)` |
-| `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
+| `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`ListChannels()`、`SaveChannel(c, create): ValidationError[]`、`RemoveChannel(id)`、`TestChannel(id)`、`PreviewMessage(...)`、`EmailPresets()`；单个 Webhook 的 `SetWebhook`、`ClearWebhook`、`TestWebhook` 仍在，等价于名为 `webhook` 的渠道（见 alerts.md） |
 | `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`StartService()`、`UninstallService()` |
 | `CatalogService` | `List(account)`、`Categories()` |
 

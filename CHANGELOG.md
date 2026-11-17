@@ -11,8 +11,13 @@
 
 - API 推荐：登录之后探测账号实际能用哪些 API 分类（只读请求：邮箱设置、OneDrive、Teams、SharePoint 根站点），给每个分类标上推荐 / 不可用（带原因）/ 可能可用。命令行：`e5extend account test <名称> --recommend`，加 `--apply` 把推荐的分类写进账号；桌面版添加账号向导的“API 分类”移到登录之后，默认勾选推荐的。`e5extend doctor` 新增 `account.<名称>.apis`：某个分类连续 3 轮都是 404 时提醒。详见 [docs/design/api-recommend.md](docs/design/api-recommend.md)。
 
+- 异常检测和多渠道通知：新增事件 `failure_spike`（最近几轮调用失败率过高；不把 404 和“账号没有这项服务”算作异常，判断和 `doctor` 的 `account.<名称>.apis` 一致）和 `all_failing`（所有未暂停的账号同时异常，至少 2 个账号）；`failure_spike` 解除时发 `recovered` 并写明原事件。新增通知渠道：Telegram、邮件（SMTP，带 Gmail / Outlook / QQ / 163 预设）、企业微信、飞书和钉钉（可选签名）、Discord、Slack、Bark、ntfy、Server 酱和通用 Webhook；每个渠道有最低级别和事件过滤，内置中英文模板，也可以用自定义模板（保存前检查）。所有令牌、密码、Webhook 地址和签名密钥存在 vault 的 `notify/<渠道名>/<字段>` 里。新增降噪：冷却时间（默认 6 小时，严重告警减半）、免打扰时段（只发严重告警，其余结束后合并成一条）。命令行：`notify channel list|add|edit|remove`、`notify test [名称]`、`notify preview <事件>`，`notify set-webhook` 保留为别名；桌面版“设置 → 高级设置 → 告警”管理渠道（测试、预览、降噪），没有渠道时基础设置页提示。旧的单个 Webhook 继续可用，显示为名为 `webhook` 的渠道，保存一次即迁移到新格式。详见 [docs/user/notifications.md](docs/user/notifications.md) 和 [docs/design/alerts.md](docs/design/alerts.md)。
+
 ### 变更
 
+- 通用 Webhook 的请求体新增 `level`（以及恢复通知的 `origin`、免打扰汇总的 `items`）字段；原有字段不变。
+- Webhook 地址现在要求 `https://`（指向本机的 `http://` 除外）；已经设置的旧地址仍按原样使用。
+- `e5extend notify test` 在没有任何渠道时的提示文字改了，并且在有多个渠道时逐个报告结果。
 - 桌面版添加账号向导的步骤顺序改为：登录方式、账号信息、登录、API 分类、测试、完成；新账号不再默认勾选全部分类。
 
 - 桌面版窗口左上角改为应用图标。
