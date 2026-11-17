@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 func TestServicePrintShowsAllPlatformsAndTouchesNothing(t *testing.T) {

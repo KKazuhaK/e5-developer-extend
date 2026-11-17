@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/doctor"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func TestDoctorWithoutConfigFailsWithExitCode2(t *testing.T) {

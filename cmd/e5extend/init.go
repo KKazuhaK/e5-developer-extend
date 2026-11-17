@@ -13,14 +13,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
-const docsURL = "https://github.com/KKazuhaK/e5-renew/blob/main/docs/user/"
+const docsURL = "https://github.com/KKazuhaK/e5-developer-extend/blob/main/docs/user/"
 
 func (a *app) isInteractive(in io.Reader) bool {
 	if a.interactive != nil {

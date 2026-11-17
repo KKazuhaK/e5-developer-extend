@@ -13,7 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 func main() {

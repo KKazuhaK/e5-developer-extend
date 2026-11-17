@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func (a *app) newVaultCmd() *cobra.Command {

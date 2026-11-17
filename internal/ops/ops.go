@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 // SvcIdentity overrides who the background job is installed for; tests only.

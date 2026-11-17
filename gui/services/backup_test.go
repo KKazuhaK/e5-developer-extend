@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func init() { backup.Iterations = 100_000 }

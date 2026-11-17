@@ -16,16 +16,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // Level is the severity of a check result.

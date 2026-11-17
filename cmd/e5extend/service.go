@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 func (a *app) serviceManager() (service.Manager, error) { return a.ops().ServiceManager() }

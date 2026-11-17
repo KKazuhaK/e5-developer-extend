@@ -12,11 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 // webhookSource looks the webhook address up on every call: first the vault,

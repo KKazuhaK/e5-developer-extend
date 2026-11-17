@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
 
 // GraphScope requests every permission already consented for the app registration.

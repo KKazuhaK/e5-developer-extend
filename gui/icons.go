@@ -8,7 +8,7 @@ import (
 	"math"
 	"sync"
 
-	"github.com/KKazuhaK/e5-renew/gui/trayhost"
+	"github.com/KKazuhaK/e5-developer-extend/gui/trayhost"
 )
 
 // The tray icons are drawn in code: a round badge in a state colour. On

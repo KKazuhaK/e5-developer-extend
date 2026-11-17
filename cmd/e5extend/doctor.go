@@ -6,7 +6,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/doctor"
+	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
 )
 
 func (a *app) newDoctorCmd() *cobra.Command {

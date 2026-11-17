@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 var t0 = time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)

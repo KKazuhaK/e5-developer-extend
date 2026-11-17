@@ -15,10 +15,10 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 const testGUID = "11111111-2222-3333-4444-555555555555"

@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // logNameRe matches the call log files a backup may carry.

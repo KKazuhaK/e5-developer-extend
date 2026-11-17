@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 )
 
 func (a *app) newCatalogCmd() *cobra.Command {

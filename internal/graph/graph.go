@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // DefaultBase is the Graph v1.0 endpoint.

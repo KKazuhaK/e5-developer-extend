@@ -12,10 +12,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 func addDelegated(e *env, name string) {

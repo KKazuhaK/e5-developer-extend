@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 // BackupService exports everything to one file and restores it (docs/user/backup.md).

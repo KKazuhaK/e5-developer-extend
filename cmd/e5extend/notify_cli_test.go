@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 type hookRecv struct {

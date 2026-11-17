@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"sync"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // maxLogFile is the size at which the run log is moved to <name>.1.

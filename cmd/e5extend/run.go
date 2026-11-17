@@ -10,10 +10,10 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/sdnotify"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/sdnotify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 func (a *app) newRunCmd() *cobra.Command {

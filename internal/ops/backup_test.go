@@ -16,10 +16,10 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func init() {

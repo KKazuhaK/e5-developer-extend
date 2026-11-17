@@ -9,8 +9,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
-	"github.com/KKazuhaK/e5-renew/gui/trayhost"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/gui/trayhost"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 // applicationStarted is the event that says the event loop is running.

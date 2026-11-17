@@ -13,12 +13,12 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/KKazuhaK/e5-renew/gui/services"
-	"github.com/KKazuhaK/e5-renew/gui/trayhost"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/gui/services"
+	"github.com/KKazuhaK/e5-developer-extend/gui/trayhost"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 // refreshEvery is how often the tray reads the state.

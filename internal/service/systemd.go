@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 type systemd struct{ env Env }

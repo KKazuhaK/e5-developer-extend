@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // PendingImportFile is the name of the file an import leaves in the data

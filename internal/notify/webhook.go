@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // ErrNotConfigured is returned by a URL source when no webhook is set.
