@@ -81,6 +81,11 @@ func runTray() error {
 		Log: log,
 	})
 
+	// This process holds the single-instance lock now (application.New exits
+	// when another tray has it): record it, so an upgrade can tell a tray runs
+	// and wait for it to exit.
+	unmarkTray := markTrayRunning()
+	defer unmarkTray()
 	// Any mark of an engine host found now is left from an earlier process.
 	ops.ClearEngineHost(dataDir)
 	for _, f := range []func() (string, error){handoverFile, resumeFile, quitFile} {

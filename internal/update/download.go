@@ -14,10 +14,21 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // maxDownload bounds one downloaded file; the largest release file is far smaller.
 const maxDownload = 400 << 20
+
+// Limits of one downloaded file: it fails when no byte arrives for this long,
+// and when it takes longer than the overall cap.
+const (
+	defaultStall   = 60 * time.Second
+	defaultMaxTime = 30 * time.Minute
+)
+
+// errStalled is the cause of a download that stopped receiving bytes.
+var errStalled = errors.New("no data received for too long")
 
 // Errors a download or its verification ends with.
 var (
@@ -38,6 +49,9 @@ type Downloader struct {
 	// Allow decides which addresses may be downloaded from; the release
 	// download address of this repository when nil. Tests allow their own server.
 	Allow func(url string) bool
+	// Stall is how long a download may receive nothing before it fails (60 s
+	// when zero); MaxTime caps one file altogether (30 minutes when zero).
+	Stall, MaxTime time.Duration
 }
 
 func (d *Downloader) allowed(url string) bool {
@@ -72,13 +86,35 @@ func (d *Downloader) Fetch(ctx context.Context, a Asset, dir string, progress fu
 		}
 		return nil
 	}
+	stall, maxTime := d.Stall, d.MaxTime
+	if stall <= 0 {
+		stall = defaultStall
+	}
+	if maxTime <= 0 {
+		maxTime = defaultMaxTime
+	}
+	ctx, stop := context.WithTimeout(ctx, maxTime)
+	defer stop()
+	ctx, cancel := context.WithCancelCause(ctx)
+	defer cancel(nil)
+	timer := time.AfterFunc(stall, func() { cancel(errStalled) })
+	defer timer.Stop()
+	fail := func(err error) error {
+		switch {
+		case errors.Is(context.Cause(ctx), errStalled):
+			err = fmt.Errorf("%w (%s)", errStalled, stall)
+		case errors.Is(ctx.Err(), context.DeadlineExceeded):
+			err = fmt.Errorf("it took longer than %s", maxTime)
+		}
+		return fmt.Errorf("download %s: %w", a.Name, urlErrorText(err))
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, a.URL, nil)
 	if err != nil {
 		return "", err
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("download %s: %w", a.Name, urlErrorText(err))
+		return "", fail(err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
@@ -96,7 +132,8 @@ func (d *Downloader) Fetch(ctx context.Context, a Asset, dir string, progress fu
 	if err != nil {
 		return "", err
 	}
-	n, err := io.Copy(f, &progressReader{r: io.LimitReader(resp.Body, maxDownload+1), total: total, cb: progress})
+	timer.Reset(stall)
+	n, err := io.Copy(f, &progressReader{r: io.LimitReader(resp.Body, maxDownload+1), total: total, cb: progress, alive: func() { timer.Reset(stall) }})
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -108,7 +145,7 @@ func (d *Downloader) Fetch(ctx context.Context, a Asset, dir string, progress fu
 	}
 	if err != nil {
 		_ = os.Remove(path)
-		return "", fmt.Errorf("download %s: %w", a.Name, err)
+		return "", fail(err)
 	}
 	return path, nil
 }
@@ -119,11 +156,15 @@ type progressReader struct {
 	total int64
 	cb    func(done, total int64)
 	last  int64
+	alive func() // called whenever bytes arrive
 }
 
 func (p *progressReader) Read(b []byte) (int, error) {
 	n, err := p.r.Read(b)
 	p.done += int64(n)
+	if n > 0 && p.alive != nil {
+		p.alive()
+	}
 	// Report at most about 200 times per file.
 	if p.cb != nil && (err != nil || p.done-p.last >= 1<<18 || p.done == p.total) {
 		p.last = p.done

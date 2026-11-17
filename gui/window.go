@@ -61,12 +61,13 @@ func runWindow(page string) error {
 		CancelHandover:  cancelHandover,
 		Exit:            func() { app.Quit() },
 		RestartApp: func() error {
-			// A tray is in use when it hosts the engine or starts at login.
+			// A tray is in use when it runs, hosts the engine or starts at login.
+			tray := runningTrayPID()
 			on, _ := wailsAutostart{app}.Enabled()
 			if dir, err := paths.DataDir(); err == nil && ops.EngineHost(dir) == ops.HostGUI {
 				on = true
 			}
-			return restartApp(slog.Default(), on)
+			return restartApp(slog.Default(), on || tray > 0, tray)
 		},
 	})
 	defer backend.Close()

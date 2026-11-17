@@ -245,7 +245,7 @@ func (c *Checker) get(ctx context.Context, channel, etag string) (rel *Release, 
 	if err != nil {
 		return nil, "", false, err
 	}
-	if r.Draft || r.Prerelease {
+	if v, verr := r.Version(); r.Draft || r.Prerelease || (verr == nil && v.IsPrerelease()) {
 		return nil, resp.Header.Get("ETag"), false, nil // never offered on the stable channel
 	}
 	return &r, resp.Header.Get("ETag"), false, nil

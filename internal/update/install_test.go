@@ -566,6 +566,45 @@ func TestDownloaderLimits(t *testing.T) {
 	}
 }
 
+func TestDownloaderStallAndCap(t *testing.T) {
+	// A server that sends a few bytes and then nothing.
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "100")
+		_, _ = w.Write([]byte("abc"))
+		w.(http.Flusher).Flush()
+		select {
+		case <-release:
+		case <-r.Context().Done():
+		}
+	}))
+	defer srv.Close()
+	defer close(release)
+	dir := t.TempDir()
+	d := &Downloader{Allow: func(string) bool { return true }, Stall: 200 * time.Millisecond}
+	start := time.Now()
+	_, err := d.Fetch(context.Background(), Asset{Name: "a.bin", URL: srv.URL}, dir, nil)
+	if err == nil || !strings.Contains(err.Error(), "no data received") || time.Since(start) > 5*time.Second {
+		t.Fatalf("stalled download: %v after %v", err, time.Since(start))
+	}
+	if _, serr := os.Stat(filepath.Join(dir, "a.bin")); serr == nil {
+		t.Error("the partial file was left")
+	}
+	// A slow but steady download is stopped by the overall cap.
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for r.Context().Err() == nil {
+			_, _ = w.Write([]byte("x"))
+			w.(http.Flusher).Flush()
+			time.Sleep(20 * time.Millisecond)
+		}
+	}))
+	defer slow.Close()
+	d = &Downloader{Allow: func(string) bool { return true }, Stall: time.Second, MaxTime: 300 * time.Millisecond}
+	if _, err = d.Fetch(context.Background(), Asset{Name: "b.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "took longer") {
+		t.Fatalf("overall cap: %v", err)
+	}
+}
+
 func TestCleanOldWorkDirs(t *testing.T) {
 	root := t.TempDir()
 	oldDir := filepath.Join(root, workPrefix+"old")

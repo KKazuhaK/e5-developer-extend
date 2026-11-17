@@ -143,6 +143,17 @@ func TestCheckStableIgnoresPrereleaseAnswer(t *testing.T) {
 	}
 }
 
+func TestCheckStableIgnoresPrereleaseTag(t *testing.T) {
+	// GitHub's flag is not set, but the tag has a pre-release part.
+	c, _ := fakeGitHub(t, func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"tag_name":"v0.4.0-rc.1","prerelease":false}`))
+	})
+	cache, rel, err := c.Check(context.Background(), ChannelStable, Cache{}, time.Now())
+	if err != nil || rel != nil || cache.Latest != nil {
+		t.Fatalf("a pre-release tag was offered on the stable channel: %+v %v %v", cache.Latest, rel, err)
+	}
+}
+
 func TestCheckNoReleaseYet(t *testing.T) {
 	c, _ := fakeGitHub(t, func(w http.ResponseWriter, _ *http.Request) { http.NotFound(w, nil) })
 	cache, rel, err := c.Check(context.Background(), ChannelStable, Cache{}, time.Now())

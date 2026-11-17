@@ -316,9 +316,19 @@ func (o *Ops) restartService() (state, note string) {
 		}
 		return "failed", err.Error()
 	}
+	return restartManaged(m)
+}
+
+// restartManaged restarts the service of m unless it is stopped or its state is unknown.
+func restartManaged(m service.Manager) (state, note string) {
 	// A service that was stopped on purpose stays stopped: it runs the new
 	// program whenever it is started next.
-	if st, serr := m.Status(); serr == nil && st.Installed && st.Running == service.No {
+	st, serr := m.Status()
+	if serr != nil {
+		// Without the state a stopped service might be started by mistake.
+		return "failed", fmt.Sprintf("cannot read the state of the service (%v); restart it yourself if it is running", serr)
+	}
+	if st.Installed && st.Running == service.No {
 		return "not_running", ""
 	}
 	if _, err := m.Restart(); err != nil {

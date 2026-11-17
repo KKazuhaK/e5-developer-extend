@@ -286,6 +286,9 @@ func EngineHost(dataDir string) string {
 	return HostGUI
 }
 
+// PidAlive reports whether a process with this id exists.
+func PidAlive(pid int) bool { return pidAlive(pid) }
+
 func pidAlive(pid int) bool {
 	p, err := os.FindProcess(pid)
 	if err != nil {
