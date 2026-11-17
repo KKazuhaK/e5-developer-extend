@@ -54,6 +54,10 @@ func newFakeAAD(t *testing.T) *fakeAAD {
 		})
 	})
 	mux.HandleFunc("/"+fakeTenant+"/oauth2/v2.0/token", f.token)
+	// Password sign-in first asks which kind of account the user name is.
+	mux.HandleFunc("/common/UserRealm/", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"account_type": "Managed", "domain_name": "contoso.test", "cloud_instance_name": "login.microsoftonline.com", "cloud_audience_urn": "urn:federation:MicrosoftOnline"})
+	})
 	f.srv = httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.total++

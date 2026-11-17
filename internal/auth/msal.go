@@ -24,6 +24,8 @@ type delegated struct {
 
 	mu     sync.Mutex
 	client *public.Client
+
+	reauth sync.Mutex // one password sign-in at a time
 }
 
 func (d *delegated) msal() (public.Client, error) {
@@ -45,7 +47,56 @@ func (d *delegated) msal() (public.Client, error) {
 	return c, nil
 }
 
+// Token returns an access token silently. A password account whose refresh
+// token no longer works (expired, revoked, or cut off by a Conditional Access
+// sign-in frequency policy) signs in again with its stored password, so a
+// background job keeps running without a person; device code and browser
+// accounts need the person and report ErrLoginRequired instead.
 func (d *delegated) Token(ctx context.Context) (Token, error) {
+	tok, err := d.silentToken(ctx)
+	if err == nil || d.acct.Auth != config.AuthPassword || !errors.Is(err, ErrLoginRequired) || ctx.Err() != nil {
+		return tok, err
+	}
+	return d.passwordSignIn(ctx)
+}
+
+// passwordSignIn is the non-interactive re-authentication for password
+// accounts. The password is read from the vault for this call only and never
+// logged. It fails with ErrLoginRequired when the password does not work
+// (wrong, MFA required, blocked by policy), so the usual hints apply.
+func (d *delegated) passwordSignIn(ctx context.Context) (Token, error) {
+	d.reauth.Lock()
+	defer d.reauth.Unlock()
+	pw, err := d.store.Get(vault.SecretKey(d.acct.Name))
+	if errors.Is(err, vault.ErrNotFound) {
+		return Token{}, fmt.Errorf("%w: account %q has no stored password to sign in again", ErrLoginRequired, d.acct.Name)
+	}
+	if err != nil {
+		return Token{}, fmt.Errorf("account %q: read password from vault: %w", d.acct.Name, err)
+	}
+	c, err := d.msal()
+	if err != nil {
+		return Token{}, err
+	}
+	res, err := c.AcquireTokenByUsernamePassword(withRecovery(ctx), scopes, d.acct.Username, string(pw))
+	if err != nil {
+		err = d.wrap(err)
+		if errors.Is(err, ErrLoginRequired) || errors.Is(err, ErrTransient) || errors.Is(err, ErrInvalidClient) || errors.Is(err, ErrConsentRequired) {
+			return Token{}, err
+		}
+		// Any other refusal (for example a Conditional Access block) means the
+		// stored password cannot sign in without a person.
+		return Token{}, fmt.Errorf("%w: %s", ErrLoginRequired, describe(err.Error()))
+	}
+	// The same user signs in again, so the home account id stays stable; a
+	// different one would mean the stored user name changed, which is a login.
+	if d.acct.HomeAccountID != "" && res.Account.HomeAccountID != d.acct.HomeAccountID {
+		return Token{}, fmt.Errorf("%w: the password signs in as a different account than the one set up for %q", ErrLoginRequired, d.acct.Name)
+	}
+	return fromResult(res.AccessToken, res.ExpiresOn, res.Account.PreferredUsername, res.Account.HomeAccountID, d.acct), nil
+}
+
+func (d *delegated) silentToken(ctx context.Context) (Token, error) {
 	if d.acct.HomeAccountID == "" {
 		return Token{}, fmt.Errorf("%w: account %q has not signed in yet", ErrLoginRequired, d.acct.Name)
 	}
