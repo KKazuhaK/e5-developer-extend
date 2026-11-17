@@ -1,7 +1,9 @@
 // In-browser fake backend implementing the contract in ./interface.ts.
-// Used when VITE_MOCK=1. Text that comes from the real backend (reasons, fixes,
-// doctor details) is Chinese here, as the Go side will produce.
+// Used when VITE_MOCK=1. Text that comes from the real backend (reasons, fixes)
+// is Chinese here, as the Go side will produce; health check details are codes
+// the UI translates, with English text beside them, as the real backend sends.
 import type { Api } from "./interface";
+import { doctorMessage } from "@/lib/doctor";
 import type {
   AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
   ChannelInput, ChannelType, ChannelView, ChannelTest, MessagePreview, EmailPreset, SecretStatus,
@@ -37,6 +39,14 @@ export const mockControls = {
 const MIN = 60_000;
 const rand = (a: number, b: number) => a + Math.floor(Math.random() * (b - a + 1));
 const iso = (t: number) => new Date(t).toISOString();
+type DxMsg = [code: string, params?: Record<string, string>];
+/** A health check as the backend sends it: codes with values, and their English text. */
+function dx(id: string, title: string, level: DoctorCheck["level"], detail: DxMsg[], fix: DxMsg[] = []): DoctorCheck {
+  const parts = detail.map(([code, params]) => ({ code, params: params ?? {} }));
+  const fixParts = fix.map(([code, params]) => ({ code, params: params ?? {} }));
+  return { id, title, level, detail: doctorMessage("en", parts, ""), fix: doctorMessage("en", fixParts, ""), parts, fixParts };
+}
+
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, controls.slow ? ms * 6 : ms));
 const lag = () => wait(rand(60, 180));
 function hash(s: string): number {
@@ -951,38 +961,49 @@ export const mockApi: Api = {
   health: {
     async doctor(offline) {
       await wait(offline ? 300 : 900);
-      // English titles, details and fixes: this is what the real backend returns.
+      // English titles and text plus codes with values: this is what the real backend returns.
+      const none = controls.host === "none";
+      const on = settings.notify.channels > 0;
       const checks: DoctorCheck[] = [
-        { id: "config", title: "Configuration", level: "ok", detail: "~/.config/e5extend/config.toml is readable and valid", fix: "" },
-        { id: "vault", title: "Vault", level: "ok", detail: "master key stored in the system keychain", fix: "" },
-        { id: "engine", title: "Engine", level: controls.host === "none" ? "warn" : "ok", detail: controls.host === "none" ? "no engine is running" : `running (${controls.host})`, fix: controls.host === "none" ? "start the tray app or run: e5extend service install" : "" },
+        dx("config", "Configuration", "ok", [["config.ok", { count: String(accounts.length) }]]),
+        dx("vault", "Vault", "ok", [["vault.ok", { count: String(accounts.length * 2) }]]),
+        none
+          ? dx("engine", "Engine", "fail", [["engine.stopped"]], [["fix.engineStart"]])
+          : dx("engine", "Engine", "ok", [["engine.running", { seconds: "14" }]]),
         service.installed
-          ? { id: "service", title: "Background service", level: "ok", detail: "installed and enabled", fix: "" }
-          : { id: "service", title: "Background service", level: "warn", detail: "not installed: nothing runs after you sign out", fix: "run: e5extend service install" },
-        { id: "linger", title: "Linger", level: service.installed ? "ok" : "warn", detail: service.installed ? "lingering is on" : "lingering is off", fix: service.installed ? "" : "run: loginctl enable-linger $USER" },
-        { id: "clock", title: "Clock", level: "ok", detail: offline ? "skipped (offline)" : "0.4 s from Microsoft's servers", fix: "" },
-        offline
-          ? { id: "network", title: "Network", level: "warn", detail: "skipped (offline)", fix: "" }
-          : { id: "network", title: "Network", level: "ok", detail: "login.microsoftonline.com and graph.microsoft.com reachable (87 ms)", fix: "" },
+          ? dx("service", "Background service", "ok", [["service.okRunning"]])
+          : dx("service", "Background service", "warn", [["service.notInstalled"]], [["fix.serviceInstall"]]),
+        service.installed
+          ? dx("linger", "Linger", "ok", [["linger.on"]])
+          : dx("linger", "Linger", "warn", [["linger.off"]], [["fix.linger"]]),
         ...(accounts.some((a) => a.input.name === "lab")
           ? [
-              { id: "account.lab.token", title: "lab sign-in", level: "fail", detail: "refresh token rejected (invalid_grant)", fix: "run: e5extend account login lab" } as DoctorCheck,
-              { id: "account.lab.state", title: "lab state", level: "fail", detail: "needs attention", fix: "sign in again, then resume the account" } as DoctorCheck,
+              dx("account.lab.token", "Account lab sign-in", "fail", [["token.loginRequired"]], [["hint.loginRequired", { account: "lab" }]]),
+              dx("account.lab.state", "Account lab state", "fail", [["state.needsAttention", { reason: "login required" }]], [["fix.resumeAfter", { account: "lab" }]]),
             ]
           : []),
         ...(accounts.some((a) => a.input.name === "main")
           ? [
-              { id: "account.main.token", title: "main sign-in", level: "ok", detail: "token valid", fix: "" } as DoctorCheck,
-              { id: "account.main.scopes", title: "main permissions", level: "ok", detail: "15 of 18 APIs usable", fix: "" } as DoctorCheck,
-              { id: "account.main.activity", title: "main activity", level: "ok", detail: "last success 19 minutes ago", fix: "" } as DoctorCheck,
+              dx("account.main.token", "Account main sign-in", "ok", [["token.ok", { seconds: "3300" }]]),
+              dx("account.main.scopes", "Account main permissions", "ok", [["scopes.ok", { count: "15" }]]),
+              dx("account.main.activity", "Account main activity", "ok", [["activity.last", { seconds: "1140" }]]),
+              dx("account.main.state", "Account main state", "ok", [["state.ok"]]),
+              dx("account.main.apis", "Account main APIs", "ok", [["apis.ok", { count: "3" }]]),
             ]
           : []),
         ...(accounts.some((a) => a.input.name === "dev-app")
-          ? [{ id: "account.dev-app.secret", title: "dev-app client secret", level: "warn", detail: `expires in 12 days (${day(12)})`, fix: "create a new secret in Entra, then run: e5extend account set-secret dev-app" } as DoctorCheck]
+          ? [dx("account.dev-app.secret", "Account dev-app client secret", "warn", [["secret.warn", { count: "12", date: day(12) }]], [["fix.newSecret", { account: "dev-app" }]])]
           : []),
-        { id: "notify", title: "Alerts", level: settings.notify.channels > 0 ? "ok" : "warn", detail: settings.notify.channels > 0 ? `${settings.notify.channels} notification channels set` : "no alert destination is set; you will not hear about problems", fix: settings.notify.channels > 0 ? "" : "add one in Settings > Advanced > Alerts" },
-        { id: "future.check", title: "Some future check", level: "ok", detail: "unknown ids fall back to the backend title", fix: "" },
+        dx("subscription.contoso.onmicrosoft.com", "Subscription contoso.onmicrosoft.com", "ok", [["sub.skuEnds", { sku: "DEVELOPERPACK_E5", status: "Enabled", date: day(80), offset: "80" }]]),
+        dx("clock", "Clock", "ok", [["clock.ok", { seconds: "120" }]]),
+        dx("network", "Network", "ok", [["net.ok", { status: "401" }]]),
+        on
+          ? dx("notify", "Alerts", "ok", [[settings.notify.channels === 1 ? "notify.one" : "notify.many", { count: String(settings.notify.channels) }]])
+          : dx("notify", "Alerts", "warn", [["notify.none"]], [["fix.channelAdd"]]),
+        // A code this version has no text for: the English text is shown.
+        { id: "future.check", title: "Some future check", level: "ok", detail: "unknown codes fall back to the backend text", fix: "", parts: [{ code: "future.thing", params: {} }], fixParts: [] },
       ];
+      if (offline) return checks.filter((c) => c.id !== "clock" && c.id !== "network" && !c.id.endsWith(".token"));
       return checks;
     },
     async serviceInfo() {

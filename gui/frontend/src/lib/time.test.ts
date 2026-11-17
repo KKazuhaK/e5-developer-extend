@@ -1,9 +1,25 @@
 import { describe, expect, it } from "vitest";
-import { daysUntil, formatLatency, formatRelative, formatWhen, resolveLang } from "./time";
+import { daysUntil, formatDuration, formatLatency, formatRelative, formatWhen, resolveLang } from "./time";
 
 const NOW = new Date(2026, 10, 16, 14, 0, 0).getTime();
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 const MIN = 60_000, H = 3_600_000, D = 86_400_000;
+
+describe("formatDuration", () => {
+  it("shows the two largest units in the UI language", () => {
+    expect(formatDuration(5, "zh")).toBe("5 秒");
+    expect(formatDuration(5, "en")).toBe("5s");
+    expect(formatDuration(120, "zh")).toBe("2 分钟");
+    expect(formatDuration(3900, "zh")).toBe("1 小时 5 分钟");
+    expect(formatDuration(3900, "en")).toBe("1h 5m");
+    expect(formatDuration(3 * 86_400 + 4 * 3600 + 59, "en")).toBe("3d 4h");
+  });
+  it("handles zero and negative values", () => {
+    expect(formatDuration(0, "en")).toBe("0s");
+    expect(formatDuration(0, "zh")).toBe("0 秒");
+    expect(formatDuration(-90, "en")).toBe("-1m 30s");
+  });
+});
 
 describe("formatRelative", () => {
   it("zh past", () => {
