@@ -281,7 +281,8 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if ev.Event == Recovered {
 			h["Tags"] = "white_check_mark"
 		}
-		secrets := []string{}
+		// The topic is a kind of password on a public server, so it is kept out of errors too.
+		secrets := []string{server + "/" + url.PathEscape(c.Topic)}
 		if tok := strings.TrimSpace(t.Secrets["token"]); tok != "" {
 			h["Authorization"] = "Bearer " + tok
 			secrets = append(secrets, tok)
