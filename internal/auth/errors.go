@@ -39,6 +39,9 @@ var codeKinds = map[string]error{
 	"AADSTS50078":   ErrLoginRequired,
 	"AADSTS70043":   ErrLoginRequired,
 	"AADSTS50132":   ErrLoginRequired,
+	"AADSTS50053":   ErrLoginRequired, // account locked
+	"AADSTS50055":   ErrLoginRequired, // password expired
+	"AADSTS50057":   ErrLoginRequired, // account disabled
 }
 
 // nameKinds maps OAuth error names to classes; they are only consulted when no
@@ -161,4 +164,14 @@ func ErrorCode(err error) string {
 		return fmt.Sprintf("HTTP %d", call.Resp.StatusCode)
 	}
 	return aadCode(err.Error())
+}
+
+// SignInFrequencyLabel is the fixed wording for a refresh token that a
+// Conditional Access sign-in frequency policy ended (AADSTS70043). The GUI
+// recognizes the code in it to offer the way out.
+const SignInFrequencyLabel = "sign-in is cut off by a Conditional Access sign-in frequency policy (AADSTS70043)"
+
+// IsSignInFrequency reports whether err is the sign-in frequency cutoff.
+func IsSignInFrequency(err error) bool {
+	return err != nil && errors.Is(err, ErrLoginRequired) && aadCode(err.Error()) == "AADSTS70043"
 }

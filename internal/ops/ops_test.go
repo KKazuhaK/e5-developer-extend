@@ -524,7 +524,8 @@ func TestHintSuggestsNextStep(t *testing.T) {
 	}
 	// The exact error a real tenant with a sign-in frequency policy returned.
 	ca := fmt.Errorf("%w: AADSTS70043: The refresh token has expired or is invalid due to sign-in frequency checks by conditional access.", auth.ErrLoginRequired)
-	if h := Hint(ca, "x"); !strings.Contains(h, "Conditional Access") || !strings.Contains(h, "account login x") {
+	if h := Hint(ca, "x"); !strings.Contains(h, "Conditional Access") || !strings.Contains(h, "account login x") ||
+		!strings.Contains(h, "account add x-app --auto --auth client_secret") || !strings.Contains(h, "(a)") || !strings.Contains(h, "(b)") || !strings.Contains(h, "(c)") {
 		t.Fatalf("sign-in frequency hint: %q", h)
 	}
 }

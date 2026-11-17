@@ -9,6 +9,8 @@
 - 自动创建应用注册：`e5extend app setup`、`e5extend account add --auto`，以及 `e5extend init` 里的“自动创建（推荐）”。用租户管理员账号登录一次（通过微软官方的 Microsoft Graph Command Line Tools，令牌只放在内存里），程序在租户里建好应用、加好只读权限并授予管理员同意；可重复执行，只补缺的，不删除任何东西；可以采用手工建的同名应用。应用身份还会创建一个以本机命名的 Client Secret，直接存进 vault。详见 [docs/user/app-registration.md](docs/user/app-registration.md) 和 [docs/design/app-setup.md](docs/design/app-setup.md)。
 - 备份与迁移：`e5extend backup export` / `backup import` 把配置、secret、登录状态、告警地址和运行状态导出成一个用备份密码加密的文件，在另一台机器（可以是另一个系统）上导入，不用重新登录、不用重新输入 secret；支持合并和替换。桌面版设置页新增“备份与迁移”。详见 [docs/user/backup.md](docs/user/backup.md)。
 
+- 账号密码方式的账号在刷新令牌被拒绝（过期、被撤销、条件访问的登录频率策略 AADSTS70043）时，后台引擎会用 vault 里加密保存的密码自动重新登录，后台不再因此停下。只有登录过一次的账号才会这样；两次自动登录至少间隔 30 分钟；密码错误、账号被锁定或禁用、需要 MFA、被条件访问拦截时进入 `needs_attention`，并且不再自动尝试，直到 `account set-secret`、`account login` 成功或修改账号身份。`doctor`、`account test` 和桌面版只静默刷新，不会用密码登录。设备码和浏览器登录的账号不变。
+- 条件访问“登录频率”策略（AADSTS70043）有专门的提示：依次说明改用应用身份、账号密码（仅限无 MFA）、把应用从策略中排除三条路；`doctor` 和账号状态里单独报告这种情况；桌面版账号卡片上增加“改用应用身份”按钮，直接打开已填好名称的自动创建向导（旧账号保存了用户名时一并带上，否则需要自己填用户的邮箱）。详见 [常见问题](docs/user/faq.md)。
 - API 推荐：登录之后探测账号实际能用哪些 API 分类（只读请求：邮箱设置、OneDrive、Teams、SharePoint 根站点），给每个分类标上推荐 / 不可用（带原因）/ 可能可用。命令行：`e5extend account test <名称> --recommend`，加 `--apply` 把推荐的分类写进账号；桌面版添加账号向导的“API 分类”移到登录之后，默认勾选推荐的。`e5extend doctor` 新增 `account.<名称>.apis`：某个分类连续 3 轮都是 404 时提醒。详见 [docs/design/api-recommend.md](docs/design/api-recommend.md)。
 
 ### 变更

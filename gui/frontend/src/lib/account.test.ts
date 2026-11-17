@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AccountInput } from "@/api/types";
-import { secretRequired, grantedScopes, needsSecret, needsUsername, summarizeByCategory, validateAccountInput } from "./account";
+import { appIdentityName, isSignInFrequency, reasonHead, secretRequired, grantedScopes, needsSecret, needsUsername, summarizeByCategory, validateAccountInput } from "./account";
 
 const GUID = "0b4f6c1e-9a2d-4c7e-8f31-5d6a7b8c9d0e";
 const input = (p: Partial<AccountInput> = {}): AccountInput => ({
@@ -80,5 +80,36 @@ describe("secret requirement across save and edit", () => {
   it("is never required for kinds without a secret", () => {
     expect(secretRequired("device_code", null)).toBe(false);
     expect(secretRequired("browser", "client_secret")).toBe(false);
+  });
+});
+
+describe("sign-in frequency cutoff", () => {
+  const reason = "sign-in is cut off by a Conditional Access sign-in frequency policy (AADSTS70043); ways out, in order: (a) use the app identity";
+  it("is recognised by its code", () => {
+    expect(isSignInFrequency(reason)).toBe(true);
+    expect(isSignInFrequency("login required; run: e5extend account login x")).toBe(false);
+    expect(isSignInFrequency("")).toBe(false);
+  });
+  it("keeps the head of the reason only", () => {
+    expect(reasonHead(reason)).toBe("sign-in is cut off by a Conditional Access sign-in frequency policy (AADSTS70043)");
+  });
+  it("suggests a valid name for the app identity", () => {
+    expect(appIdentityName("main")).toBe("main-app");
+  });
+  it("keeps the suffix and a different name at 32 characters", () => {
+    const long = "x".repeat(32);
+    const n = appIdentityName(long);
+    expect(n).toHaveLength(32);
+    expect(n.endsWith("-app")).toBe(true);
+    expect(n).not.toBe(long);
+    expect(appIdentityName("x".repeat(28) + "-app")).not.toBe("x".repeat(28) + "-app");
+  });
+  it("counts up when the name is taken", () => {
+    expect(appIdentityName("main", ["main-app"])).toBe("main-app2");
+    expect(appIdentityName("main", ["main-app", "main-app2"])).toBe("main-app3");
+    const taken = ["x".repeat(28) + "-app"];
+    const n = appIdentityName("x".repeat(32), taken);
+    expect(n).toHaveLength(32);
+    expect(taken).not.toContain(n);
   });
 });

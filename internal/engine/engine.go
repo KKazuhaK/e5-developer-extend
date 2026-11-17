@@ -71,6 +71,11 @@ type Options struct {
 	Clock   Clock
 	Logger  *slog.Logger
 
+	// SaveHomeAccount stores the home account ID a password sign-in returned
+	// into the configuration (under the configuration lock), provided the
+	// account on disk still has the identity it signed in with; nil skips it.
+	SaveHomeAccount func(ctx context.Context, signedIn config.Account, homeAccountID string) error
+
 	// Hint returns a suggested next step for a sign-in error, or "".
 	Hint func(err error, account string) string
 	// OnEntry sees every call-log entry as it is written.
@@ -496,6 +501,7 @@ func (e *Engine) init() {
 		e.saveLocked()
 	})
 	e.reportClockFix(fixed)
+	e.applyPasswordResets()
 	e.adoptPending()
 	if e.o.ConfigPath != "" {
 		if fi, err := os.Stat(e.o.ConfigPath); err == nil {
@@ -705,6 +711,8 @@ func (e *Engine) processTriggers(now time.Time) map[string]bool {
 		switch {
 		case name == ".reload":
 			e.reloadConfig()
+		case strings.HasSuffix(name, passwordSuffix):
+			e.resetPasswordGate(strings.TrimSuffix(name, passwordSuffix))
 		case strings.HasSuffix(name, ".resume"):
 			e.resumeAccount(strings.TrimSuffix(name, ".resume"), now)
 		default:

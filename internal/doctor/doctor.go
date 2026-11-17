@@ -464,6 +464,8 @@ func checkToken(ctx context.Context, d Deps, cfg *config.Config, acct config.Acc
 // tenant names and user names, so it is never shown.
 func tokenLabel(err error) string {
 	switch {
+	case auth.IsSignInFrequency(err):
+		return auth.SignInFrequencyLabel
 	case errors.Is(err, auth.ErrLoginRequired):
 		return "login required"
 	case errors.Is(err, auth.ErrInvalidClient):

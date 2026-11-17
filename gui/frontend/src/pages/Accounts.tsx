@@ -12,10 +12,11 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyBlock, ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, StatusBadge, fieldAria } from "@/components/common";
 import { SecretExpiry } from "@/components/AccountCard";
+import { SignInFrequencyNotice } from "@/components/SignInFrequencyNotice";
 import { AccountWizard } from "./AccountWizard";
 import { compareStatus, displayStatus, needsAction } from "@/lib/status";
 import { formatRelative } from "@/lib/time";
-import { needsSecret } from "@/lib/account";
+import { isSignInFrequency, needsSecret } from "@/lib/account";
 import { isValidDate } from "@/lib/settings";
 import { cn, errMsg } from "@/lib/utils";
 
@@ -52,6 +53,7 @@ export function Accounts() {
         mode={wizard.mode}
         name={wizard.mode === "edit" ? wizard.name : undefined}
         startStep={wizard.mode === "edit" ? wizard.step : undefined}
+        from={wizard.mode === "add" ? wizard.from : undefined}
         onClose={() => {
           setWizard(null);
           void snapshot.refresh();
@@ -165,7 +167,10 @@ export function Accounts() {
                           <IconBtn label={t("common.delete")} onClick={() => setDeleting(a)} danger><Trash2 /></IconBtn>
                         </div>
                       </div>
-                      {a.status !== "ok" && (a.reason || a.fix) && (
+                      {a.status !== "ok" && isSignInFrequency(a.reason) && (
+                        <div className="mt-2"><SignInFrequencyNotice a={a} onSwitch={(n) => navigate("accounts", { wizard: { mode: "add", from: n } })} /></div>
+                      )}
+                      {a.status !== "ok" && (a.reason || a.fix) && !isSignInFrequency(a.reason) && (
                         <p className="mt-2 rounded-md bg-muted/60 px-3 py-1.5 text-[13px]">
                           {a.reason}
                           {a.fix && <span className="text-muted-foreground"> · {t("account.fixPrefix")}{a.fix}</span>}

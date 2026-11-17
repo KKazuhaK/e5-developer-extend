@@ -244,6 +244,7 @@ func TestTokenChecks(t *testing.T) {
 		detail string
 	}{
 		{auth.ErrLoginRequired, Fail, "login required"},
+		{fmt.Errorf("%w: AADSTS70043: sign-in frequency checks", auth.ErrLoginRequired), Fail, "sign-in frequency policy"},
 		{auth.ErrInvalidClient, Fail, "credentials rejected"},
 		{auth.ErrConsentRequired, Fail, "consent"},
 		{fmt.Errorf("dial: %w", auth.ErrTransient), Warn, "network"},
