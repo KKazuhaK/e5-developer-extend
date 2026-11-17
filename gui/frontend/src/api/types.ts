@@ -323,3 +323,57 @@ export interface BackupImportResult {
   summary: ImportSummary;
   problem: BackupProblem | null;
 }
+
+/** What a tenant's subscription check could do: read them, was refused (permission), failed, or has not run. */
+export type SubscriptionAccess = "ok" | "no_permission" | "error" | "unchecked";
+export interface RenewalView {
+  from: string; // YYYY-MM-DD
+  to: string; // YYYY-MM-DD
+  seenAt: string; // RFC3339
+}
+export interface SubscriptionView {
+  id: string;
+  sku: string;
+  /** False for subscriptions the settings do not watch (no alerts for them). */
+  watched: boolean;
+  /** Enabled, Warning, Suspended, LockedOut or Deleted. */
+  status: string;
+  isTrial: boolean;
+  licenses: number;
+  /** End date YYYY-MM-DD (UTC); empty when Microsoft gave none. */
+  expires: string;
+  daysLeft: number | null;
+  checkedAt: string;
+  renewals: RenewalView[];
+}
+export interface TenantSubscriptions {
+  tenant: string;
+  label: string;
+  tenantId: string;
+  accounts: string[];
+  access: SubscriptionAccess;
+  /** English reason of an "error" access; empty otherwise. */
+  detail: string;
+  checkedAt: string | null;
+  attemptedAt: string | null;
+  nextCheckAt: string | null;
+  subscriptions: SubscriptionView[];
+  /** The end date written by hand (YYYY-MM-DD), "" for none. */
+  manualExpires: string;
+  manualDaysLeft: number | null;
+  /** The hand-written date stands in for missing data. */
+  manualInUse: boolean;
+  /** Real data exists, so the hand-written date can be removed. */
+  manualRedundant: boolean;
+  /** The account whose app registration lacks the permission, its identity and the command line that repairs it. */
+  fixAccount: string;
+  fixKind: "delegated" | "app";
+  fixCommand: string;
+  /** SKU prefixes that alert (subscription.skus; the default is DEVELOPERPACK). */
+  watchedSkus: string[];
+}
+export interface SubscriptionRefresh {
+  tenants: TenantSubscriptions[];
+  /** A running engine had not answered yet; the tenants show what it saved before. */
+  queued: boolean;
+}

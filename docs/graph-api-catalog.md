@@ -100,6 +100,7 @@
 - 委托身份：尽量选普通用户能自己同意的低权限。`GroupMember.Read.All` 需要管理员同意（E5 开发者租户里你自己就是管理员，所以不是问题）。
   其余是否需要管理员同意，以 Entra 后台“API 权限”页显示为准，实测时核对。`offline_access` 不对应任何接口，只是让登录可以续期。
 - 应用身份：全部需要管理员同意。
+- `Organization.Read.All` 在两个列表里都有：除了“组织信息”接口，订阅到期检测（`GET /directory/subscriptions`，见 [docs/design/subscription.md](design/subscription.md)）也读它；委托身份下它需要管理员同意。
 - 测试保证列表里的每个权限（`offline_access` 除外）都至少被 `apis.yaml` 里的一个接口用到，所以列表不会悄悄变成多余的权限。
 
 ## 还要实测确认的事

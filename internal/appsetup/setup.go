@@ -51,6 +51,11 @@ type Setup struct {
 	// exists, so nothing is left behind.
 	BeforeSecret func(app AppRef) error
 
+	// NoSecret leaves the client secret of KindApp alone: nothing is created,
+	// stored or deleted, and StoreSecret is not needed. Setup then only adds
+	// the permissions and role assignments that are missing (repair).
+	NoSecret bool
+
 	// Progress reports what is going on, e.g. "waiting for Microsoft to replicate".
 	Progress func(msg string)
 	// Backoff and Sleep replace the replication waits; tests only.
@@ -481,7 +486,7 @@ func (s *Setup) PlanFor(ctx context.Context, choice *Choice) (*Plan, error) {
 
 	if undecided {
 		// What is left depends on which app the user picks.
-		if s.Kind == KindApp {
+		if s.Kind == KindApp && !s.NoSecret {
 			add("create_secret", "create a client secret named for this computer and store it in the vault (12 months)")
 		}
 		return p, nil
@@ -514,13 +519,15 @@ func (s *Setup) PlanFor(ctx context.Context, choice *Choice) (*Plan, error) {
 		if need {
 			add("assign_roles", "grant the application permissions (administrator consent)")
 		}
-		text := "create a client secret named for this computer and store it in the vault (12 months)"
-		if app != nil {
-			if old, _ := s.ownSecrets(app, ""); len(old) > 0 {
-				text += fmt.Sprintf("; then delete this computer's %d earlier secret(s) from the app", len(old))
+		if !s.NoSecret {
+			text := "create a client secret named for this computer and store it in the vault (12 months)"
+			if app != nil {
+				if old, _ := s.ownSecrets(app, ""); len(old) > 0 {
+					text += fmt.Sprintf("; then delete this computer's %d earlier secret(s) from the app", len(old))
+				}
 			}
+			add("create_secret", text)
 		}
-		add("create_secret", text)
 	} else {
 		need := true
 		if hasSP {
@@ -659,7 +666,7 @@ func (s *Setup) notes() string {
 // again. A failure to grant consent does not fail Apply: the Result carries the
 // administrator consent link instead.
 func (s *Setup) Apply(ctx context.Context, choice Choice) (*Result, error) {
-	if s.Kind == KindApp && s.StoreSecret == nil {
+	if s.Kind == KindApp && !s.NoSecret && s.StoreSecret == nil {
 		return nil, errors.New("appsetup: StoreSecret is required for the application identity")
 	}
 	if choice.Adopt != "" && choice.CreateNew {
@@ -681,7 +688,7 @@ func (s *Setup) Apply(ctx context.Context, choice Choice) (*Result, error) {
 	res.ClientID, res.ObjectID, res.DisplayName = app.AppID, app.ID, app.DisplayName
 
 	// Refuse before anything else is done for a secret that could not be kept.
-	if s.Kind == KindApp && s.BeforeSecret != nil {
+	if s.Kind == KindApp && !s.NoSecret && s.BeforeSecret != nil {
 		if err := s.BeforeSecret(app.ref()); err != nil {
 			return nil, err
 		}
@@ -712,7 +719,7 @@ func (s *Setup) Apply(ctx context.Context, choice Choice) (*Result, error) {
 	}
 
 	// 4. The client secret.
-	if s.Kind == KindApp {
+	if s.Kind == KindApp && !s.NoSecret {
 		if err := s.createSecret(ctx, c, app, res); err != nil {
 			return nil, err
 		}

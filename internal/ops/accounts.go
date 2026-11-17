@@ -180,6 +180,7 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 	}
 	next := in.Account()
 	next.Paused, next.HomeAccountID = cur.Paused, cur.HomeAccountID
+	next.SubscriptionExpires = cur.SubscriptionExpires // tenant-level; set with SetSubscriptionExpires
 	identityChanged := cur.Auth != next.Auth || cur.Tenant != next.Tenant ||
 		cur.ClientID != next.ClientID || cur.Username != next.Username
 	if identityChanged {

@@ -88,6 +88,70 @@ func (c *Client) ListUserIDs(ctx context.Context, token string) ([]string, Resul
 	return ids, res
 }
 
+// Subscription is a companySubscription of the tenant, reduced to what the
+// expiry check reads.
+type Subscription struct {
+	ID                    string    `json:"id"`
+	SKUPartNumber         string    `json:"skuPartNumber"`
+	Status                string    `json:"status"`
+	NextLifecycleDateTime time.Time `json:"nextLifecycleDateTime"`
+	IsTrial               bool      `json:"isTrial"`
+	TotalLicenses         int       `json:"totalLicenses"`
+	OwnerTenantID         string    `json:"ownerTenantId"`
+}
+
+// maxSubscriptionPages bounds how many pages ListSubscriptions follows; a
+// tenant has a handful of subscriptions, so one page is the usual answer.
+const maxSubscriptionPages = 10
+
+// ListSubscriptions reads GET /directory/subscriptions and follows
+// @odata.nextLink while there is one. Its least privilege is
+// Organization.Read.All, delegated or application.
+func (c *Client) ListSubscriptions(ctx context.Context, token string) ([]Subscription, Result) {
+	var subs []Subscription
+	path, query := "/directory/subscriptions", url.Values{
+		"$select": {"id,skuPartNumber,status,nextLifecycleDateTime,isTrial,totalLicenses,ownerTenantId"},
+	}
+	for page := 0; ; page++ {
+		var next string
+		bad := false
+		res := c.do(ctx, token, path, query, func(r io.Reader) {
+			var body struct {
+				Value    []Subscription `json:"value"`
+				NextLink string         `json:"@odata.nextLink"`
+			}
+			if json.NewDecoder(r).Decode(&body) != nil {
+				bad = true
+				return
+			}
+			subs = append(subs, body.Value...)
+			next = body.NextLink
+		})
+		if res.Class == OK && bad {
+			res.Class = ClientError
+			res.Err = errors.New("the subscription list could not be read")
+		}
+		if res.Class != OK {
+			return nil, res
+		}
+		if next == "" {
+			return subs, res
+		}
+		// A partial list would look like a complete one: fail instead.
+		u, err := url.Parse(next)
+		switch {
+		case page+1 >= maxSubscriptionPages:
+			res.Class, res.Err = ClientError, errors.New("the subscription list has too many pages")
+			return nil, res
+		case err != nil || !strings.HasPrefix(u.Path, "/"):
+			res.Class, res.Err = ClientError, errors.New("the subscription list has an unusable next page link")
+			return nil, res
+		}
+		// The link is absolute and carries its own query; keep it on this client's base.
+		path, query = "/"+strings.TrimPrefix(strings.TrimPrefix(u.Path, "/v1.0"), "/"), u.Query()
+	}
+}
+
 func (c *Client) do(ctx context.Context, token, path string, query url.Values, sink func(io.Reader)) Result {
 	base := c.Base
 	if base == "" {

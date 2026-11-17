@@ -40,6 +40,8 @@ type Input struct {
 	// neither raised nor ended.
 	Calls map[string][]store.Entry
 	APIs  []catalog.API
+	// Subscription says which subscriptions are watched.
+	Subscription config.Subscription
 }
 
 // evaluator is one run of Evaluate.
@@ -61,15 +63,15 @@ func (ev *evaluator) allowed(kind string) bool {
 // one-shot (recovered, period_ended).
 func cooldownApplies(kind string) bool {
 	switch kind {
-	case NeedsAttention, AutoPaused, FailureSpike, AllFailing:
+	case NeedsAttention, AutoPaused, FailureSpike, AllFailing, SubscriptionStatus:
 		return true
 	}
 	return false
 }
 
 // cooldownFor is the cooldown of a kind: critical ones repeat twice as soon.
-func (ev *evaluator) cooldownFor(kind string) time.Duration {
-	if LevelOf(kind) == config.LevelCritical {
+func (ev *evaluator) cooldownFor(kind, key string) time.Duration {
+	if LevelOfKey(kind, key) == config.LevelCritical {
 		return ev.cooldown / 2
 	}
 	return ev.cooldown
@@ -77,11 +79,16 @@ func (ev *evaluator) cooldownFor(kind string) time.Duration {
 
 // scope is where the notices of one account, or of the global alerts, live.
 type scope struct {
-	ev       *evaluator
-	account  string // empty for global alerts
-	tenant   string
-	notified *map[string]store.Notice
-	sent     *map[string]time.Time
+	ev      *evaluator
+	account string // empty for global alerts
+	tenant  string
+	// subscription is the subscription ID of a tenant-level alert.
+	subscription string
+	// sku, status and end describe that subscription (end is YYYY-MM-DD); for
+	// the date entered by hand only end is set.
+	sku, status, end string
+	notified         *map[string]store.Notice
+	sent             *map[string]time.Time
 }
 
 func (s scope) get(kind string) (store.Notice, bool) { n, ok := (*s.notified)[kind]; return n, ok }
@@ -109,7 +116,11 @@ func (s scope) del(kind string) {
 // event rebuilds the event of a notice. key carries what the decision was
 // based on: the numbers of a failure_spike, the origin of a recovery.
 func (s scope) event(kind, key, msg string, at, attempt time.Time) Event {
-	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt}
+	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt, Subscription: s.subscription,
+		SKU: s.sku, SubStatus: s.status, EndDate: s.end}
+	if sev := LevelOfKey(kind, key); sev != LevelOf(kind) {
+		e.Severity = sev
+	}
 	switch kind {
 	case FailureSpike:
 		parts := strings.Split(key, "/")
@@ -135,7 +146,7 @@ func (s scope) announce(kind, key, msg string) (cooled, held bool) {
 	}
 	if ev.allowed(kind) {
 		n.Msg = msg
-		if last, ok := (*s.sent)[kind]; ok && cooldownApplies(kind) && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind) {
+		if last, ok := (*s.sent)[kind]; ok && cooldownApplies(kind) && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind, key) {
 			n.Cooled = true
 			s.put(kind, n)
 			return true, false
@@ -151,7 +162,7 @@ func (s scope) announce(kind, key, msg string) (cooled, held bool) {
 func (s scope) handOut(kind string, n *store.Notice) {
 	ev, now := s.ev, s.ev.in.Now
 	n.Cooled, n.Pending = false, true
-	if ev.quiet && LevelOf(kind) != config.LevelCritical {
+	if ev.quiet && LevelOfKey(kind, n.Key) != config.LevelCritical {
 		n.Held = true
 	} else {
 		n.Tried = now
@@ -197,7 +208,7 @@ func (s scope) retry() {
 			continue
 		}
 		if n.Cooled {
-			if last, ok := (*s.sent)[kind]; ok && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind) {
+			if last, ok := (*s.sent)[kind]; ok && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind, n.Key) {
 				continue
 			}
 			// The cooldown is over and the condition still holds: announce it now.
@@ -211,7 +222,7 @@ func (s scope) retry() {
 		if !n.Pending {
 			continue
 		}
-		heldBack := ev.quiet && LevelOf(kind) != config.LevelCritical
+		heldBack := ev.quiet && LevelOfKey(kind, n.Key) != config.LevelCritical
 		if n.Held {
 			if heldBack {
 				continue
@@ -227,7 +238,9 @@ func (s scope) retry() {
 		if now.Sub(n.Tried) < RetryAfter {
 			continue
 		}
-		if slices.ContainsFunc(ev.events, func(e Event) bool { return e.Account == s.account && e.Event == kind }) {
+		if slices.ContainsFunc(ev.events, func(e Event) bool {
+			return e.Account == s.account && e.Event == kind && e.Tenant == s.tenant && e.Subscription == s.subscription
+		}) {
 			continue
 		}
 		if heldBack {
@@ -400,6 +413,8 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	}
 	g.retry()
 
+	ev.evalSubscriptions()
+
 	// What was held during the quiet hours goes out as one message.
 	switch len(ev.held) {
 	case 0:
@@ -436,6 +451,26 @@ func MarkDelivered(st *store.State, account, kind string, tried time.Time) bool 
 		}
 		notified = as.Notified
 	}
+	return markNotified(notified, kind, tried)
+}
+
+// markSubscription is MarkDelivered for a subscription_* alert of a tenant.
+func markSubscription(st *store.State, tenant, subscription, kind string, tried time.Time) bool {
+	ts := st.Tenants[tenant]
+	if ts == nil {
+		return false
+	}
+	if subscription == manualID {
+		return markNotified(ts.Notified, kind, tried)
+	}
+	sub := ts.Subscriptions[subscription]
+	if sub == nil {
+		return false
+	}
+	return markNotified(sub.Notified, kind, tried)
+}
+
+func markNotified(notified map[string]store.Notice, kind string, tried time.Time) bool {
 	n, ok := notified[kind]
 	// A late callback from an earlier attempt must not settle a newer one.
 	if !ok || !n.Tried.Equal(tried) {
@@ -462,12 +497,18 @@ func MarkEvent(st *store.State, ev Event) bool {
 		}
 		return e.Attempt
 	}
+	mark := func(e Event) bool {
+		if e.Subscription != "" {
+			return markSubscription(st, e.Tenant, e.Subscription, e.Event, attempt(e))
+		}
+		return MarkDelivered(st, e.Account, e.Event, attempt(e))
+	}
 	if ev.Event != Digest {
-		return MarkDelivered(st, ev.Account, ev.Event, attempt(ev))
+		return mark(ev)
 	}
 	changed := false
 	for _, it := range ev.Items {
-		if MarkDelivered(st, it.Account, it.Event, attempt(it)) {
+		if mark(it) {
 			changed = true
 		}
 	}

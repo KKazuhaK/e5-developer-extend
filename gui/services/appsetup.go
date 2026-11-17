@@ -79,8 +79,33 @@ func (s *AppSetupService) Begin(id string, start AppSetupStart) error {
 	if err := b.Ops.PrepareAddAccount(AccountInput{Name: start.Name, Auth: acctAuth, Username: start.Username}); err != nil {
 		return err
 	}
-	opts := ops.AppSetupOptions{AppOnly: start.AppOnly, Method: method, Account: start.Name}
+	return s.launch(id, ops.AppSetupOptions{AppOnly: start.AppOnly, Method: method, Account: start.Name})
+}
 
+// Repair starts the repair of an existing account's app registration: the
+// missing permissions (and consent) are added to the app the account signs in
+// with, and nothing else changes: no account is added, no client secret is
+// created or deleted, and any other app registration is refused. The events
+// are those of Begin; after "result" the caller ends it with Finish.
+func (s *AppSetupService) Repair(id, account, method string) error {
+	if !setupIDRe.MatchString(id) {
+		return errors.New("invalid setup id")
+	}
+	if method == "" {
+		method = config.AuthDeviceCode
+	}
+	if method != config.AuthDeviceCode && method != config.AuthBrowser {
+		return fmt.Errorf("the administrator signs in with %s or %s, not %q", config.AuthDeviceCode, config.AuthBrowser, method)
+	}
+	if err := s.b.Ops.CheckAccount(account); err != nil {
+		return err
+	}
+	return s.launch(id, ops.AppSetupOptions{Repair: true, Method: method, Account: account})
+}
+
+// launch registers the session and runs the setup in the background.
+func (s *AppSetupService) launch(id string, opts ops.AppSetupOptions) error {
+	b := s.b
 	b.mu.Lock()
 	if _, taken := b.setups[id]; taken {
 		b.mu.Unlock()

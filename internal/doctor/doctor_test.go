@@ -610,3 +610,60 @@ func TestKeepsFailingCategory(t *testing.T) {
 		expect(t, r.run(true), id, Warn, "category files keeps failing (not found; no OneDrive?)")
 	})
 }
+
+func TestSubscriptionChecks(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Accounts[0].Tenant = "contoso.onmicrosoft.com"
+	id := "subscription.contoso.onmicrosoft.com"
+	save := func(ts *store.TenantState) {
+		st := store.NewState()
+		st.Tenants = map[string]*store.TenantState{"contoso.onmicrosoft.com": ts}
+		if err := store.New(r.dir).SaveState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sub := func(status string, days int) *store.TenantState {
+		return &store.TenantState{Access: store.AccessOK, Checked: now, Attempted: now, Subscriptions: map[string]*store.SubscriptionState{
+			"s1": {SKU: "DEVELOPERPACK_E5", Status: status, CheckedAt: now, NextLifecycle: now.AddDate(0, 0, days)},
+			"s2": {SKU: "ENTERPRISEPACK", Status: "Suspended", CheckedAt: now, NextLifecycle: now.AddDate(0, 0, 1)}}}
+	}
+
+	expect(t, r.run(true), id, OK, "not checked yet")
+	save(sub("Enabled", 89))
+	got := r.run(true)
+	expect(t, got, id, OK, "DEVELOPERPACK_E5 Enabled, ends 2027-02-14 (in 89 days)")
+	if strings.Contains(got[id].Detail, "ENTERPRISEPACK") {
+		t.Errorf("an unwatched SKU is judged: %q", got[id].Detail)
+	}
+	save(sub("Enabled", 7))
+	expect(t, r.run(true), id, Warn, "in 7 days")
+	save(sub("Enabled", 8))
+	expect(t, r.run(true), id, OK, "in 8 days")
+	save(sub("Warning", 60))
+	c := r.run(true)[id]
+	if c.Level != Warn || c.Fix == "" {
+		t.Errorf("a status other than Enabled: %+v", c)
+	}
+
+	// Without the permission: explained, not a problem; a manual date is judged.
+	save(&store.TenantState{Access: store.AccessNoPermission, Attempted: now})
+	expect(t, r.run(true), id, OK, "Organization.Read.All")
+	r.cfg.Accounts[0].SubscriptionExpires = "2026-11-20"
+	expect(t, r.run(true), id, Warn, "date you entered (2026-11-20) is in 3 days")
+	r.cfg.Accounts[0].SubscriptionExpires = "2027-02-14"
+	expect(t, r.run(true), id, OK, "date you entered (2027-02-14)")
+
+	// Real data present and a manual date: say it can go.
+	r.cfg.Accounts[0].SubscriptionExpires = "2027-02-14"
+	save(sub("Enabled", 89))
+	expect(t, r.run(true), id, OK, "remove subscription_expires")
+
+	// The last check failed: a note, unless nothing was ever read.
+	r.cfg.Accounts[0].SubscriptionExpires = ""
+	ts := sub("Enabled", 89)
+	ts.Access, ts.Detail = store.AccessError, "could not reach Microsoft Graph"
+	save(ts)
+	expect(t, r.run(true), id, OK, "could not reach Microsoft Graph")
+	save(&store.TenantState{Access: store.AccessError, Detail: "could not sign in", Attempted: now})
+	expect(t, r.run(true), id, Warn, "could not sign in")
+}

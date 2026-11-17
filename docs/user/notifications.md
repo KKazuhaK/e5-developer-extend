@@ -135,6 +135,7 @@ e5extend notify channel add mail --type email --preset gmail \
 ```
 
 `text` 兼容 Slack、企业微信、飞书一类机器人，`content` 兼容 Discord；`level` 是 `info` / `warning` / `critical`；恢复通知有 `origin`（结束的事件名）；免打扰汇总有 `items` 数组。
+订阅类事件（`subscription_*`）还有 `tenant`（租户 ID，读到之前是配置里写的租户）、`subscription`（订阅 ID，手动日期是 `manual`）、`sku`、`status`、`ends`（到期日，本机时区）；它们的 `account` 为空。
 旧版本只有 `event`、`account`、`message`、`time`、`text`、`content` 六个字段，新字段都是追加的，原来的接收端不用改。
 
 想自己决定请求体：加 `--format template --template-file body.tmpl`，模板的输出必须是合法的 JSON，例如：
@@ -155,8 +156,13 @@ e5extend notify channel add mail --type email --preset gmail \
 | `failure_spike` | 警告 | 调用失败率过高，见下 |
 | `stale` | 警告 | 超过 `notify.stale_after`（默认 72 小时）没有成功调用，之后每 24 小时最多再提醒一次 |
 | `secret_expiring` | 警告 | Client Secret 到期前 30、7、1 天和到期当天各一次 |
+| `subscription_expiring` | 警告 / 严重 | 关注的订阅离到期（`nextLifecycleDateTime`）30 天提醒一次（警告），7 天和 1 天各一次（严重），到期当天还会再提醒；续期后重新计 |
+| `subscription_status` | 严重 / 提示 | 订阅状态从 `Enabled` 变成 `Warning`、`Suspended`、`LockedOut` 或 `Deleted`（严重），或恢复为 `Enabled`（提示） |
+| `subscription_renewed` | 提示 | 订阅的到期时间向后移动了，写明从哪天移到哪天 |
 | `recovered` | 提示 | 之前的问题恢复了；`failure_spike` 解除时会写明“解除的是调用失败率过高” |
 | `period_ended` | 提示 | 运行期限结束 |
+
+订阅类事件属于租户而不是某个账号：消息和通用 Webhook 里的 `account` 为空，消息里写明 SKU 和租户（内置模板在租户 ID 与消息里的写法不同时会补上 ID；自定义模板可以用 `.Tenant`、`.SKU`、`.SubStatus`、`.EndDate`）。免打扰时段里严重的（7 天内到期、状态变坏）照常发，其余等到时段结束。详见 [订阅到期检测](getting-started.md#看订阅什么时候到期)。
 
 ### 什么算“调用失败率过高”（`failure_spike`）
 
@@ -179,7 +185,7 @@ e5extend notify channel add mail --type email --preset gmail \
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
-| `cooldown` | `6h` | 同一账号的同一告警在这段时间内不重复发送；严重告警冷却时间减半；留空表示默认值，只有 `0` 才关闭。管 `needs_attention`、`auto_paused`、`failure_spike`、`all_failing`；`stale`、`secret_expiring` 有各自的重复规则，`recovered`、`period_ended` 只发一次。被冷却压下的问题如果冷却结束时仍然存在，会在那时发出（时间显示的是它最初被发现的时间），之后恢复时正常发“已恢复”；冷却期间就已恢复的问题，既不发告警也不发“已恢复” |
+| `cooldown` | `6h` | 同一账号的同一告警在这段时间内不重复发送；严重告警冷却时间减半；留空表示默认值，只有 `0` 才关闭。管 `needs_attention`、`auto_paused`、`failure_spike`、`all_failing`、`subscription_status`；`stale`、`secret_expiring`、`subscription_expiring` 有各自的重复规则，`recovered`、`period_ended`、`subscription_renewed` 只发一次。被冷却压下的问题如果冷却结束时仍然存在，会在那时发出（时间显示的是它最初被发现的时间），之后恢复时正常发“已恢复”；冷却期间就已恢复的问题，既不发告警也不发“已恢复” |
 | `quiet_hours` | 空 | 例如 `"23:00-08:00"`（本机时间，可以跨午夜）。期间只发严重告警；其余的暂存，免打扰结束后**合并成一条**发出（只暂存了一条就按原样发；免打扰期间已经恢复的问题，暂存的告警和它的“已恢复”都会丢弃，不会收到没发过的问题的“已恢复”） |
 | `spike_rounds` / `spike_rate` / `spike_min_failures` | 3 / 0.5 / 5 | 见上 |
 | `events` | 空（全部） | 全局只发这些事件 |

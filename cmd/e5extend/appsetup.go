@@ -41,6 +41,7 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 	var f setupFlags
 	var appOnly bool
 	var account string
+	var noNewSecret, repair bool
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Create or update the app registration automatically",
@@ -49,15 +50,25 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 			"and grant administrator consent. Running it again only adds what is missing.\n\n" +
 			"With --app-only it sets up the client-secret identity instead and stores a new client secret in the\n" +
 			"vault under --account NAME; the secret is never shown. Add the account afterwards with\n" +
-			"  e5extend account add NAME --auth client_secret --tenant ... --client-id ... --stored-secret\n\n" +
+			"  e5extend account add NAME --auth client_secret --tenant ... --client-id ... --stored-secret\n" +
+			"With --repair --account NAME (any kind of existing account) it only adds the missing permissions (and\n" +
+			"consent) to that account's own app registration: no account is added, no client secret is created,\n" +
+			"stored or deleted, and no other app is touched. Use it when a newer version needs a permission the\n" +
+			"app lacks. --no-new-secret with --app-only is the same for a client_secret account.\n\n" +
 			"The administrator's token is kept in memory only. Manual setup: " + appsetup.Manual,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
+			if noNewSecret && !appOnly {
+				return errors.New("--no-new-secret is --repair for a client_secret account and needs --app-only: use --repair --account NAME")
+			}
+			if repair || noNewSecret {
+				return a.repairApp(cmd, f, account, appOnly)
+			}
 			if appOnly && account == "" {
 				return errors.New("--app-only needs --account NAME: the vault entry that receives the client secret")
 			}
 			if !appOnly && account != "" {
-				return errors.New("--account only applies with --app-only")
+				return errors.New("--account only applies with --app-only (or with --repair)")
 			}
 			sess, res, err := a.runAppSetup(cmd, ops.AppSetupOptions{AppOnly: appOnly, Method: f.method, Tenant: f.tenant, Account: account}, f)
 			if err != nil {
@@ -82,6 +93,8 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&appOnly, "app-only", false, "set up the client-secret identity (application permissions) instead of the delegated one")
 	cmd.Flags().StringVar(&account, "account", "", "with --app-only: account name whose vault entry receives the client secret")
+	cmd.Flags().BoolVar(&repair, "repair", false, "with --account: only add the missing permissions to the existing account's own app (no new account, no client secret)")
+	cmd.Flags().BoolVar(&noNewSecret, "no-new-secret", false, "with --app-only --account: same as --repair for a client_secret account")
 	cmd.Flags().StringVar(&f.method, "auth", "", "administrator sign-in: device_code (default) or browser")
 	cmd.Flags().StringVar(&f.tenant, "tenant", "", "tenant ID or domain of the administrator (default: organizations)")
 	f.register(cmd)
@@ -335,4 +348,34 @@ func (a *app) dropStoredSecret(name string) {
 		return
 	}
 	_ = v.Delete(vault.SecretKey(name))
+}
+
+// repairApp adds the missing permissions to the app of an existing account.
+func (a *app) repairApp(cmd *cobra.Command, f setupFlags, account string, appOnly bool) error {
+	if account == "" {
+		return errors.New("--repair needs --account NAME of an existing account")
+	}
+	for _, name := range []string{"tenant", "adopt", "new", "no-rename"} {
+		if cmd.Flags().Changed(name) {
+			return fmt.Errorf("--%s does not apply to a repair: the tenant and the app come from the account", name)
+		}
+	}
+	cfg, _, err := a.loadConfig()
+	if err != nil {
+		return err
+	}
+	acct, err := a.ops().FindAccount(cfg, account)
+	if err != nil {
+		return err
+	}
+	if appOnly && acct.Auth != config.AuthClientSecret {
+		return fmt.Errorf("account %q signs in with %s, not a client secret: leave out --app-only", account, acct.Auth)
+	}
+	sess, _, err := a.runAppSetup(cmd, ops.AppSetupOptions{Repair: true, Method: f.method, Account: account}, f)
+	if err != nil {
+		return err
+	}
+	sess.Close()
+	fmt.Fprintf(cmd.OutOrStdout(), "\nthe app of account %q has its permissions; check with: e5extend subscription\n", account)
+	return nil
 }

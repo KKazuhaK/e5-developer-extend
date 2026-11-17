@@ -390,3 +390,62 @@ func TestAccountAddAutoRevokesTheSecretWhenAddingTheAccountFails(t *testing.T) {
 		t.Error("the account was added")
 	}
 }
+
+func TestAppSetupNoNewSecretRepairsTheAccountsOwnApp(t *testing.T) {
+	e, g, _ := setupEnv(t)
+	objID := g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "appId": testGUID, "tags": []string{"e5extend", "e5extend:app"}})
+	t.Setenv(vault.EnvMasterKey, vault.EncodeKey(make([]byte, 32)))
+	e.mustRun("OLD-SECRET\n", "account", "add", "app1", "--auth", "client_secret", "--tenant", "tid-123", "--client-id", testGUID, "--username", "u@t.example", "--secret-expires", "2027-06-30")
+	for _, bad := range [][]string{
+		{"app", "setup", "--no-new-secret", "--yes"},
+		{"app", "setup", "--app-only", "--no-new-secret", "--yes"},
+		{"app", "setup", "--app-only", "--account", "nobody", "--no-new-secret", "--yes"},
+	} {
+		if _, _, err := e.run("", bad...); err == nil {
+			t.Errorf("%v must be refused", bad)
+		}
+	}
+	if len(g.Writes()) != 0 {
+		t.Fatalf("a refused command wrote: %v", g.Writes())
+	}
+	out, errOut, err := e.run("", "app", "setup", "--app-only", "--account", "app1", "--no-new-secret", "--yes")
+	if err != nil {
+		t.Fatalf("%v\n%s\n%s", err, out, errOut)
+	}
+	if strings.Contains(out, "create a client secret") || strings.Contains(out, "next: e5extend account add") || len(g.PasswordNames(objID)) != 0 {
+		t.Errorf("a repair touched the secret:\n%s", out)
+	}
+	if !strings.Contains(out, "app1") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestAppSetupRepairWorksForBothKindsAndRejectsCreateFlags(t *testing.T) {
+	e, g, _ := setupEnv(t)
+	t.Setenv(vault.EnvMasterKey, vault.EncodeKey(make([]byte, 32)))
+	g.AddApp(map[string]any{"displayName": "E5 Developer Extend", "appId": testGUID, "tags": []string{"e5extend", "e5extend:delegated"}})
+	e.mustRun("", "account", "add", "dev", "--auth", "device_code", "--tenant", "tid-123", "--client-id", testGUID)
+	for _, bad := range [][]string{
+		{"app", "setup", "--repair", "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--tenant", "x", "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--adopt", testGUID, "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--new", "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--no-rename", "--yes"},
+		{"app", "setup", "--repair", "--app-only", "--account", "dev", "--yes"},
+		{"app", "setup", "--no-new-secret", "--account", "dev", "--yes"},
+	} {
+		if _, _, err := e.run("", bad...); err == nil {
+			t.Errorf("%v must be refused", bad)
+		}
+	}
+	if len(g.Writes()) != 0 {
+		t.Fatalf("a refused command wrote: %v", g.Writes())
+	}
+	out, errOut, err := e.run("", "app", "setup", "--repair", "--account", "dev", "--yes")
+	if err != nil {
+		t.Fatalf("%v\n%s\n%s", err, out, errOut)
+	}
+	if !strings.Contains(out, `account "dev"`) || len(g.Apps) != 1 {
+		t.Errorf("out:\n%s (apps %d)", out, len(g.Apps))
+	}
+}

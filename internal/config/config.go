@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/pelletier/go-toml/v2"
@@ -38,12 +39,14 @@ const (
 
 // Config is the root of config.toml.
 type Config struct {
-	Version  int       `toml:"version"`
-	Schedule Schedule  `toml:"schedule"`
-	Network  Network   `toml:"network"`
-	Notify   Notify    `toml:"notify"`
-	Vault    Vault     `toml:"vault"`
-	Accounts []Account `toml:"accounts"`
+	Version  int      `toml:"version"`
+	Schedule Schedule `toml:"schedule"`
+	Network  Network  `toml:"network"`
+	Notify   Notify   `toml:"notify"`
+	// Subscription selects which subscriptions the expiry check watches.
+	Subscription Subscription `toml:"subscription"`
+	Vault        Vault        `toml:"vault"`
+	Accounts     []Account    `toml:"accounts"`
 }
 
 // Schedule controls when and how much the engine runs.
@@ -93,7 +96,8 @@ type Notify struct {
 }
 
 // NotifyEvents are the alert kinds accepted in Notify.Events.
-var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing"}
+var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
+	"subscription_expiring", "subscription_status", "subscription_renewed"}
 
 // DefaultStaleAfter is the default for Notify.StaleAfter.
 const DefaultStaleAfter = "72h"
@@ -114,6 +118,57 @@ type Account struct {
 	Paused        bool     `toml:"paused"`
 	SecretExpires string   `toml:"secret_expires"`
 	HomeAccountID string   `toml:"home_account_id"`
+	// SubscriptionExpires (YYYY-MM-DD) is the manual fallback for the expiry of
+	// the tenant's E5 subscription, used while it cannot be read from Graph.
+	// It belongs to the tenant: it is written on one account of the tenant.
+	SubscriptionExpires string `toml:"subscription_expires"`
+}
+
+// Subscription holds the subscription expiry check settings.
+type Subscription struct {
+	// Skus lists the SKU part numbers to watch; an entry matches every SKU
+	// that starts with it (case-insensitive). Empty means DefaultSubscriptionSKU.
+	Skus []string `toml:"skus"`
+}
+
+// DefaultSubscriptionSKU is the SKU prefix of E5 developer subscriptions.
+const DefaultSubscriptionSKU = "DEVELOPERPACK"
+
+// SKUPrefixes returns the watched SKU prefixes, upper-cased.
+func (s Subscription) SKUPrefixes() []string {
+	var out []string
+	for _, p := range s.Skus {
+		if p = strings.ToUpper(strings.TrimSpace(p)); p != "" {
+			out = append(out, p)
+		}
+	}
+	if len(out) == 0 {
+		return []string{DefaultSubscriptionSKU}
+	}
+	return out
+}
+
+// Watches reports whether a subscription with this SKU part number is watched.
+func (s Subscription) Watches(sku string) bool {
+	sku = strings.ToUpper(sku)
+	for _, p := range s.SKUPrefixes() {
+		if strings.HasPrefix(sku, p) {
+			return true
+		}
+	}
+	return false
+}
+
+// TenantKey names the tenant of an account for grouping: the configured
+// tenant, lower-cased. The multi-tenant endpoints (organizations, common,
+// consumers) do not name one tenant, so such an account stands alone.
+func (a Account) TenantKey() string {
+	t := strings.ToLower(strings.TrimSpace(a.Tenant))
+	switch t {
+	case "", "common", "organizations", "consumers":
+		return "account:" + a.Name
+	}
+	return t
 }
 
 // Delegated reports whether the account signs in as a user.
@@ -143,8 +198,9 @@ func Default() *Config {
 			SpikeRounds: DefaultSpikeRounds, SpikeRate: DefaultSpikeRate, SpikeMinFailures: DefaultSpikeMinFailures,
 			Channels: []Channel{},
 		},
-		Vault:    Vault{Backend: BackendAuto},
-		Accounts: []Account{},
+		Subscription: Subscription{Skus: []string{}},
+		Vault:        Vault{Backend: BackendAuto},
+		Accounts:     []Account{},
 	}
 }
 

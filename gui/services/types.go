@@ -14,6 +14,12 @@ type Snapshot = ops.Snapshot
 // AccountSummary is one account in a Snapshot.
 type AccountSummary = ops.AccountSummary
 
+// TenantSubscriptions is what is known about the subscriptions of one tenant.
+type TenantSubscriptions = ops.TenantSubscriptions
+
+// SubscriptionRefresh is the outcome of a refresh.
+type SubscriptionRefresh = ops.SubscriptionRefresh
+
 // AccountInput is used to add and edit an account. Secret is only ever
 // received; it is never part of a result.
 type AccountInput = ops.AccountInput

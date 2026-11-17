@@ -68,6 +68,7 @@ func runWindow(page string) error {
 	app.RegisterService(application.NewService(services.NewHealthService(backend)))
 	app.RegisterService(application.NewService(services.NewCatalogService(backend)))
 	app.RegisterService(application.NewService(services.NewBackupService(backend)))
+	app.RegisterService(application.NewService(services.NewSubscriptionService(backend)))
 
 	win = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",

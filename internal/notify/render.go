@@ -33,7 +33,7 @@ type Data struct {
 	Level      string // info, warning or critical
 	LevelLabel string
 	Account    string // account name; empty for global events
-	Tenant     string // tenant ID of the account; built-in templates never show it
+	Tenant     string // tenant ID (or configured tenant) of the account or subscription; built-in templates show it only for subscription events, inside Message
 	Message    string // what happened, without secrets
 	Time       string // local time of the event
 	Hint       string // a suggested next step
@@ -41,6 +41,8 @@ type Data struct {
 	FailRate string
 	Failures int
 	Rounds   int
+	// SKU, SubStatus and EndDate (YYYY-MM-DD) describe the subscription of a subscription event.
+	SKU, SubStatus, EndDate string
 	// Origin is, for a recovery, the kind of the event that ended; OriginLabel is its name.
 	Origin      string
 	OriginLabel string
@@ -83,14 +85,16 @@ var labels = map[string]map[string]string{
 	"zh": {
 		NeedsAttention: "需要处理", Recovered: "已恢复", AutoPaused: "已自动暂停", Stale: "长时间没有成功调用",
 		SecretExpiring: "密钥即将过期", PeriodEnded: "运行周期已结束", FailureSpike: "调用失败率过高",
-		AllFailing: "所有账号同时异常", Test: "测试消息", Digest: "免打扰期间的告警汇总",
+		AllFailing: "所有账号同时异常", SubscriptionExpiring: "E5 订阅即将到期", SubscriptionStatus: "E5 订阅状态变化",
+		SubscriptionRenewed: "E5 订阅已续期", Test: "测试消息", Digest: "免打扰期间的告警汇总",
 		"level.info": "提示", "level.warning": "警告", "level.critical": "严重",
 	},
 	"en": {
 		NeedsAttention: "Needs attention", Recovered: "Recovered", AutoPaused: "Paused automatically",
 		Stale: "No successful call for a long time", SecretExpiring: "Client secret expiring",
 		PeriodEnded: "Run period ended", FailureSpike: "High failure rate", AllFailing: "All accounts failing",
-		Test: "Test message", Digest: "Alerts held during quiet hours",
+		SubscriptionExpiring: "E5 subscription expiring", SubscriptionStatus: "E5 subscription status changed",
+		SubscriptionRenewed: "E5 subscription renewed", Test: "Test message", Digest: "Alerts held during quiet hours",
 		"level.info": "Info", "level.warning": "Warning", "level.critical": "Critical",
 	},
 }
@@ -131,6 +135,10 @@ func Hint(kind, account, lang string) string {
 		return pick("需要继续运行时，在设置里调整运行周期。", "To keep running, change the run period in the settings.")
 	case FailureSpike:
 		return pick("运行 e5extend doctor 查看失败的调用类型（限流 429、5xx、网络错误）；账号本身没有问题时通常会自己恢复。", "Run e5extend doctor to see which calls fail (429 throttling, 5xx, network errors); it usually clears by itself.")
+	case SubscriptionExpiring:
+		return pick("在 Microsoft 365 管理中心续订；运行 e5extend subscription 查看当前到期日和续期记录。", "Renew it in the Microsoft 365 admin center; run e5extend subscription to see the end date and the renewal history.")
+	case SubscriptionStatus:
+		return pick("运行 e5extend subscription 查看当前状态，并在 Microsoft 365 管理中心（账单 > 你的产品）核对订阅。", "Run e5extend subscription to see the status, and check the subscription in the Microsoft 365 admin center (Billing > Your products).")
 	case AllFailing:
 		return pick("先检查网络、代理和 Microsoft 365 服务状态，再逐个看账号。", "Check the network, the proxy and the Microsoft 365 service status first, then each account.")
 	}
@@ -148,9 +156,16 @@ func NewData(ev Event, lang, host string, loc *time.Location) Data {
 	}
 	d := Data{
 		App: AppName, Host: host, Event: ev.Event, EventLabel: EventLabel(ev.Event, lang),
-		Level: ev.Level(), LevelLabel: levelLabel(ev.Level(), lang), Account: ev.Account, Tenant: ev.Tenant,
+		Level: ev.Level(), LevelLabel: levelLabel(ev.Level(), lang), Account: ev.Account, Tenant: ev.PublicTenant(),
 		Message: ev.Message, Time: t.In(loc).Format("2006-01-02 15:04 MST"), Hint: Hint(ev.Event, ev.Account, lang),
 		Failures: ev.Failures, Rounds: ev.Rounds, Origin: ev.Origin,
+	}
+	if ev.Subscription != "" {
+		d.SKU, d.SubStatus, d.EndDate = ev.SKU, ev.SubStatus, ev.EndDate
+		// The message names the tenant the way the configuration does; add its ID when that is another string.
+		if t := ev.PublicTenant(); t != "" && !strings.Contains(ev.Message, t) {
+			d.Message += " (tenant " + t + ")"
+		}
 	}
 	if ev.IsTest {
 		// Titles and headlines are built from the label, so the mark shows everywhere.
@@ -369,6 +384,15 @@ func SampleEvent(kind string, now time.Time) Event {
 		ev.Message = "client secret expires in 7 days (" + now.AddDate(0, 0, 7).Format("2006-01-02") + "); create a new one and run: e5extend account set-secret"
 	case PeriodEnded:
 		ev.Message = "the run period has ended; no more rounds will run"
+	case SubscriptionExpiring:
+		ev.Account, ev.Subscription, ev.Severity = "", "sub-1", config.LevelCritical
+		ev.Message = "subscription DEVELOPERPACK_E5 of tenant contoso.onmicrosoft.com expires in 7 days (" + now.AddDate(0, 0, 7).UTC().Format("2006-01-02") + "); renew it in the Microsoft 365 admin center"
+	case SubscriptionStatus:
+		ev.Account, ev.Subscription, ev.Severity = "", "sub-1", config.LevelCritical
+		ev.Message = "subscription DEVELOPERPACK_E5 of tenant contoso.onmicrosoft.com changed from Enabled to Warning; check it in the Microsoft 365 admin center (Billing > Your products)"
+	case SubscriptionRenewed:
+		ev.Account, ev.Subscription = "", "sub-1"
+		ev.Message = "subscription DEVELOPERPACK_E5 of tenant contoso.onmicrosoft.com was renewed: the end date moved from " + now.AddDate(0, 0, 3).UTC().Format("2006-01-02") + " to " + now.AddDate(0, 3, 3).UTC().Format("2006-01-02")
 	case FailureSpike:
 		ev.Message, ev.Failures, ev.Rounds, ev.FailRate = "9 of the last 12 calls failed (75%) over the last 3 rounds", 9, 3, 0.75
 	case AllFailing:
@@ -381,6 +405,12 @@ func SampleEvent(kind string, now time.Time) Event {
 		ev.Account = ""
 		ev.Message = "2 alerts were held during the quiet hours"
 		ev.Items = []Event{SampleEvent(Stale, now), SampleEvent(SecretExpiring, now)}
+	}
+	if ev.Subscription != "" {
+		ev.Tenant, ev.SKU, ev.SubStatus, ev.EndDate = "0b3c0b0e-1111-4222-8333-444455556666", "DEVELOPERPACK_E5", "Enabled", now.AddDate(0, 0, 7).Format("2006-01-02")
+		if kind == SubscriptionStatus {
+			ev.SubStatus = "Warning"
+		}
 	}
 	return ev
 }

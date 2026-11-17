@@ -1,6 +1,6 @@
 import type {
   AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
-  RecommendResult, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
+  RecommendResult, SubscriptionRefresh, TenantSubscriptions, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
 } from "./types";
 
 /**
@@ -42,6 +42,12 @@ export interface Api {
    */
   appSetup: {
     begin(id: string, start: AppSetupStart): Promise<void>;
+    /**
+     * Repairs an existing account: adds the missing permissions to the app registration the account signs in
+     * with (no new account, no new client secret; any other app is refused). Same events as begin; the caller
+     * ends it with finish after "result".
+     */
+    repair(id: string, account: string, method: "device_code" | "browser"): Promise<void>;
     /** The plan as it would be for this choice (actions and missing permissions); changes nothing. */
     preview(id: string, choice: AppSetupChoice): Promise<AppSetupPlan>;
     apply(id: string, choice: AppSetupChoice): Promise<void>;
@@ -86,6 +92,14 @@ export interface Api {
     /** Starts the installed service when it is stopped; does not rewrite it. */
     startService(): Promise<ServiceResult>;
     uninstallService(): Promise<ServiceResult>;
+  };
+  subscription: {
+    /** What the engine last saw of each tenant's subscriptions; makes no network call. */
+    list(): Promise<TenantSubscriptions[]>;
+    /** Reads them now for the tenant of the account (every tenant when empty); a running engine is asked and waited for. */
+    refresh(account: string): Promise<SubscriptionRefresh>;
+    /** Writes the end date (YYYY-MM-DD, "" removes it) of the account's tenant, for when it cannot be read. */
+    setExpires(account: string, date: string): Promise<void>;
   };
   catalog: {
     list(account: string): Promise<CatalogEntry[]>;

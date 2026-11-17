@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -203,7 +204,15 @@ func TestRecommendedPermissionsAreUsedByTheCatalog(t *testing.T) {
 			}
 		}
 	}
+	// Besides the catalog, the subscription expiry check (GET /directory/subscriptions)
+	// is a user of this permission, for both identities.
+	used[Delegated][SubscriptionPermission], used[App][SubscriptionPermission] = true, true
 	lists := map[string][]string{Delegated: RecommendedDelegated, App: RecommendedApplication}
+	for _, kind := range []string{Delegated, App} {
+		if !slices.Contains(lists[kind], SubscriptionPermission) {
+			t.Errorf("the subscription check needs %s, which is not recommended for %s", SubscriptionPermission, kind)
+		}
+	}
 	for kind, list := range lists {
 		seen := map[string]bool{}
 		for _, p := range list {

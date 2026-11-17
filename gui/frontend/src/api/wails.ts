@@ -1,9 +1,9 @@
 import { Browser, Events } from "@wailsio/runtime";
 import {
-  AccountService, AppSetupService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService,
+  AccountService, AppSetupService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService, SubscriptionService,
 } from "../../bindings/github.com/KKazuhaK/e5-developer-extend/gui/services";
 import type { Api } from "./interface";
-import type { AppSetupEvent, AppSetupPlan, LoginEvent, RunDone, Snapshot } from "./types";
+import type { AppSetupEvent, AppSetupPlan, LoginEvent, RunDone, Snapshot, TenantSubscriptions } from "./types";
 
 // The bindings are generated (gitignored); see README. Generated models are
 // classes whose structure matches ./types.ts, so results are cast. Go nil
@@ -18,6 +18,14 @@ function payload<T>(ev: { data?: unknown }): T {
   const d = ev?.data;
   return (Array.isArray(d) ? d[0] : d) as T;
 }
+
+const normTenants = (ts: unknown): TenantSubscriptions[] =>
+  arr(cast<TenantSubscriptions[] | null>(ts)).map((t) => ({
+    ...t,
+    accounts: arr(t.accounts),
+    watchedSkus: arr(t.watchedSkus),
+    subscriptions: arr(t.subscriptions).map((s) => ({ ...s, renewals: arr(s.renewals) })),
+  }));
 
 export const wailsApi: Api = {
   status: {
@@ -54,6 +62,7 @@ export const wailsApi: Api = {
   },
   appSetup: {
     begin: (id, s) => AppSetupService.Begin(id, cast(s)),
+    repair: (id, account, method) => AppSetupService.Repair(id, account, method),
     preview: async (id, c) => planOf(cast<AppSetupPlan>(await AppSetupService.Preview(id, cast(c)))),
     apply: (id, c) => AppSetupService.Apply(id, cast(c)),
     finish: (id) => AppSetupService.Finish(id),
@@ -119,6 +128,14 @@ export const wailsApi: Api = {
     installService: async () => norm(await HealthService.InstallService()),
     startService: async () => norm(await HealthService.StartService()),
     uninstallService: async () => norm(await HealthService.UninstallService()),
+  },
+  subscription: {
+    list: async () => normTenants(await SubscriptionService.List()),
+    refresh: async (a) => {
+      const r = await SubscriptionService.Refresh(a);
+      return { queued: r.queued, tenants: normTenants(r.tenants) };
+    },
+    setExpires: (a, d) => SubscriptionService.SetExpires(a, d),
   },
   catalog: {
     list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes) })),

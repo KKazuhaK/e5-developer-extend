@@ -5,7 +5,7 @@ import type { Api } from "./interface";
 import type {
   AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
   ChannelInput, ChannelType, ChannelView, ChannelTest, MessagePreview, EmailPreset, SecretStatus,
-  Settings, Snapshot, ValidationError,
+  Settings, Snapshot, SubscriptionView, TenantSubscriptions, ValidationError,
 } from "./types";
 
 type Host = "gui" | "service" | "none";
@@ -108,6 +108,65 @@ function seedAccounts() {
   ];
 }
 if (!controls.empty) seedAccounts();
+
+
+// ---- subscriptions ----
+// ?subscription=ok|expiring|warning|nopermission|manual picks what the check found for the first tenant
+// (nopermission and manual apply to every tenant; manual also has a hand-written date on the first).
+type SubVariant = "ok" | "expiring" | "warning" | "nopermission" | "manual";
+let subVariantNow = (["ok", "expiring", "warning", "nopermission", "manual"].includes(q.get("subscription") ?? "") ? q.get("subscription") : "ok") as SubVariant;
+const subManual = new Map<string, string>(); // tenant -> hand-written date
+const subCheckedAt = new Map<string, number>();
+const daysFrom = (iso: string) => Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) / 86_400_000);
+function mockSub(id: string, sku: string, status: string, expires: number, extra: Partial<SubscriptionView> = {}): SubscriptionView {
+  return {
+    id, sku, watched: sku.startsWith("DEVELOPERPACK"), status, isTrial: false, licenses: 25, expires: day(expires), daysLeft: expires, checkedAt: iso(now0 - 3 * 3_600_000),
+    renewals: [], ...extra,
+  };
+}
+function mockTenants(): TenantSubscriptions[] {
+  const groups = new Map<string, string[]>();
+  for (const a of accounts) {
+    const key = a.input.tenant.toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), a.input.name]);
+  }
+  if (subVariantNow === "manual" && groups.size > 0 && !subManual.has([...groups.keys()][0])) subManual.set([...groups.keys()][0], day(40));
+  return [...groups.entries()].map(([tenant, names], i) => {
+    const first = i === 0;
+    const checked = subCheckedAt.get(tenant) ?? now0 - 3 * 3_600_000;
+    const base = {
+      tenant, label: tenant, tenantId: first ? MOCK_TENANT : "", accounts: names, detail: "", attemptedAt: iso(checked), nextCheckAt: iso(checked + 86_400_000),
+      manualExpires: subManual.get(tenant) ?? "", manualDaysLeft: null as number | null, manualInUse: false, manualRedundant: false,
+      fixAccount: names[0],
+      fixKind: (accounts.find((a) => a.input.name === names[0])?.input.auth === "client_secret" ? "app" : "delegated") as "app" | "delegated",
+      fixCommand: accounts.find((a) => a.input.name === names[0])?.input.auth === "client_secret"
+        ? `e5extend app setup --repair --account ${names[0]}`
+        : `e5extend app setup --repair --account ${names[0]}`,
+      watchedSkus: ["DEVELOPERPACK"],
+    };
+    let t: TenantSubscriptions;
+    if (subVariantNow === "nopermission" || subVariantNow === "manual") {
+      t = { ...base, access: "no_permission", checkedAt: null, subscriptions: [] };
+    } else {
+      const days = first ? (subVariantNow === "expiring" ? 5 : subVariantNow === "warning" ? 20 : 89) : 60 + i * 37;
+      const status = first && subVariantNow === "warning" ? "Warning" : "Enabled";
+      const subs = [mockSub(`s-${i}`, "DEVELOPERPACK_E5", status, days, first ? {
+        renewals: [
+          { from: day(days - 180), to: day(days - 90), seenAt: iso(now0 - 91 * 86_400_000) },
+          { from: day(days - 90), to: day(days), seenAt: iso(now0 - 2 * 86_400_000) },
+        ],
+      } : {})];
+      if (first) subs.push(mockSub("s-x", "POWER_BI_STANDARD", "Enabled", 400, { licenses: 1_000_000, isTrial: true }));
+      t = { ...base, access: "ok", checkedAt: iso(checked), subscriptions: subs.map((x) => ({ ...x, checkedAt: iso(checked) })) };
+    }
+    if (t.manualExpires) {
+      t.manualDaysLeft = daysFrom(t.manualExpires);
+      t.manualInUse = !t.subscriptions.some((x) => x.watched);
+      t.manualRedundant = !t.manualInUse;
+    }
+    return t;
+  });
+}
 
 // ---- catalog ----
 const CATALOG: { id: string; category: string; name: string; scopes: string[] }[] = [
@@ -232,7 +291,7 @@ const setupListeners = new Map<string, Set<(e: AppSetupEvent) => void>>();
 const setupTimers = new Map<string, number[]>();
 // catalog.RecommendedDelegated and catalog.RecommendedApplication, verbatim.
 const DELEGATED_PERMS = [
-  "User.Read", "User.ReadBasic.All", "GroupMember.Read.All", "Mail.ReadBasic", "MailboxSettings.Read", "Calendars.ReadBasic", "Contacts.Read",
+  "User.Read", "User.ReadBasic.All", "Organization.Read.All", "GroupMember.Read.All", "Mail.ReadBasic", "MailboxSettings.Read", "Calendars.ReadBasic", "Contacts.Read",
   "Files.Read", "Sites.Read.All", "Notes.Read", "Tasks.Read", "Team.ReadBasic.All", "offline_access",
 ];
 const APP_PERMS = [
@@ -253,7 +312,7 @@ function setupClear(id: string) {
   (setupTimers.get(id) ?? []).forEach((t) => clearTimeout(t));
   setupTimers.delete(id);
 }
-interface MockSetup { start: AppSetupStart; plan: AppSetupPlan; result: AppSetupResult | null }
+interface MockSetup { start: AppSetupStart; plan: AppSetupPlan; result: AppSetupResult | null; repair?: boolean }
 const setups = new Map<string, MockSetup>();
 
 /** The actions and missing permissions for the app the plan is about; choice is the user's decision when candidates exist. */
@@ -425,7 +484,9 @@ const EVENT_LABEL: Record<string, [string, string]> = {
   needs_attention: ["需要处理", "Needs attention"], recovered: ["已恢复", "Recovered"], auto_paused: ["已自动暂停", "Paused automatically"],
   stale: ["长时间没有成功调用", "No successful call for a long time"], secret_expiring: ["密钥即将过期", "Client secret expiring"],
   period_ended: ["运行周期已结束", "Run period ended"], failure_spike: ["调用失败率过高", "High failure rate"],
-  all_failing: ["所有账号同时异常", "All accounts failing"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
+  all_failing: ["所有账号同时异常", "All accounts failing"],
+  subscription_expiring: ["E5 订阅即将到期", "E5 subscription expiring"], subscription_status: ["E5 订阅状态变化", "E5 subscription status changed"],
+  subscription_renewed: ["E5 订阅已续期", "E5 subscription renewed"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
 };
 
 function validateSettings(s: Settings): ValidationError[] {
@@ -620,6 +681,30 @@ export const mockApi: Api = {
       setupAt(id, 6000, () => setupEmit(id, { kind: "signed_in", message: "signed in" }));
       setupAt(id, 7200, () => setupEmit(id, { kind: "plan", message: "", plan }));
     },
+    async repair(id, account, method) {
+      const a = accounts.find((x) => x.input.name === account);
+      if (!a) throw new Error(`no account named "${account}"`);
+      if (setups.size > 0) throw new Error("an app setup is already in progress");
+      setupClear(id);
+      const app = a.input.auth === "client_secret";
+      const displayName = app ? "E5 Developer Extend (app-only)" : "E5 Developer Extend";
+      const plan: AppSetupPlan = {
+        kind: app ? "app" : "delegated", tenantId: MOCK_TENANT, displayName, tags: ["e5extend", app ? "e5extend:app" : "e5extend:delegated"],
+        permissions: app ? APP_PERMS : DELEGATED_PERMS, missing: ["Organization.Read.All"], existing: { clientId: a.input.clientId, displayName },
+        candidates: [], needsChoice: false,
+        actions: [{ code: "add_permissions", text: "add 1 permission(s)" }, app ? { code: "assign_roles", text: "grant the application permissions" } : { code: "grant_consent", text: "grant administrator consent" }],
+      };
+      setups.set(id, { start: { name: account, appOnly: app, auth: "device_code", username: "", method }, plan, result: null, repair: true });
+      await wait(150);
+      if (!setups.has(id)) return;
+      if (method === "device_code") {
+        setupAt(id, 400, () => setupEmit(id, { kind: "device_code", message: "To sign in, open https://microsoft.com/devicelogin and enter the code to authenticate.", userCode: "K4PD-82MQ", verificationUri: "https://microsoft.com/devicelogin" }));
+      } else {
+        setupAt(id, 400, () => setupEmit(id, { kind: "browser_opened", message: "complete the sign-in in your browser" }));
+      }
+      setupAt(id, 2000, () => setupEmit(id, { kind: "signed_in", message: "signed in" }));
+      setupAt(id, 2600, () => setupEmit(id, { kind: "plan", message: "", plan }));
+    },
     async preview(id, choice) {
       await wait(250);
       const st = setups.get(id);
@@ -631,6 +716,21 @@ export const mockApi: Api = {
       await wait(100);
       const st = setups.get(id);
       if (!st) throw new Error("this app setup is not running any more");
+      if (st.repair) {
+        setupAt(id, 500, () => setupEmit(id, { kind: "progress", message: `updating the app registration "${st.plan.displayName}"...` }));
+        setupAt(id, 1400, () => setupEmit(id, { kind: "progress", message: st.plan.kind === "app" ? `granting ${st.plan.missing[0]}...` : "granting administrator consent..." }));
+        setupAt(id, 2300, () => {
+          st.result = {
+            kind: st.plan.kind, tenantId: st.plan.tenantId, clientId: st.plan.existing?.clientId ?? MOCK_CLIENT, displayName: st.plan.displayName,
+            createdApp: false, adoptedApp: false, renamed: false, consentGranted: true, adminConsentUrl: "", consentError: "",
+            secretExpires: "", secretCreated: false, removedSecrets: 0, notRemovedSecrets: 0,
+          };
+          // The permission is there now: the next subscription check reads the subscription.
+          subVariantNow = "ok";
+          setupEmit(id, { kind: "result", message: "done", result: st.result });
+        });
+        return;
+      }
       if (st.plan.needsChoice && !choice.adopt && !choice.createNew) throw new Error("choose whether to adopt an existing app registration or create a new one");
       const { actions } = mockActions(st.plan, st.plan.needsChoice ? choice : null);
       const steps = mockProgress(st.plan, actions, st.start.name, st.plan.candidates.find((c) => c.clientId === choice.adopt)?.displayName);
@@ -762,7 +862,13 @@ export const mockApi: Api = {
       if (template.includes("{{.Nope}}")) throw new Error("template: can't evaluate field Nope (checked with the example needs_attention event)");
       const zh = language === "zh" || (language === "" && (settings.ui.language === "zh" || (settings.ui.language === "auto" && navigator.language.startsWith("zh"))));
       const label = (EVENT_LABEL[event] ?? [event, event])[zh ? 0 : 1];
-      const msg = event === "failure_spike" ? "9 of the last 12 calls failed (75%) over the last 3 rounds" : "needs attention: login required; run: e5extend account login demo";
+      const SUB = "of tenant contoso.onmicrosoft.com";
+      const msg = ({
+        failure_spike: "9 of the last 12 calls failed (75%) over the last 3 rounds",
+        subscription_expiring: `subscription DEVELOPERPACK_E5 ${SUB} expires in 7 days (2027-02-14); renew it in the Microsoft 365 admin center`,
+        subscription_status: `subscription DEVELOPERPACK_E5 ${SUB} changed from Enabled to Warning; check it in the Microsoft 365 admin center (Billing > Your products)`,
+        subscription_renewed: `subscription DEVELOPERPACK_E5 ${SUB} was renewed: the end date moved from 2027-02-14 to 2027-05-14`,
+      } as Record<string, string>)[event] ?? "needs attention: login required; run: e5extend account login demo";
       const bold = (x: string) => (type === "telegram" ? `<b>${x}</b>` : type === "slack" ? `*${x}*` : ["wecom", "dingtalk", "discord", "serverchan"].includes(type) ? `**${x}**` : x);
       const body = template.trim()
         ? template.replace(/\{\{\s*\.(\w+)\s*\}\}/g, (_m, k: string) => (k === "Event" ? event : k === "Account" ? "demo" : k === "Message" ? msg : k === "Level" ? "warning" : ""))
@@ -819,6 +925,27 @@ export const mockApi: Api = {
           skippedCodes: mode === "merge" ? [{ code: "merge_settings", args: [] }] : [], noteCodes: [],
         },
       };
+    },
+  },
+  subscription: {
+    async list() {
+      await lag();
+      return mockTenants();
+    },
+    async refresh(account) {
+      await wait(rand(500, 900));
+      const key = account ? accounts.find((a) => a.input.name === account)?.input.tenant.toLowerCase() : null;
+      for (const t of mockTenants()) if (!key || t.tenant === key) subCheckedAt.set(t.tenant, Date.now());
+      return { tenants: mockTenants(), queued: false };
+    },
+    async setExpires(account, date) {
+      await lag();
+      const a = accounts.find((x) => x.input.name === account);
+      if (!a) throw new Error(`no account named "${account}"`);
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`not a YYYY-MM-DD date: "${date}"`);
+      const key = a.input.tenant.toLowerCase();
+      if (date) subManual.set(key, date);
+      else subManual.delete(key);
     },
   },
   health: {

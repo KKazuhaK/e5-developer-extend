@@ -147,8 +147,11 @@ interface Failure { code: string; message: string; roles: string[] }
  * The second step of the automatic path: administrator sign-in, the plan, the
  * confirmation and the progress. Leaving the step before it ends cancels the session.
  */
-export function AppSetupStep({ input, method, done, onResult, onManual, onRestart, onAbort }: {
-  input: AccountInput; method: AdminMethod; done: AppSetupResult | null;
+export function AppSetupStep({ input, method, done, repair, onResult, onManual, onRestart, onAbort }: {
+  /** Not used in repair mode. */
+  input?: AccountInput; method: AdminMethod; done: AppSetupResult | null;
+  /** The account whose app registration is repaired: only missing permissions are added, no account and no secret is made. */
+  repair?: string;
   onResult: (r: AppSetupResult, sessionId: string) => void; onManual: () => void; onRestart: () => void; onAbort: () => void;
 }) {
   const { t } = useI18n();
@@ -207,11 +210,10 @@ export function AppSetupStep({ input, method, done, onResult, onManual, onRestar
           break;
       }
     });
-    const start: AppSetupStart = {
-      name: input.name.trim(), appOnly: input.auth === "client_secret", auth: input.auth === "browser" ? "browser" : "device_code",
-      username: input.username.trim(), method,
-    };
-    api.appSetup.begin(sid, start).catch((ex) => alive && failWith({ code: "other", message: errMsg(ex), roles: [] }));
+    const start: AppSetupStart | null = input
+      ? { name: input.name.trim(), appOnly: input.auth === "client_secret", auth: input.auth === "browser" ? "browser" : "device_code", username: input.username.trim(), method }
+      : null;
+    (repair ? api.appSetup.repair(sid, repair, method) : start ? api.appSetup.begin(sid, start) : Promise.reject(new Error("no account"))).catch((ex) => alive && failWith({ code: "other", message: errMsg(ex), roles: [] }));
     return () => {
       alive = false;
       off();
@@ -238,7 +240,7 @@ export function AppSetupStep({ input, method, done, onResult, onManual, onRestar
   };
 
   const body = (() => {
-    if (phase === "done" && result) return <DoneView result={result} />;
+    if (phase === "done" && result) return <DoneView result={result} repair={!!repair} />;
     if (phase === "error" && fail) return <FailView fail={fail} onManual={onManual} onRestart={onRestart} />;
     if (phase === "signin" && ev) {
       return (
@@ -401,7 +403,7 @@ function ProgressView({ lines }: { lines: string[] }) {
   );
 }
 
-function DoneView({ result }: { result: AppSetupResult }) {
+function DoneView({ result, repair }: { result: AppSetupResult; repair?: boolean }) {
   const { t } = useI18n();
   const what = result.createdApp
     ? t("auto.done.created", { name: result.displayName })
@@ -437,7 +439,7 @@ function DoneView({ result }: { result: AppSetupResult }) {
           <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> {t("auto.done.notRemovedSecrets", { n: result.notRemovedSecrets })}
         </p>
       )}
-      <p className="text-[13px] text-muted-foreground">{t("auto.done.next")}</p>
+      <p className="text-[13px] text-muted-foreground">{t(repair ? "auto.done.nextRepair" : "auto.done.next")}</p>
     </div>
   );
 }

@@ -702,3 +702,70 @@ func TestAppSetupCancelDuringPreviewIsRaceFree(t *testing.T) {
 	wg.Wait()
 	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
 }
+
+func TestRepairFlowAddsPermissionsAndEndsWithFinish(t *testing.T) {
+	r := newSetupRig(t)
+	ctx := context.Background()
+	objID := r.g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "appId": testGUID, "tags": []string{"e5extend", "e5extend:app"}})
+	if err := r.b.Ops.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD-SECRET-VALUE"}); err != nil {
+		t.Fatal(err)
+	}
+	id := r.id()
+	if err := r.svc.Repair(id, "app1", ""); err != nil {
+		t.Fatal(err)
+	}
+	evs := r.wait(id, "plan", "error")
+	plan := last(evs).Plan
+	if plan == nil || plan.NeedsChoice || plan.Existing == nil || plan.Existing.ClientID != testGUID || len(plan.Missing) == 0 {
+		t.Fatalf("plan: %+v / %+v", plan, last(evs))
+	}
+	for _, a := range plan.Actions {
+		if a.Code == "create_secret" {
+			t.Errorf("the repair plans a secret: %+v", plan.Actions)
+		}
+	}
+	if err := r.svc.Apply(id, AppSetupChoice{}); err != nil {
+		t.Fatal(err)
+	}
+	res := last(r.wait(id, "result", "error")).Result
+	if res == nil || res.CreatedApp || res.SecretCreated || !res.ConsentGranted {
+		t.Fatalf("result: %+v", res)
+	}
+	if err := r.svc.Finish(id); err != nil {
+		t.Fatal(err)
+	}
+	if n := r.g.PasswordNames(objID); len(n) != 0 {
+		t.Errorf("a secret was created: %v", n)
+	}
+	cfg, _, _ := r.b.Ops.LoadConfig()
+	if len(cfg.Accounts) != 1 {
+		t.Errorf("accounts = %+v", cfg.Accounts)
+	}
+	r.noLeak()
+	if strings.Contains(r.ev.json(), "OLD-SECRET-VALUE") {
+		t.Error("the stored secret leaked through an event")
+	}
+}
+
+func TestRepairFlowRefusesAnotherAppAndUnknownAccount(t *testing.T) {
+	r := newSetupRig(t)
+	ctx := context.Background()
+	r.g.AddApp(map[string]any{"displayName": "E5 Developer Extend", "appId": "99999999-0000-4000-8000-000000000000", "tags": []string{"e5extend", "e5extend:delegated"}})
+	if err := r.b.Ops.AddAccount(ctx, AccountInput{Name: "dev", Auth: config.AuthDeviceCode, Tenant: "tid-123", ClientID: testGUID}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.svc.Repair(r.id(), "nobody", ""); err == nil {
+		t.Error("an unknown account must be refused")
+	}
+	if err := r.svc.Repair(r.id(), "dev", "magic"); err == nil {
+		t.Error("an unknown sign-in method must be refused")
+	}
+	id := r.id()
+	if err := r.svc.Repair(id, "dev", ""); err != nil {
+		t.Fatal(err)
+	}
+	ev := last(r.wait(id, "plan", "error"))
+	if ev.Kind != "error" || len(r.g.Writes()) != 0 {
+		t.Errorf("event %+v writes %v", ev, r.g.Writes())
+	}
+}
