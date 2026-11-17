@@ -234,11 +234,13 @@ const emptyImport = {
 let lastBackup: { passphrase: string; accounts: string[] } | null = null;
 
 function serviceInfo(): ServiceInfo {
+  // ?service=unsupported previews a platform without background job support.
+  if (q.get("service") === "unsupported") return { platform: "unsupported", installed: false, enabled: "unknown", running: "unknown", details: [] };
   return {
     platform: "linux · systemd (user)",
     installed: service.installed,
-    enabled: service.installed ? "enabled" : "not-found",
-    running: service.installed ? (controls.host === "service" ? "active (running)" : "inactive") : "—",
+    enabled: service.installed ? "yes" : "no",
+    running: service.installed ? (controls.host === "service" ? "yes" : "no") : "no",
     details: service.installed
       ? ["单元文件：~/.config/systemd/user/e5extend.service", "可执行文件：~/.local/bin/e5extend run", "日志：journalctl --user -u e5extend"]
       : [],
@@ -515,6 +517,7 @@ export const mockApi: Api = {
     async installService() {
       await wait(900);
       service.installed = true;
+      mockControls.set({ host: "service" }); // the tray hands the engine over
       return {
         actions: ["wrote ~/.config/systemd/user/e5extend.service", "enabled and started e5extend.service"],
         warnings: ["the tray app is also running; the service takes over the engine"],
@@ -524,6 +527,7 @@ export const mockApi: Api = {
     async uninstallService() {
       await wait(700);
       service.installed = false;
+      if (controls.host === "service") mockControls.set({ host: "gui" });
       return { actions: ["stopped and removed e5extend.service"], warnings: [], manual: [] };
     },
   },
