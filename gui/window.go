@@ -95,10 +95,44 @@ func runWindow(page string) error {
 	})
 	app.OnShutdown(func() { backend.WaitIdle(idleWait) })
 
+	// The tray's "Quit" quits the whole app: it leaves a request in the data
+	// directory, and the window closes through the normal path (the hook above).
+	start := time.Now()
+	stopWatch := make(chan struct{})
+	app.OnShutdown(func() { close(stopWatch) })
+	go watchQuit(start, stopWatch, func() { application.InvokeAsync(func() { win.Close() }) })
+
 	if err := app.Run(); err != nil {
 		return fmt.Errorf("window: %w", err)
 	}
 	return nil
+}
+
+// watchQuit calls closeWindow once, when the tray has asked for a quit after
+// start. It checks every second until stop is closed.
+func watchQuit(start time.Time, stop <-chan struct{}, closeWindow func()) {
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	for {
+		select {
+		case <-stop:
+			return
+		case <-tick.C:
+		}
+		f, err := quitFile()
+		if err != nil {
+			continue
+		}
+		fi, err := os.Stat(f)
+		if err != nil {
+			continue
+		}
+		content, _ := os.ReadFile(f)
+		if shouldQuit(start, content, fi.ModTime(), true) {
+			closeWindow()
+			return
+		}
+	}
 }
 
 // NavigateEvent is emitted to the open window when a second launch passes

@@ -66,6 +66,32 @@ func resumeFile() (string, error) {
 	return filepath.Join(dir, "gui-resume"), nil
 }
 
+// quitFile is how the tray tells an open window that the app is quitting. Its
+// content is the time of the request; the tray removes it at its next start.
+func quitFile() (string, error) {
+	dir, err := paths.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "gui-quit"), nil
+}
+
+// shouldQuit reports whether a window started at start has to close, given the
+// content and modification time of the quit file (exists is false when there
+// is none). The request time is the content, an RFC 3339 timestamp; when that
+// does not parse, the modification time stands in. A request that predates the
+// window is left from an earlier quit and is ignored.
+func shouldQuit(start time.Time, content []byte, mtime time.Time, exists bool) bool {
+	if !exists {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(content)))
+	if err != nil {
+		at = mtime
+	}
+	return at.After(start)
+}
+
 // cancelHandover withdraws a handover request after a failed install: the
 // request file is removed (if the tray has not read it yet) and the tray is
 // told to end its quiet time.
