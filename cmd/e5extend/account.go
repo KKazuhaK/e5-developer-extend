@@ -404,20 +404,15 @@ func (a *app) newAccountRenameCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "rename <old> <new>",
 		Short: "Give an account a new name",
-		Long: "Rename an account. Its stored secret, saved sign-in and statistics move to the new name.\n" +
-			"The call log keeps the old name in entries already written; `logs <new>` shows them too.\n" +
+		Long: "Rename an account. Its stored secret, saved sign-in, statistics and call log stay with it.\n" +
 			"Names are 1-64 lowercase letters, digits, - or _.",
 		Args: cobra.ExactArgs(2),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			o := a.ops()
-			warnings, err := o.RenameAccount(contextOrBackground(cmd), args[0], args[1])
-			if err != nil {
+			if err := o.RenameAccount(contextOrBackground(cmd), args[0], args[1]); err != nil {
 				return err
 			}
 			o.ReloadEngine()
-			for _, w := range warnings {
-				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
-			}
 			fmt.Fprintf(cmd.OutOrStdout(), "renamed account %q to %q\n", args[0], args[1])
 			return nil
 		},

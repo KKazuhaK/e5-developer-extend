@@ -287,7 +287,7 @@ func (o *Ops) SetSecret(ctx context.Context, name, secret, expires string) error
 	}
 	o.resetPasswordBlock(acct.Key())
 	if expires != "" {
-		return o.updateAccount(ctx, acct.Key(), func(ac *config.Account) { ac.SecretExpires = expires })
+		return o.updateAccountKey(ctx, acct.Key(), func(ac *config.Account) { ac.SecretExpires = expires })
 	}
 	return nil
 }
@@ -302,9 +302,18 @@ func (o *Ops) resetPasswordBlock(key string) {
 }
 
 // updateAccount reloads the config under the lock, applies change to the
-// account with the given key and saves. It is a no-op if the account has
-// disappeared; a rename in between does not matter.
-func (o *Ops) updateAccount(ctx context.Context, key string, change func(*config.Account)) error {
+// account with the given name and saves. It is a no-op if there is none.
+func (o *Ops) updateAccount(ctx context.Context, name string, change func(*config.Account)) error {
+	return o.updateWith(ctx, func(c *config.Config) (*config.Account, bool) { return c.Find(name) }, change)
+}
+
+// updateAccountKey is updateAccount for the account with the given key; a
+// rename in between does not matter.
+func (o *Ops) updateAccountKey(ctx context.Context, key string, change func(*config.Account)) error {
+	return o.updateWith(ctx, func(c *config.Config) (*config.Account, bool) { return c.FindKey(key) }, change)
+}
+
+func (o *Ops) updateWith(ctx context.Context, find func(*config.Config) (*config.Account, bool), change func(*config.Account)) error {
 	unlock, err := o.LockConfig(ctx)
 	if err != nil {
 		return err
@@ -314,7 +323,7 @@ func (o *Ops) updateAccount(ctx context.Context, key string, change func(*config
 	if err != nil {
 		return err
 	}
-	acct, ok := cfg.FindKey(key)
+	acct, ok := find(cfg)
 	if !ok {
 		return nil
 	}
@@ -472,7 +481,7 @@ func (o *Ops) Login(ctx context.Context, name string, ui auth.LoginUI) (LoginRes
 		return LoginResult{}, WithHint(err, name)
 	}
 	if acct.Delegated() && tok.HomeAccountID != "" && tok.HomeAccountID != acct.HomeAccountID {
-		err := o.updateAccount(ctx, acct.Key(), func(ac *config.Account) { ac.HomeAccountID = tok.HomeAccountID })
+		err := o.updateAccountKey(ctx, acct.Key(), func(ac *config.Account) { ac.HomeAccountID = tok.HomeAccountID })
 		if err != nil {
 			return LoginResult{}, fmt.Errorf("signed in, but saving the config failed: %w", err)
 		}
@@ -531,7 +540,7 @@ func (o *Ops) setPaused(ctx context.Context, name string, paused bool) (PauseRes
 		return PauseResult{}, err
 	}
 	key := acct.Key()
-	if err := o.updateAccount(ctx, key, func(ac *config.Account) { ac.Paused = paused }); err != nil {
+	if err := o.updateAccountKey(ctx, key, func(ac *config.Account) { ac.Paused = paused }); err != nil {
 		return PauseResult{}, err
 	}
 	dataDir, err := paths.DataDir()

@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { EmptyBlock, ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, StatusBadge, fieldAria } from "@/components/common";
 import { SecretExpiry } from "@/components/AccountCard";
+import { AccountNotes } from "@/components/AccountNotes";
 import { SignInFrequencyNotice } from "@/components/SignInFrequencyNotice";
 import { AccountWizard } from "./AccountWizard";
 import { AccountEdit } from "./AccountEdit";
@@ -187,6 +188,7 @@ export function Accounts() {
                         </span>
                         <span>{t("account.apis")} <span className="text-foreground">{displayStatus(a) === "waiting" ? "—" : `${a.usableApis}/${a.totalApis}`}</span></span>
                       </div>
+                      <div className="mt-1.5"><AccountNotes a={a} /></div>
                     </Card>
                   </li>
                 );

@@ -5,7 +5,9 @@
 
 {{.Time | md}} · {{.Host | md}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}}
 
-{{.Message | md}}{{if .Rounds}}
+{{.Message | md}}{{range .Summary}}
+
+{{.Line | md}}{{end}}{{if .Rounds}}
 
 Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds{{end}}{{if .Origin}}
 

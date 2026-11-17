@@ -460,7 +460,7 @@ func knownVaultKey(cfg *config.Config, key string) bool {
 		return true
 	}
 	for _, a := range cfg.Accounts {
-		if key == vault.SecretKey(a.Name) || key == vault.TokenCacheKey(a.Name) {
+		if key == vault.SecretKey(a.Key()) || key == vault.TokenCacheKey(a.Key()) {
 			return true
 		}
 	}
@@ -620,11 +620,16 @@ func (o *Ops) applyImport(ctx context.Context, plan *importPlan, mode ImportMode
 	// puts are the vault entries to write, newAccounts the accounts coming from the backup.
 	puts := map[string][]byte{}
 	var newAccounts []string
+	var newKeys []string // their keys, which the state is kept under
 	switch mode {
 	case ImportMerge:
 		var conflicts []string
 		for _, a := range plan.cfg.Accounts {
-			if _, ok := tcfg.Find(a.Name); ok {
+			// The same name, or a key that is a name or key here: state and vault
+			// entries of the two would be taken for each other's.
+			if slices.ContainsFunc(tcfg.Accounts, func(t config.Account) bool {
+				return t.Name == a.Name || t.Key() == a.Key() || t.Name == a.Key() || t.Key() == a.Name
+			}) {
 				conflicts = append(conflicts, a.Name)
 			}
 		}
@@ -639,7 +644,8 @@ func (o *Ops) applyImport(ctx context.Context, plan *importPlan, mode ImportMode
 		for _, a := range plan.cfg.Accounts {
 			final.Accounts = append(final.Accounts, a)
 			newAccounts = append(newAccounts, a.Name)
-			for _, k := range []string{vault.SecretKey(a.Name), vault.TokenCacheKey(a.Name)} {
+			newKeys = append(newKeys, a.Key())
+			for _, k := range []string{vault.SecretKey(a.Key()), vault.TokenCacheKey(a.Key())} {
 				if val, ok := p.Vault[k]; ok {
 					puts[k] = val
 				}
@@ -665,6 +671,7 @@ func (o *Ops) applyImport(ctx context.Context, plan *importPlan, mode ImportMode
 		final.Vault = tcfg.Vault
 		for _, a := range final.Accounts {
 			newAccounts = append(newAccounts, a.Name)
+			newKeys = append(newKeys, a.Key())
 		}
 		for k, val := range p.Vault {
 			puts[k] = val
@@ -707,13 +714,13 @@ func (o *Ops) applyImport(ctx context.Context, plan *importPlan, mode ImportMode
 	}
 	for _, k := range keys {
 		if err := v.Put(k, puts[k]); err != nil {
-			return sum, undo.abort(WithHint(fmt.Errorf("write vault entry %s: %w", k, err), accountOfKey(k)), mode, newAccounts)
+			return sum, undo.abort(WithHint(fmt.Errorf("write vault entry %s: %w", k, err), accountOfKey(final, k)), mode, newAccounts)
 		}
 	}
 
 	// The state goes first to a running engine, before the config is saved, so
 	// a reload that sees the new accounts finds their state too.
-	st, err := prepareState(plan, mode, newAccounts)
+	st, err := prepareState(plan, mode, newKeys)
 	if err != nil {
 		return sum, undo.abort(err, mode, newAccounts)
 	}
@@ -825,7 +832,7 @@ func (h *stateHandover) discard() {
 	}
 }
 
-func prepareState(plan *importPlan, mode ImportMode, newAccounts []string) (*stateHandover, error) {
+func prepareState(plan *importPlan, mode ImportMode, newKeys []string) (*stateHandover, error) {
 	dataDir, err := paths.DataDir()
 	if err != nil {
 		return nil, err
@@ -838,7 +845,7 @@ func prepareState(plan *importPlan, mode ImportMode, newAccounts []string) (*sta
 	pending := &store.PendingImport{Mode: store.PendingReplace, Accounts: imported}
 	if mode == ImportMerge {
 		pending.Mode, pending.Accounts = store.PendingMerge, map[string]*store.AccountState{}
-		for _, name := range newAccounts {
+		for _, name := range newKeys {
 			if as, ok := imported[name]; ok {
 				pending.Accounts[name] = as
 			}
@@ -931,9 +938,13 @@ func (o *Ops) writeImportedFiles(plan *importPlan, mode ImportMode, h *stateHand
 	return
 }
 
-func accountOfKey(key string) string {
-	_, name, _ := strings.Cut(key, "/")
-	return name
+// accountOfKey names the account a vault entry ("secret/<key>") belongs to, for hints.
+func accountOfKey(cfg *config.Config, vaultKey string) string {
+	_, key, _ := strings.Cut(vaultKey, "/")
+	if a, ok := cfg.FindKey(key); ok {
+		return a.Name
+	}
+	return key
 }
 
 // ensureMasterKey makes sure this machine has a master key to write with. A

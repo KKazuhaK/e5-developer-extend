@@ -231,8 +231,8 @@ func TestOneYearSimulation(t *testing.T) {
 		if as.LastSuccess.Before(end.AddDate(0, 0, -4)) {
 			t.Errorf("%s: last success %s", name, as.LastSuccess)
 		}
-		if len(as.APISkipUntil) > 1 || len(as.APIForbiddenCount) > 1 {
-			t.Errorf("%s: skip maps grew: %v %v", name, as.APISkipUntil, as.APIForbiddenCount)
+		if len(as.APISkipUntil) > 1 {
+			t.Errorf("%s: skip map grew: %v", name, as.APISkipUntil)
 		}
 	}
 	if maxFiles > 31 {

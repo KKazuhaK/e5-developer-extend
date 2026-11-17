@@ -14,7 +14,7 @@ var t0 = time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 
 func TestEventNamesMatchConfig(t *testing.T) {
 	kinds := []string{NeedsAttention, Recovered, AutoPaused, Stale, SecretExpiring, PeriodEnded, FailureSpike, AllFailing,
-		SubscriptionExpiring, SubscriptionStatus, SubscriptionRenewed}
+		SubscriptionExpiring, SubscriptionStatus, SubscriptionRenewed, DailySummary}
 	if !slices.Equal(kinds, config.NotifyEvents) {
 		t.Errorf("config.NotifyEvents = %v, notify kinds = %v", config.NotifyEvents, kinds)
 	}

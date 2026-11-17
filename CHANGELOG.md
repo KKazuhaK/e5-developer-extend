@@ -8,6 +8,11 @@
 
 - 账号可以改名：`e5extend account rename <旧名称> <新名称>`，桌面版的编辑页里直接改“账号名称”。Secret、已保存的登录、统计、告警记录和订阅信息都跟着新名称走，改名不会触发告警；已写入的调用日志仍用旧名称，但按新名称查看日志时会一并显示。名称规则不变（小写字母、数字、`-`、`_`，1-64 个字符）。后台引擎在运行时，改名通过数据目录里的 `state.rename.json` 交给引擎，由引擎在重新加载配置时应用。
 - Windows：`e5extend service install --headless` 让后台任务无人登录也运行（Windows Server / Server Core 开机后不用登录，用户注销后也不停）。任务的登录类型改为 S4U（不保存 Windows 密码），在登录触发器和重复触发器之外增加开机触发器（延迟 30 秒），失败重启等设置不变。因为 S4U 会话读不到用户的凭据管理器，主密钥会复制成配置目录里的 `master.key.dpapi`：用 DPAPI 本机范围加密，ACL 只授予当前用户、SYSTEM 和 Administrators。需要“作为批处理作业登录”权限（管理员默认有），注册任务通常要在管理员命令行里执行；权限不够时会打印完整的命令。`service status` 显示 `headless:`，`doctor` 新增 `headless` 项（密钥文件缺失、读不了、ACL 过宽）。卸载只在任务是 headless 时删除这个文件。其他平台上 `--headless` 会报错并指向 Linux 的 `--key-file` / `--enable-linger`。默认安装（登录时运行）不变。详见 [docs/user/background.md](docs/user/background.md) 和 [docs/design/service-doctor-notify.md](docs/design/service-doctor-notify.md)。
+- 限流重试：收到 429（或带 `Retry-After` 的 503）时，按 `Retry-After`（秒数或 HTTP 日期）等待后重试同一个调用，同一轮里最多再试 2 次；要求等待超过 60 秒的直接跳过这次调用。限流不算失败：不计入连续失败（自动暂停）和 `failure_spike`，调用日志里的类别是 `throttled`。
+- 接口不可用：某个接口返回 403 或 404 时，对这个账号暂停 24 小时（写进状态，重启后仍有效），之后几轮改调别的接口；只碰到这样的接口不算这一轮失败；一轮里没有任何成功、而且账号能调用的接口全部被拒绝（许可证或邮箱被收回）时才算失败，连续 3 轮自动暂停。自动暂停后的探测不会只凭令牌恢复，也会跳过已暂停的接口。手动恢复（`account resume`）和探测恢复会同时清除这些 24 小时的接口暂停，账号不会因为没有可调用的接口而马上再次自动暂停。`e5extend status`、`doctor`（`account.<名称>.apis`）、桌面版概览和账号页显示“N 个 API 暂停 24 小时”，以及今日限流次数。
+- 自动恢复：因连续失败被自动暂停的账号，在暂停后 6 小时、再过 12 小时、之后每 24 小时用一次轻量调用（`/me`，应用身份用 `/organization` 或最便宜的可用接口）探测；成功就自动恢复并发 `recovered`。手动暂停的账号不会被自动恢复；`invalid_grant`、需要重新登录等仍是 `needs_attention`，不探测。`status`、`doctor` 和桌面版显示下一次探测的时间。
+- 重启后的补跑：启动时如果某个账号的下一轮已经错过很久，只在几分钟内（带抖动）补跑一轮，不补齐错过的轮次，调用日志里有 `catch_up` 事件。
+- 每日摘要：新事件 `daily_summary`（提示级别，默认关闭）。设置 `notify.daily_summary_at = "21:00"` 后每天发一条，列出每个账号过去 24 小时的成功、失败、限流次数，最近成功时间，暂停或需要处理的状态，暂停的 API 数，以及已知时 E5 订阅的剩余天数。免打扰时段内到点的话在时段结束时发。所有渠道类型都有中英文内置模板，`notify test --event daily_summary` 和 `notify preview daily_summary` 可用；通用 Webhook 的请求体多一个 `summary` 数组。桌面版“设置 → 高级设置 → 告警”新增开关和时间。
 - 调用节奏新增两档预设：**密集（同原版强度）**（8 到 17 分钟一轮，每轮 15 到 25 个 API）和**急救（临时）**（5 到 10 分钟一轮，每轮 20 到 30 个 API，只用于订阅到期前的几天，界面上有提示，过后请手动改回“标准”）。某一轮要的 API 数比账号能用的多时，调用能用的全部。
 - API 目录新增只读接口：洞察（热门文档）、相关人员、在线状态（presence）、直属下级、用户设置、OneDrive 驱动器列表、日历组、OneNote 分区，以及 Bookings（业务和货币，默认关闭；货币只有委托身份）。新增三个只读权限，自动创建应用会一并申请：委托身份 `People.Read`、`Presence.Read`、`Bookings.Read.All`，应用身份 `Presence.Read.All`、`Bookings.Read.All`。已有的应用注册没有这些权限时，对应接口只是不会被选中，其他不受影响；要补权限可以重新运行 `e5extend app setup`。没有收 `/me/insights/used` 和 `shared`、`/me/manager`（没有上级的账号会返回 404）、`/me/drive/recent` 和 `sharedWithMe`（微软已停止返回数据）、`/me/settings/regionalAndLanguageSettings`（只在 beta 里）。详见 [docs/graph-api-catalog.md](docs/graph-api-catalog.md)。
 - 按 API 统计调用次数：引擎为每个账号记录每个 API 的成功、失败、总次数和最近一次的结果（存在 state.json 里，每个 API 一条）。命令行 `e5extend stats [账号]`；桌面版“日志”页新增“按 API 统计”，可按列排序。
@@ -19,6 +24,12 @@
 - 添加向导第 1 步分成“选择方式”和“账号信息 / 登录方式”两个有明显分隔的区块。
 - 默认全天调用（`work_start` 和 `work_end` 都是 `"00:00"`，两者相等表示全天）；以前是 08:00 到 22:00。已有的配置不变。
 - 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
+- 返回 403 的接口现在在第一次就暂停 24 小时（之前连续 3 次后暂停 7 天），404 也一样；`failure_spike` 和“今日失败”不再把 403、404 和限流算作失败。
+- 自动暂停的原因里说明会自动再试一次。
+
+### 文档
+
+- 常见问题新增微软 Legacy sandbox 订阅退役的说明（微软的 FAQ 于 2026 年 11 月发布，没有给出统一的退役日期）：仍然符合资格的成员得到最后一次 60 天的续期；不再符合资格的成员，订阅在当前订阅期结束时到期，之后只读 30 天，再永久删除；Legacy 订阅不能再次续期或转换。请备份数据并到开发者控制台确认，任何工具都改变不了这件事（见 [常见问题](docs/user/faq.md)）。README 的“先读这个”里也加了一条；文档和 README 都没有承诺续期。
 
 ## [0.2.0] - 2026-11-16
 

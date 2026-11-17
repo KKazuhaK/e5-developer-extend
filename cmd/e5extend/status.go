@@ -65,6 +65,17 @@ func (a *app) newStatusCmd() *cobra.Command {
 				if as != nil && as.Reason != "" {
 					notes = append(notes, fmt.Sprintf("  %s: %s", sum.Name, as.Reason))
 				}
+				if sum.AutoResumeAt != nil {
+					if at, err := time.Parse(time.RFC3339, *sum.AutoResumeAt); err == nil {
+						notes = append(notes, fmt.Sprintf("  %s: tried again automatically at %s", sum.Name, at.Local().Format("2006-01-02 15:04")))
+					}
+				}
+				if sum.PausedAPIs > 0 {
+					notes = append(notes, fmt.Sprintf("  %s: %d APIs paused for 24 h (refused with 403 or 404)", sum.Name, sum.PausedAPIs))
+				}
+				if sum.TodayThrottled > 0 {
+					notes = append(notes, fmt.Sprintf("  %s: %d calls throttled today (not counted as failures)", sum.Name, sum.TodayThrottled))
+				}
 			}
 			if err := tw.Flush(); err != nil {
 				return err
@@ -130,7 +141,9 @@ func (a *app) newLogsCmd() *cobra.Command {
 				account = args[0]
 			}
 			out := cmd.OutOrStdout()
-			f := store.Filter{Account: account, Since: time.Now().Add(-since), Limit: limit}
+			base := a.ops().AccountLogFilter(account)
+			f := base
+			f.Since, f.Limit = time.Now().Add(-since), limit
 			entries, err := st.Read(f)
 			if err != nil {
 				return err
@@ -159,7 +172,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 			if !follow {
 				return nil
 			}
-			return followLog(contextOrBackground(cmd), st, account, func(list []store.Entry) { show(list) }, func() time.Time { return last })
+			return followLog(contextOrBackground(cmd), st, base, func(list []store.Entry) { show(list) }, func() time.Time { return last })
 		},
 	}
 	cmd.Flags().DurationVar(&since, "since", 24*time.Hour, "show entries newer than this")
@@ -168,7 +181,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 	return cmd
 }
 
-func followLog(ctx context.Context, st *store.Store, account string, show func([]store.Entry), last func() time.Time) error {
+func followLog(ctx context.Context, st *store.Store, base store.Filter, show func([]store.Entry), last func() time.Time) error {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
@@ -180,7 +193,9 @@ func followLog(ctx context.Context, st *store.Store, account string, show func([
 			if since.IsZero() {
 				since = time.Now().Add(-time.Minute)
 			}
-			list, err := st.Read(store.Filter{Account: account, Since: since})
+			f := base
+			f.Since = since
+			list, err := st.Read(f)
 			if err != nil {
 				return err
 			}

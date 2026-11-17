@@ -69,6 +69,20 @@ func newTestEnv(t *testing.T) *testEnv {
 	return e
 }
 
+// keyOf is the key of the named account: what its state, vault entries and trigger files are named by.
+func (e *testEnv) keyOf(t *testing.T, name string) string {
+	t.Helper()
+	cfg, _, err := e.LoadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, ok := cfg.Find(name)
+	if !ok {
+		t.Fatalf("no account %q", name)
+	}
+	return a.Key()
+}
+
 func (e *testEnv) addDevice(t *testing.T, name string) {
 	t.Helper()
 	in := AccountInput{Name: name, Auth: config.AuthDeviceCode, Tenant: "t.example", ClientID: testGUID}
@@ -255,7 +269,9 @@ func TestAccountLifecycle(t *testing.T) {
 		t.Fatal("bad expiry must fail")
 	}
 	v, _ := e.OpenVault(cfg)
-	if b, err := v.Get(vault.SecretKey("app")); err != nil || string(b) != "N3W" {
+	appAcct, _ := cfg.Find("app")
+	appKey := appAcct.Key()
+	if b, err := v.Get(vault.SecretKey(appKey)); err != nil || string(b) != "N3W" {
 		t.Fatalf("stored secret: %q %v", b, err)
 	}
 
@@ -276,7 +292,7 @@ func TestAccountLifecycle(t *testing.T) {
 	if err != nil || len(warns) != 0 {
 		t.Fatalf("remove: %v %v", warns, err)
 	}
-	if ok, _ := v.Has(vault.SecretKey("app")); ok {
+	if ok, _ := v.Has(vault.SecretKey(appKey)); ok {
 		t.Fatal("secret survived the removal")
 	}
 	if _, err := e.RemoveAccount(ctx, "app"); err == nil {
@@ -311,7 +327,7 @@ func TestSnapshotStatuses(t *testing.T) {
 		// A real sign-in leaves a token cache behind; the fake one does not.
 		cfg, _, _ := e.LoadConfig()
 		v, _ := e.OpenVault(cfg)
-		if err := v.Put(vault.TokenCacheKey(n), []byte("cache")); err != nil {
+		if err := v.Put(vault.TokenCacheKey(e.keyOf(t, n)), []byte("cache")); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -322,16 +338,16 @@ func TestSnapshotStatuses(t *testing.T) {
 	now := time.Now()
 	st := store.New(e.dataDir)
 	state := store.NewState()
-	state.Accounts["ok"] = &store.AccountState{Status: store.StatusOK, LastSuccess: now.Add(-time.Hour), LastRun: now.Add(-time.Hour),
+	state.Accounts[e.keyOf(t, "ok")] = &store.AccountState{Status: store.StatusOK, LastSuccess: now.Add(-time.Hour), LastRun: now.Add(-time.Hour),
 		NextRun: now.Add(time.Hour), GrantedScopes: []string{"User.Read", "Mail.Read"}}
-	state.Accounts["attn"] = &store.AccountState{Status: store.StatusNeedsAttention, Reason: "login required; run: e5extend account login attn"}
+	state.Accounts[e.keyOf(t, "attn")] = &store.AccountState{Status: store.StatusNeedsAttention, Reason: "login required; run: e5extend account login attn"}
 	if err := st.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(store.Entry{TS: now, Account: "ok", API: "mail.list", Status: 200, Class: "ok", LatencyMS: 12}); err != nil {
+	if err := st.Append(store.Entry{TS: now, Account: "ok", AccountID: e.keyOf(t, "ok"), Round: "r1", API: "mail.list", Status: 200, Class: "ok", LatencyMS: 12}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(store.Entry{TS: now, Account: "ok", API: "mail.list", Status: 500, Class: "server", LatencyMS: 12}); err != nil {
+	if err := st.Append(store.Entry{TS: now, Account: "ok", AccountID: e.keyOf(t, "ok"), Round: "r2", API: "mail.list", Status: 500, Class: "server", LatencyMS: 12}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -423,7 +439,7 @@ func TestRunNowQueuesWhenEngineRuns(t *testing.T) {
 	if err != nil || !res.Queued || !slices.Equal(res.Targets, []string{"main"}) {
 		t.Fatalf("queued: %+v %v", res, err)
 	}
-	if _, err := os.Stat(filepath.Join(e.dataDir, "trigger", "main")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.dataDir, "trigger", e.keyOf(t, "main"))); err != nil {
 		t.Fatalf("trigger file: %v", err)
 	}
 }

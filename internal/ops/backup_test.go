@@ -79,6 +79,31 @@ func (m *machine) addSecretAccount(name, secret string) {
 	if err := m.AddAccount(context.Background(), in); err != nil {
 		m.t.Fatal(err)
 	}
+	m.legacy(name)
+}
+
+// legacy turns the account into one without an ID, keyed by its name, as the
+// accounts of earlier versions are; most backup tests use those names as keys.
+func (m *machine) legacy(name string) {
+	m.t.Helper()
+	var id string
+	m.edit(func(c *config.Config) {
+		a, _ := c.Find(name)
+		id, a.ID = a.ID, ""
+	})
+	v := m.vault(m.key)
+	for _, k := range []string{"secret/", "tokencache/"} {
+		val, err := v.Get(k + id)
+		if vault.IsNotFound(err) {
+			continue
+		} else if err != nil {
+			m.t.Fatal(err)
+		}
+		if err := v.Put(k+name, val); err != nil {
+			m.t.Fatal(err)
+		}
+		_ = v.Delete(k + id)
+	}
 }
 
 func (m *machine) put(key, val string) {
@@ -199,6 +224,7 @@ func sourceMachine(t *testing.T) *machine {
 	if err := a.AddAccount(context.Background(), in); err != nil {
 		t.Fatal(err)
 	}
+	a.legacy("dev")
 	a.edit(func(c *config.Config) {
 		c.Schedule.IntervalMin = "50m"
 		c.Notify.StaleAfter = "48h"

@@ -238,7 +238,14 @@ func (s *AppSetupSession) storeSecret(secret string) error {
 	if err != nil {
 		return err
 	}
-	if err := v.Put(vault.SecretKey(s.opts.Account), []byte(secret)); err != nil {
+	// An account that exists keeps its secret under its key. For one that is
+	// not added yet the secret waits under the bare name; AddAccount moves it
+	// to the ID the account gets.
+	key := s.opts.Account
+	if acct, ok := cfg.Find(s.opts.Account); ok {
+		key = acct.Key()
+	}
+	if err := v.Put(vault.SecretKey(key), []byte(secret)); err != nil {
 		return WithHint(fmt.Errorf("store secret: %w", err), s.opts.Account)
 	}
 	return nil
@@ -402,6 +409,7 @@ func (s *AppSetupSession) DiscardSecret(ctx context.Context, res *appsetup.Resul
 	if _, exists := cfg.Find(s.opts.Account); exists {
 		return false, nil
 	}
+	// Not added: the secret waits under the bare name (see storeSecret).
 	revokeErr := s.revokeSecret(ctx, res)
 	var vaultErr error
 	if v, err := s.o.OpenVault(cfg); err != nil {
@@ -440,7 +448,7 @@ func (s *AppSetupSession) Apply(ctx context.Context, choice appsetup.Choice) (*a
 	if s.opts.AppOnly && !s.opts.Repair && res.SecretExpires != "" {
 		if cfg, _, err := s.o.LoadConfig(); err == nil {
 			if acct, ok := cfg.Find(s.opts.Account); ok && acct.Auth == config.AuthClientSecret {
-				if err := s.o.updateAccount(ctx, s.opts.Account, func(ac *config.Account) { ac.SecretExpires = res.SecretExpires }); err != nil {
+				if err := s.o.updateAccountKey(ctx, acct.Key(), func(ac *config.Account) { ac.SecretExpires = res.SecretExpires }); err != nil {
 					return res, fmt.Errorf("the secret was stored, but saving its expiry date failed: %w", err)
 				}
 			}

@@ -70,6 +70,11 @@ interface MockAccount {
   nextRunAt: number | null;
   todayOk: number;
   todayFailed: number;
+  todayThrottled: number;
+  pausedApis: number;
+  /** Minutes until the next probe of an automatically paused account. */
+  probeInMin: number | null;
+  probes: number;
 }
 
 const now0 = Date.now();
@@ -94,6 +99,10 @@ function mk(
     nextRunAt: ok ? now0 + rand(4, 28) * MIN : null,
     todayOk: extra.todayOk ?? (ok ? rand(14, 32) : 0),
     todayFailed: extra.todayFailed ?? 0,
+    todayThrottled: extra.todayThrottled ?? 0,
+    pausedApis: extra.pausedApis ?? 0,
+    probeInMin: extra.probeInMin ?? null,
+    probes: extra.probes ?? 0,
   };
 }
 
@@ -107,7 +116,7 @@ function seedAccounts() {
     return;
   }
   accounts = [
-    mk("main", "device_code", "contoso.onmicrosoft.com", "ok", { categories: CATS_ALL.slice(0, 10), todayFailed: 1 }),
+    mk("main", "device_code", "contoso.onmicrosoft.com", "ok", { categories: CATS_ALL.slice(0, 10), todayFailed: 1, todayThrottled: 3, pausedApis: 2 }),
     mk("dev-app", "client_secret", "7d3f2a10-55c1-4c88-b1d4-0a3e9c61f2b8", "ok", { secretExpires: day(12), categories: CATS_ALL }),
     mk("sales-demo", "browser", "fabrikam.onmicrosoft.com", "ok", { categories: CATS_ALL.slice(0, 6) }),
     mk("lab", "device_code", "labtenant.onmicrosoft.com", "needs_attention", {
@@ -119,6 +128,10 @@ function seedAccounts() {
       reason: "sign-in is cut off by a Conditional Access sign-in frequency policy (AADSTS70043); ways out, in order: (a) use the app identity ...",
       fix: "",
       lastRunAt: now0 - 2 * 3_600_000, lastSuccessAt: now0 - 4 * 3_600_000, todayFailed: 2,
+    }),
+    mk("flaky", "client_secret", "flaky.onmicrosoft.com", "paused", {
+      reason: "3 rounds in a row failed (last error: server_error)", fix: "it is tried again automatically, or fix the cause and run: e5extend account resume flaky",
+      lastRunAt: now0 - 4 * 3_600_000, lastSuccessAt: now0 - 20 * 3_600_000, todayFailed: 9, probeInMin: 140, probes: 1,
     }),
     mk("archive", "password", "old-corp.onmicrosoft.com", "paused", {
       reason: "已手动暂停", lastRunAt: now0 - 3 * 86_400_000, lastSuccessAt: now0 - 3 * 86_400_000, todayOk: 0,
@@ -428,7 +441,7 @@ let settings: Settings = {
   network: { proxy: "" },
   notify: {
     staleAfter: "72h", events: ["needs_attention", "auto_paused", "stale"], webhookConfigured: false, channels: 0,
-    cooldown: "6h", quietHours: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5,
+    cooldown: "6h", quietHours: "", dailySummaryAt: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5,
   },
   ui: { language: (["zh", "en"].includes(q.get("lang") ?? "") ? q.get("lang") : "auto") as "auto" | "zh" | "en", theme: (["light", "dark"].includes(q.get("theme") ?? "") ? q.get("theme") : "system") as "light" | "dark" | "system", startAtLogin: demo },
 };
@@ -470,7 +483,8 @@ function snapshot(): Snapshot {
         nextRun: a.nextRunAt && running && a.status === "ok" ? iso(a.nextRunAt) : null,
         lastRun: a.lastRunAt ? iso(a.lastRunAt) : null,
         lastSuccess: a.lastSuccessAt ? iso(a.lastSuccessAt) : null,
-        todayOk: a.todayOk, todayFailed: a.todayFailed, usableApis: usable, totalApis: catalogFor(a.input.name).length,
+        todayOk: a.todayOk, todayFailed: a.todayFailed, todayThrottled: a.todayThrottled, pausedApis: a.pausedApis,
+        autoResumeAt: a.probeInMin !== null ? iso(Date.now() + a.probeInMin * MIN) : null, autoResumeTries: a.probes, usableApis: usable, totalApis: catalogFor(a.input.name).length,
         secretExpires: a.input.secretExpires || null, paused: a.status === "paused",
       };
     }),
@@ -514,13 +528,14 @@ const EVENT_LABEL: Record<string, [string, string]> = {
   period_ended: ["运行周期已结束", "Run period ended"], failure_spike: ["调用失败率过高", "High failure rate"],
   all_failing: ["所有账号同时异常", "All accounts failing"],
   subscription_expiring: ["E5 订阅即将到期", "E5 subscription expiring"], subscription_status: ["E5 订阅状态变化", "E5 subscription status changed"],
-  subscription_renewed: ["E5 订阅已续期", "E5 subscription renewed"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
+  subscription_renewed: ["E5 订阅已续期", "E5 subscription renewed"], daily_summary: ["每日摘要", "Daily summary"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
 };
 
 function validateSettings(s: Settings): ValidationError[] {
   const out: ValidationError[] = [];
   if (s.network.proxy && /bad/.test(s.network.proxy)) out.push({ field: "network.proxy", message: "not a valid URL: " + s.network.proxy });
   if (s.notify.quietHours && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(s.notify.quietHours)) out.push({ field: "notify.quietHours", message: "use the form 23:00-08:00" });
+  if (s.notify.dailySummaryAt && !/^([01]\d|2[0-3]):[0-5]\d$/.test(s.notify.dailySummaryAt)) out.push({ field: "notify.dailySummaryAt", message: "use the form 21:00" });
   if (s.schedule.apisPerRoundMax > 12) out.push({ field: "schedule.apisPerRoundMax", message: "must be at most 12 (this catalog has only 12 read-only categories)" });
   return out;
 }
@@ -562,7 +577,7 @@ export const mockApi: Api = {
       void useStoredSecret;
       accounts.push({
         input: rest, status: "not_signed_in", reason: "尚未登录", fix: "完成一次登录后才会开始调用",
-        lastRunAt: null, lastSuccessAt: null, nextRunAt: null, todayOk: 0, todayFailed: 0,
+        lastRunAt: null, lastSuccessAt: null, nextRunAt: null, todayOk: 0, todayFailed: 0, todayThrottled: 0, pausedApis: 0, probeInMin: null, probes: 0,
       });
     },
     async update(input) {
@@ -927,6 +942,7 @@ export const mockApi: Api = {
         subscription_expiring: `subscription DEVELOPERPACK_E5 ${SUB} expires in 7 days (2027-02-14); renew it in the Microsoft 365 admin center`,
         subscription_status: `subscription DEVELOPERPACK_E5 ${SUB} changed from Enabled to Warning; check it in the Microsoft 365 admin center (Billing > Your products)`,
         subscription_renewed: `subscription DEVELOPERPACK_E5 ${SUB} was renewed: the end date moved from 2027-02-14 to 2027-05-14`,
+        daily_summary: "daily summary: 2 accounts, 41 calls ok, 1 failed, 2 throttled in the last 24 hours",
       } as Record<string, string>)[event] ?? "needs attention: login required; run: e5extend account login demo";
       const bold = (x: string) => (type === "telegram" ? `<b>${x}</b>` : type === "slack" ? `*${x}*` : ["wecom", "dingtalk", "discord", "serverchan"].includes(type) ? `**${x}**` : x);
       const body = template.trim()

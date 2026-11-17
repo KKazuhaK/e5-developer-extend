@@ -205,7 +205,7 @@ func (s scope) retry() {
 	ev, now := s.ev, s.ev.in.Now
 	for _, kind := range sortedKinds(*s.notified) {
 		n := (*s.notified)[kind]
-		if !ev.allowed(kind) {
+		if !ev.allowed(kind) || kind == DailySummary { // the summary has its own schedule
 			continue
 		}
 		if n.Cooled {
@@ -331,8 +331,12 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		// rounds to tell, what was announced stays as it is.
 		spiking := false
 		if in.Calls != nil && as.Status == store.StatusOK && !acct.Paused {
-			sp := callstat.SpikeOf(in.Calls[acct.Key()], in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
-			_, had := get(FailureSpike)
+			calls := in.Calls[acct.Key()]
+			if !as.ResumedAt.IsZero() { // what failed before the pause ended is not judged again
+				calls = slices.DeleteFunc(slices.Clone(calls), func(c store.Entry) bool { return !c.TS.After(as.ResumedAt) })
+			}
+			sp := callstat.SpikeOf(calls, in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
+			spikeN, had := get(FailureSpike)
 			switch {
 			case sp.Active:
 				spiking = true
@@ -343,6 +347,12 @@ func Evaluate(in Input) (events []Event, changed bool) {
 				}
 			case !sp.Enough:
 				spiking = had
+				if had && !as.ResumedAt.IsZero() && as.ResumedAt.After(spikeN.At) && as.LastSuccess.After(as.ResumedAt) {
+					// The pause ended and the account has succeeded since: the
+					// spike announced before it is over, no full window needed.
+					spiking = false
+					del(FailureSpike)
+				}
 			default:
 				del(FailureSpike)
 			}
@@ -415,6 +425,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	g.retry()
 
 	ev.evalSubscriptions()
+	ev.evalDailySummary()
 
 	// What was held during the quiet hours goes out as one message.
 	switch len(ev.held) {

@@ -406,7 +406,7 @@ func TestAppSetupApplicationIdentityKeepsTheSecretInTheVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := v.Get(vault.SecretKey("app1")); err != nil || string(got) != r.g.Secrets[0] {
+	if got, err := v.Get(vault.SecretKey(func() string { a, _ := cfg.Find("app1"); return a.Key() }())); err != nil || string(got) != r.g.Secrets[0] {
 		t.Errorf("vault: %q %v", got, err)
 	}
 	r.noLeak()

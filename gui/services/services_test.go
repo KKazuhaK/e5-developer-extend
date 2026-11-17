@@ -459,7 +459,7 @@ func TestRunNowQueuesForARunningEngine(t *testing.T) {
 	if err := NewStatusService(r.b).RunNow([]string{"me"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(r.dataDir, "trigger", "me")); err != nil {
+	if _, err := os.Stat(filepath.Join(r.dataDir, "trigger", func() string { c, _, _ := r.b.Ops.LoadConfig(); a, _ := c.Find("me"); return a.Key() }())); err != nil {
 		t.Fatalf("no trigger: %v", err)
 	}
 }
@@ -724,6 +724,7 @@ func TestAccountRenameMovesTheAccountAndAllowsUpdate(t *testing.T) {
 	if _, err := acc.Rename("app", "Not Valid"); err == nil {
 		t.Fatal("renamed to an invalid name")
 	}
+	appKey := func() string { c, _, _ := r.b.Ops.LoadConfig(); a, _ := c.Find("app"); return a.Key() }()
 	if warns, err := acc.Rename("app", "work"); err != nil || warns == nil || len(warns) != 0 {
 		t.Fatalf("rename: %v %#v", err, warns)
 	}
@@ -740,10 +741,12 @@ func TestAccountRenameMovesTheAccountAndAllowsUpdate(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := vault.New(filepath.Join(r.dataDir, "vault"), nil)
-	if ok, _ := v.Has("secret/work"); !ok {
+	if ok, _ := v.Has("secret/" + appKey); !ok {
 		t.Error("the secret did not follow the account")
 	}
-	if ok, _ := v.Has("secret/app"); ok {
-		t.Error("the old secret was left")
+	if c, _, _ := r.b.Ops.LoadConfig(); c != nil {
+		if a, _ := c.Find("work"); a == nil || a.Key() != appKey {
+			t.Errorf("the key changed: %+v", a)
+		}
 	}
 }
