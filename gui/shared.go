@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/browser"
@@ -225,10 +226,12 @@ func passThroughArgs() []string {
 }
 
 // restartWait is how long the helper waits for the old processes to exit
-// before it starts the app anyway. The old tray polls the quit file every 3 s
-// and stops its engine (up to 10 s) before it lets go of its single-instance
-// lock, and the window may wait for an upgrade, so this is generous.
-const restartWait = 30
+// before it gives up. The old tray polls the quit file every 3 s and stops its
+// engine (up to 10 s) before it lets go of its single-instance lock, and the
+// window may wait for an upgrade, so this is generous. A process still alive
+// after this long would only make a new app hit the single-instance lock, so
+// the helper starts nothing and leaves the old one as it is.
+const restartWait = 90
 
 // trayPidFile is where a running tray records its process id, from the moment
 // it holds the single-instance lock until it exits.
@@ -240,74 +243,129 @@ func trayPidFile() (string, error) {
 	return filepath.Join(dir, "gui-tray.pid"), nil
 }
 
-// markTrayRunning records this process as the running tray and returns the
-// function that removes the record again.
+// procRef names one process: its id and, when known, its start time, so a
+// reused id is not taken for it.
+type procRef struct {
+	pid   int
+	start string
+}
+
+// startToken keeps only what is safe inside a quoted shell word.
+func startToken(s string) string {
+	for _, r := range s {
+		if !(r >= '0' && r <= '9' || r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' || r == ' ' || r == ':') {
+			return ""
+		}
+	}
+	return s
+}
+
+// markTrayRunning records this process (its id and start time) as the running
+// tray and returns the function that removes the record again.
 func markTrayRunning() func() {
 	f, err := trayPidFile()
 	if err != nil {
 		return func() {}
 	}
-	pid := strconv.Itoa(os.Getpid())
-	if err := paths.WriteFileAtomic(f, []byte(pid+"\n")); err != nil {
+	self := os.Getpid()
+	pid := strconv.Itoa(self)
+	rec := pid + "\n"
+	if st := startToken(ops.ProcStart(self)); st != "" {
+		rec = pid + " " + st + "\n"
+	}
+	if err := paths.WriteFileAtomic(f, []byte(rec)); err != nil {
 		return func() {}
 	}
+	var once sync.Once
 	return func() {
-		// Only remove our own record, never a newer tray's.
-		if b, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(b)) == pid {
-			_ = os.Remove(f)
-		}
+		once.Do(func() {
+			// Only remove our own record, never a newer tray's.
+			if r, ok := parseTrayRecord(f); ok && r.pid == self {
+				_ = os.Remove(f)
+			}
+		})
 	}
 }
 
-// runningTrayPID is the process id of the running tray, 0 when there is none.
-func runningTrayPID() int {
-	f, err := trayPidFile()
-	if err != nil {
-		return 0
-	}
-	return readTrayPID(f, ops.PidAlive)
-}
-
-func readTrayPID(file string, alive func(int) bool) int {
+// parseTrayRecord reads "pid [start]" from the record file.
+func parseTrayRecord(file string) (procRef, bool) {
 	b, err := os.ReadFile(file)
 	if err != nil {
-		return 0
+		return procRef{}, false
 	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
-	if err != nil || pid <= 0 || !alive(pid) {
-		return 0
+	line := strings.TrimSpace(string(b))
+	first, rest, _ := strings.Cut(line, " ")
+	pid, err := strconv.Atoi(first)
+	if err != nil || pid <= 0 {
+		return procRef{}, false
 	}
-	return pid
+	return procRef{pid, startToken(strings.TrimSpace(rest))}, true
+}
+
+// runningTray is the running tray, the zero value when there is none.
+func runningTray() procRef {
+	f, err := trayPidFile()
+	if err != nil {
+		return procRef{}
+	}
+	return readTray(f, ops.PidMatches)
+}
+
+// readTray returns the recorded tray if alive says it still runs (an id whose
+// process started at another time was reused and is not the tray).
+func readTray(file string, alive func(pid int, start string) bool) procRef {
+	r, ok := parseTrayRecord(file)
+	if !ok || !alive(r.pid, r.start) {
+		return procRef{}
+	}
+	return r
 }
 
 // restartScript is the shell script of the helper that starts the app again:
-// it waits until every process in pids has exited (at most wait seconds), then
-// runs the command given as "$0" "$@" (through open for a bundle).
-func restartScript(pids []int, wait int, bundle bool) string {
-	var cond []string
-	for _, p := range pids {
-		if p > 0 {
-			cond = append(cond, fmt.Sprintf("kill -0 %d 2>/dev/null", p))
+// it waits until every process in procs has exited (at most wait seconds), then
+// runs the command given as "$0" "$@" (through open for a bundle). A process
+// counts as running only if it started at its recorded time. If one whose
+// start time is known is still running after wait seconds the helper starts
+// nothing and exits 1 (a new app would hit its single-instance lock); one whose
+// identity cannot be verified is not waited for any longer than that.
+func restartScript(procs []procRef, wait int, bundle bool) string {
+	var loose, strict []string
+	for _, p := range procs {
+		if p.pid <= 0 {
+			continue
 		}
+		c := fmt.Sprintf("kill -0 %d 2>/dev/null", p.pid)
+		if st := startToken(p.start); st != "" {
+			c = fmt.Sprintf("{ %s && [ \"$(st %d)\" = '%s' ]; }", c, p.pid, st)
+			strict = append(strict, c)
+		}
+		loose = append(loose, c)
 	}
 	launch := `exec "$0" "$@"`
 	if bundle {
 		launch = `exec open -n "$0" --args "$@"`
 	}
-	if len(cond) == 0 {
+	if len(loose) == 0 {
 		return launch
 	}
-	return fmt.Sprintf("i=0; while [ $i -lt %d ] && { %s; }; do sleep 1; i=$((i+1)); done; %s",
-		wait, strings.Join(cond, " || "), launch)
+	// st prints the start time of a process as ops.ProcStart does.
+	fn := `st() { if [ -r /proc/$1/stat ]; then sed 's/^.*) //' /proc/$1/stat | cut -d' ' -f20; else LC_ALL=C TZ=UTC ps -o lstart= -p $1 | tr -s ' ' | sed 's/^ //;s/ $//'; fi; }; `
+	script := fn + fmt.Sprintf("i=0; while [ $i -lt %d ] && { %s; }; do sleep 1; i=$((i+1)); done; ",
+		wait, strings.Join(loose, " || "))
+	if len(strict) > 0 {
+		script += fmt.Sprintf("if { %s; }; then echo 'restart: the old app is still running, not starting a new one' >&2; exit 1; fi; ",
+			strings.Join(strict, " || "))
+	}
+	return script + launch
 }
 
 // restartApp closes the app and starts it again once the old processes have
 // exited, so an upgraded program runs: the tray when one was in use (it
-// runs, hosts the engine or starts at login), the window otherwise. trayPID is
-// the running tray (0 for none). It does nothing on Windows, where the
+// runs, hosts the engine or starts at login), the window otherwise. trayRef is
+// the running tray (zero for none). It does nothing on Windows, where the
 // installer restarts the tray itself. The quit request closes this window and
 // the tray, as the tray's Quit item does.
-func restartApp(log *slog.Logger, trayInUse bool, trayPID int) error {
+func restartApp(log *slog.Logger, trayInUse bool, tray procRef) error {
 	if runtime.GOOS == "windows" {
 		return errors.New("the installer restarts the app on Windows")
 	}
@@ -321,13 +379,14 @@ func restartApp(log *slog.Logger, trayInUse bool, trayPID int) error {
 	}
 	args := append([]string{mode}, passThroughArgs()...)
 	// Wait for this process (it holds the window's lock) and for the tray.
-	pids := []int{os.Getpid(), trayPID}
+	self := os.Getpid()
+	procs := []procRef{{self, ops.ProcStart(self)}, tray}
 	first, bundle := exe, false
 	if i := strings.Index(exe, ".app/Contents/MacOS/"); runtime.GOOS == "darwin" && i >= 0 {
 		// A bundle is started through LaunchServices.
 		first, bundle = exe[:i+len(".app")], true
 	}
-	cmd := append([]string{"-c", restartScript(pids, restartWait, bundle), first}, args...)
+	cmd := append([]string{"-c", restartScript(procs, restartWait, bundle), first}, args...)
 	if err := update.StartDetached("sh", cmd...); err != nil {
 		return err
 	}

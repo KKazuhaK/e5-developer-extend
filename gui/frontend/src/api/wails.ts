@@ -39,6 +39,7 @@ export const wailsApi: Api = {
   accounts: {
     add: (i) => AccountService.Add(cast(i)),
     update: (i) => AccountService.Update(cast(i)),
+    rename: async (f, t) => arr(await AccountService.Rename(f, t)),
     remove: (n) => AccountService.Remove(n),
     setSecret: (n, s) => AccountService.SetSecret(n, s),
     login: (n) => AccountService.Login(n),
@@ -148,7 +149,7 @@ export const wailsApi: Api = {
     onProgress: (cb) => Events.On("update:progress", (ev) => cb(normProgress(payload<UpdateProgress>(ev)))),
   },
   catalog: {
-    list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes) })),
+    list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes), scopeSets: arr(e.scopeSets).map((g) => arr(g)) })),
     categories: async () => arr(await CatalogService.Categories()),
     defaultCategories: async () => arr(await CatalogService.DefaultCategories()),
   },

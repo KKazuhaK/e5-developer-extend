@@ -141,7 +141,9 @@ func (a *app) newLogsCmd() *cobra.Command {
 				account = args[0]
 			}
 			out := cmd.OutOrStdout()
-			f := store.Filter{Account: account, Since: time.Now().Add(-since), Limit: limit}
+			base := a.ops().AccountLogFilter(account)
+			f := base
+			f.Since, f.Limit = time.Now().Add(-since), limit
 			entries, err := st.Read(f)
 			if err != nil {
 				return err
@@ -170,7 +172,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 			if !follow {
 				return nil
 			}
-			return followLog(contextOrBackground(cmd), st, account, func(list []store.Entry) { show(list) }, func() time.Time { return last })
+			return followLog(contextOrBackground(cmd), st, base, func(list []store.Entry) { show(list) }, func() time.Time { return last })
 		},
 	}
 	cmd.Flags().DurationVar(&since, "since", 24*time.Hour, "show entries newer than this")
@@ -179,7 +181,7 @@ func (a *app) newLogsCmd() *cobra.Command {
 	return cmd
 }
 
-func followLog(ctx context.Context, st *store.Store, account string, show func([]store.Entry), last func() time.Time) error {
+func followLog(ctx context.Context, st *store.Store, base store.Filter, show func([]store.Entry), last func() time.Time) error {
 	tick := time.NewTicker(time.Second)
 	defer tick.Stop()
 	for {
@@ -191,7 +193,9 @@ func followLog(ctx context.Context, st *store.Store, account string, show func([
 			if since.IsZero() {
 				since = time.Now().Add(-time.Minute)
 			}
-			list, err := st.Read(store.Filter{Account: account, Since: since})
+			f := base
+			f.Since = since
+			list, err := st.Read(f)
 			if err != nil {
 				return err
 			}

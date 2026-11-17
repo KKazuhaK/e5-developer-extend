@@ -277,6 +277,7 @@ const CATALOG: { id: string; category: string; name: string; scopes: string[] }[
   { id: "user.me", category: "user", name: "我的资料", scopes: ["User.Read"] },
   { id: "user.list", category: "user", name: "用户列表", scopes: ["User.ReadBasic.All"] },
   { id: "user.memberof", category: "user", name: "我所在的组", scopes: ["User.Read"] },
+  { id: "user.directreports", category: "user", name: "直属下级", scopes: ["User.Read.All", "Directory.Read.All"] },
   { id: "mail.messages", category: "mail", name: "最近邮件", scopes: ["Mail.ReadBasic", "Mail.Read"] },
   { id: "mail.folders", category: "mail", name: "邮件文件夹", scopes: ["Mail.ReadBasic", "Mail.Read"] },
   { id: "mail.rules", category: "mail", name: "收件箱规则", scopes: ["MailboxSettings.Read"] },
@@ -307,6 +308,7 @@ function catalogFor(account: string): CatalogEntry[] {
   const chosen = a ? new Set(a.input.categories) : null;
   return CATALOG.filter((c) => !chosen || chosen.has(c.category)).map((c) => ({
     ...c,
+    scopeSets: c.id === "user.directreports" ? [["User.Read", "User.ReadBasic.All"]] : [],
     usable: a?.status === "not_signed_in" || a?.status === "needs_attention" ? false : hash(account + c.id) % 7 !== 0,
   }));
 }
@@ -653,7 +655,22 @@ export const mockApi: Api = {
       const a = find(input.name);
       const { secret, ...rest } = input;
       void secret;
+      // Like the real service: a new tenant, client or user discards the saved sign-in.
+      if (a.input.tenant !== rest.tenant || a.input.clientId !== rest.clientId || a.input.username !== rest.username) {
+        a.status = "not_signed_in";
+        a.reason = "尚未登录";
+        a.fix = "完成一次登录后才会开始调用";
+      }
       a.input = rest;
+    },
+    async rename(from, to): Promise<string[]> {
+      await wait(300);
+      const a = find(from);
+      if (accounts.some((x) => x.input.name === to)) throw new Error(`账号 ${to} 已存在。请换一个名称。`);
+      if (!/^[a-z0-9_-]{1,64}$/.test(to)) throw new Error("名称只能包含小写字母、数字、- 和 _，最长 64 个字符");
+      clearLogin(from);
+      a.input = { ...a.input, name: to };
+      return [];
     },
     async remove(name) {
       await lag();

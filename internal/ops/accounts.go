@@ -115,34 +115,48 @@ func (o *Ops) AddAccount(ctx context.Context, in AccountInput) error {
 	if _, exists := cfg.Find(acct.Name); exists {
 		return fmt.Errorf("account %q already exists", acct.Name)
 	}
+	// Everything stored for the account hangs on its ID, so a name can be reused
+	// after a removal, and changed, without inheriting or losing anything.
+	acct.ID = config.NewAccountID(cfg)
 	cfg.Accounts = append(cfg.Accounts, acct)
 	if err := cfg.Validate(); err != nil {
 		return fmt.Errorf("invalid account:\n%w", err)
 	}
 
 	var v *vault.Vault
+	var pending string // the vault entry an app setup made under the bare name, moved to the ID
 	if acct.NeedsSecret() && in.Secret == "" {
-		// UseStoredSecret: the secret is already in the vault.
-		sv, err := o.OpenVault(cfg)
-		if err != nil {
+		// UseStoredSecret: an app setup stored the secret under the name, before
+		// the account (and its ID) existed.
+		if v, err = o.OpenVault(cfg); err != nil {
 			return err
 		}
-		if ok, _ := sv.Has(vault.SecretKey(acct.Name)); !ok {
+		pending = vault.SecretKey(acct.Name)
+		secret, err := v.Get(pending)
+		if errors.Is(err, vault.ErrNotFound) {
 			return fmt.Errorf("no secret is stored for account %q", acct.Name)
+		} else if err != nil {
+			return WithHint(fmt.Errorf("read the stored secret: %w", err), acct.Name)
+		}
+		if err := v.Put(vault.SecretKey(acct.ID), secret); err != nil {
+			return WithHint(fmt.Errorf("store secret: %w", err), acct.Name)
 		}
 	} else if acct.NeedsSecret() {
 		if v, err = o.OpenVault(cfg); err != nil {
 			return err
 		}
-		if err := v.Put(vault.SecretKey(acct.Name), []byte(in.Secret)); err != nil {
+		if err := v.Put(vault.SecretKey(acct.ID), []byte(in.Secret)); err != nil {
 			return WithHint(fmt.Errorf("store secret: %w", err), acct.Name)
 		}
 	}
 	if err := cfg.Save(path); err != nil {
 		if v != nil {
-			_ = v.Delete(vault.SecretKey(acct.Name))
+			_ = v.Delete(vault.SecretKey(acct.ID))
 		}
 		return err
+	}
+	if pending != "" {
+		_ = v.Delete(pending) // best effort: nothing reads it any more
 	}
 	return nil
 }
@@ -179,6 +193,7 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 		return err
 	}
 	next := in.Account()
+	next.ID = cur.ID // the name is changed by RenameAccount only
 	next.Paused, next.HomeAccountID = cur.Paused, cur.HomeAccountID
 	next.SubscriptionExpires = cur.SubscriptionExpires // tenant-level; set with SetSubscriptionExpires
 	identityChanged := cur.Auth != next.Auth || cur.Tenant != next.Tenant ||
@@ -199,7 +214,7 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 	if err != nil {
 		return err
 	}
-	secretKey := vault.SecretKey(next.Name)
+	secretKey := vault.SecretKey(next.Key())
 	switch {
 	case next.NeedsSecret() && in.Secret != "":
 		if err := v.Put(secretKey, []byte(in.Secret)); err != nil {
@@ -217,12 +232,12 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 		}
 	}
 	if identityChanged {
-		if err := v.Delete(vault.TokenCacheKey(next.Name)); err != nil && !errors.Is(err, vault.ErrNotFound) {
+		if err := v.Delete(vault.TokenCacheKey(next.Key())); err != nil && !errors.Is(err, vault.ErrNotFound) {
 			return err
 		}
 	}
 	if identityChanged || in.Secret != "" {
-		o.resetPasswordBlock(next.Name)
+		o.resetPasswordBlock(next.Key())
 	}
 	return nil
 }
@@ -252,7 +267,8 @@ func (o *Ops) PrepareSetSecret(name, expires string) (config.Account, error) {
 // SetSecret replaces the stored secret or password of an account and, when
 // expires is not empty, its expiry date.
 func (o *Ops) SetSecret(ctx context.Context, name, secret, expires string) error {
-	if _, err := o.PrepareSetSecret(name, expires); err != nil {
+	acct, err := o.PrepareSetSecret(name, expires)
+	if err != nil {
 		return err
 	}
 	if secret == "" {
@@ -266,27 +282,38 @@ func (o *Ops) SetSecret(ctx context.Context, name, secret, expires string) error
 	if err != nil {
 		return err
 	}
-	if err := v.Put(vault.SecretKey(name), []byte(secret)); err != nil {
+	if err := v.Put(vault.SecretKey(acct.Key()), []byte(secret)); err != nil {
 		return WithHint(fmt.Errorf("store secret: %w", err), name)
 	}
-	o.resetPasswordBlock(name)
+	o.resetPasswordBlock(acct.Key())
 	if expires != "" {
-		return o.updateAccount(ctx, name, func(ac *config.Account) { ac.SecretExpires = expires })
+		return o.updateAccountKey(ctx, acct.Key(), func(ac *config.Account) { ac.SecretExpires = expires })
 	}
 	return nil
 }
 
 // resetPasswordBlock lets the engine try automatic password sign-in again for
-// an account whose password or identity changed, or that a person signed in.
-func (o *Ops) resetPasswordBlock(name string) {
+// an account (given by its key) whose password or identity changed, or that a
+// person signed in.
+func (o *Ops) resetPasswordBlock(key string) {
 	if dir, err := paths.DataDir(); err == nil {
-		_ = engine.TriggerPasswordReset(dir, name)
+		_ = engine.TriggerPasswordReset(dir, key)
 	}
 }
 
-// updateAccount reloads the config under the lock, applies change to the named
-// account and saves. It is a no-op if the account has disappeared.
+// updateAccount reloads the config under the lock, applies change to the
+// account with the given name and saves. It is a no-op if there is none.
 func (o *Ops) updateAccount(ctx context.Context, name string, change func(*config.Account)) error {
+	return o.updateWith(ctx, func(c *config.Config) (*config.Account, bool) { return c.Find(name) }, change)
+}
+
+// updateAccountKey is updateAccount for the account with the given key; a
+// rename in between does not matter.
+func (o *Ops) updateAccountKey(ctx context.Context, key string, change func(*config.Account)) error {
+	return o.updateWith(ctx, func(c *config.Config) (*config.Account, bool) { return c.FindKey(key) }, change)
+}
+
+func (o *Ops) updateWith(ctx context.Context, find func(*config.Config) (*config.Account, bool), change func(*config.Account)) error {
 	unlock, err := o.LockConfig(ctx)
 	if err != nil {
 		return err
@@ -296,7 +323,7 @@ func (o *Ops) updateAccount(ctx context.Context, name string, change func(*confi
 	if err != nil {
 		return err
 	}
-	acct, ok := cfg.Find(name)
+	acct, ok := find(cfg)
 	if !ok {
 		return nil
 	}
@@ -320,9 +347,12 @@ func (o *Ops) RemoveAccount(ctx context.Context, name string) (warnings []string
 	if err != nil {
 		return nil, err
 	}
-	if !cfg.Remove(name) {
+	acct, ok := cfg.Find(name)
+	if !ok {
 		return nil, fmt.Errorf("no account named %q", name)
 	}
+	key := acct.Key()
+	cfg.Remove(name)
 	if err := cfg.Save(path); err != nil {
 		return nil, err
 	}
@@ -330,8 +360,8 @@ func (o *Ops) RemoveAccount(ctx context.Context, name string) (warnings []string
 	if err != nil {
 		return nil, err
 	}
-	for _, key := range []string{vault.SecretKey(name), vault.TokenCacheKey(name)} {
-		if err := v.Delete(key); err != nil && !errors.Is(err, vault.ErrNotFound) {
+	for _, ent := range []string{vault.SecretKey(key), vault.TokenCacheKey(key)} {
+		if err := v.Delete(ent); err != nil && !errors.Is(err, vault.ErrNotFound) {
 			warnings = append(warnings, err.Error())
 		}
 	}
@@ -378,16 +408,16 @@ func LocalEntry(v interface{ Has(string) (bool, error) }, acct config.Account) A
 
 	switch acct.Auth {
 	case config.AuthClientSecret:
-		if has(vault.SecretKey(acct.Name)) {
+		if has(vault.SecretKey(acct.Key())) {
 			parts = append(parts, "secret stored")
 			e.Credentials = true
 		} else {
 			parts = append(parts, "secret missing")
 		}
 	default:
-		if acct.Auth == config.AuthPassword && !has(vault.SecretKey(acct.Name)) {
+		if acct.Auth == config.AuthPassword && !has(vault.SecretKey(acct.Key())) {
 			parts = append(parts, "password missing")
-		} else if acct.HomeAccountID != "" && has(vault.TokenCacheKey(acct.Name)) {
+		} else if acct.HomeAccountID != "" && has(vault.TokenCacheKey(acct.Key())) {
 			parts = append(parts, "logged in")
 			e.Credentials = true
 		} else {
@@ -451,13 +481,13 @@ func (o *Ops) Login(ctx context.Context, name string, ui auth.LoginUI) (LoginRes
 		return LoginResult{}, WithHint(err, name)
 	}
 	if acct.Delegated() && tok.HomeAccountID != "" && tok.HomeAccountID != acct.HomeAccountID {
-		err := o.updateAccount(ctx, name, func(ac *config.Account) { ac.HomeAccountID = tok.HomeAccountID })
+		err := o.updateAccountKey(ctx, acct.Key(), func(ac *config.Account) { ac.HomeAccountID = tok.HomeAccountID })
 		if err != nil {
 			return LoginResult{}, fmt.Errorf("signed in, but saving the config failed: %w", err)
 		}
 	}
 	if acct.Auth == config.AuthPassword {
-		o.resetPasswordBlock(name)
+		o.resetPasswordBlock(acct.Key())
 	}
 	return LoginResult{TokenInfo: tokenInfo(tok), Delegated: acct.Delegated()}, nil
 }
@@ -505,10 +535,12 @@ func (o *Ops) setPaused(ctx context.Context, name string, paused bool) (PauseRes
 	if err != nil {
 		return PauseResult{}, err
 	}
-	if _, err := o.FindAccount(cfg, name); err != nil {
+	acct, err := o.FindAccount(cfg, name)
+	if err != nil {
 		return PauseResult{}, err
 	}
-	if err := o.updateAccount(ctx, name, func(ac *config.Account) { ac.Paused = paused }); err != nil {
+	key := acct.Key()
+	if err := o.updateAccountKey(ctx, key, func(ac *config.Account) { ac.Paused = paused }); err != nil {
 		return PauseResult{}, err
 	}
 	dataDir, err := paths.DataDir()
@@ -522,7 +554,7 @@ func (o *Ops) setPaused(ctx context.Context, name string, paused bool) (PauseRes
 	}
 	if !paused {
 		// The engine alone writes state.json, so it clears an automatic pause itself.
-		if err := engine.TriggerResume(dataDir, name); err != nil {
+		if err := engine.TriggerResume(dataDir, key); err != nil {
 			return PauseResult{}, err
 		}
 	}

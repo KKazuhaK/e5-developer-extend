@@ -37,7 +37,7 @@ func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 	defer e.wg.Done()
 	defer func() {
 		e.mu.Lock()
-		if rt := e.rt[acct.Name]; rt != nil {
+		if rt := e.rt[acct.Key()]; rt != nil {
 			rt.running = false
 		}
 		e.mu.Unlock()
@@ -47,7 +47,7 @@ func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 	if manual {
 		// An explicit run retries a failed user lookup.
 		e.withLock(func() {
-			if rt := e.rt[acct.Name]; rt != nil {
+			if rt := e.rt[acct.Key()]; rt != nil {
 				rt.userFail = ""
 			}
 		})
@@ -75,7 +75,7 @@ func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
 	var follow []string // events to log after unlocking
 	found := true
 	e.withLock(func() {
-		as := e.state.Accounts[acct.Name]
+		as := e.state.Accounts[acct.Key()]
 		if as == nil { // removed from the config meanwhile
 			found = false
 			return
@@ -88,10 +88,12 @@ func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
 		return
 	}
 
-	e.emit(store.Entry{TS: now, Account: acct.Name, Round: roundID, Event: "round_end",
-		OK: out.ok, Failed: out.failed, Skipped: skipped, Message: msg})
+	ent := e.entry(acct.Key())
+	ent.TS, ent.Round, ent.Event = now, roundID, "round_end"
+	ent.OK, ent.Failed, ent.Skipped, ent.Message = out.ok, out.failed, skipped, msg
+	e.emit(ent)
 	for _, ev := range follow {
-		e.event(acct.Name, ev, msg)
+		e.event(acct.Key(), ev, msg)
 	}
 	e.evalNotify()
 	e.log.Info("round finished", "account", acct.Name, "ok", out.ok, "failed", out.failed, "skipped", skipped)
@@ -188,12 +190,12 @@ func (e *Engine) signIn(ctx context.Context, acct config.Account) (auth.Token, e
 	// After Graph rejected a token, do not trust the cached one again.
 	force := false
 	e.withLock(func() {
-		if rt := e.rt[acct.Name]; rt != nil {
+		if rt := e.rt[acct.Key()]; rt != nil {
 			force, rt.forceTok = rt.forceTok, false
 		}
 	})
 	// Only here may a password account sign in with its password again.
-	ctx = e.gateContext(ctx, acct.Name)
+	ctx = e.gateContext(ctx, acct.Key())
 	tctx := ctx
 	if force {
 		tctx = auth.ForceRefresh(ctx)
@@ -255,7 +257,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	var minN, maxN int
 	var random, gone bool
 	e.withLock(func() {
-		as := e.state.Accounts[acct.Name]
+		as := e.state.Accounts[acct.Key()]
 		if as == nil {
 			gone = true
 			return
@@ -313,7 +315,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	// handle books the result of one call; it reports whether the round must stop.
 	throttledRun := 0
 	handle := func(id string, res graph.Result) (stop bool) {
-		e.countAPI(acct.Name, id, res)
+		e.countAPI(acct.Key(), id, res)
 		if res.Class != graph.Throttled {
 			throttledRun = 0
 		}
@@ -340,7 +342,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			out.failed++
 			out.lastFail = res.Class
 			e.withLock(func() {
-				if rt := e.rt[acct.Name]; rt != nil {
+				if rt := e.rt[acct.Key()]; rt != nil {
 					rt.forceTok = true
 				}
 			})
@@ -353,7 +355,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			out.refused = true
 			out.lastFail = res.Class
 			skip[id] = true
-			e.updateAccount(acct.Name, func(as *store.AccountState) {
+			e.updateAccount(acct.Key(), func(as *store.AccountState) {
 				if as.APISkipUntil == nil {
 					as.APISkipUntil = map[string]time.Time{}
 				}
@@ -394,7 +396,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			}
 			path = strings.ReplaceAll(path, "{user}", url.PathEscape(user))
 		}
-		res := e.callOne(ctx, acct.Name, roundID, api.ID, tok.AccessToken, path, e.pickQuery(api))
+		res := e.callOne(ctx, acct, roundID, api.ID, tok.AccessToken, path, e.pickQuery(api))
 		if handle(api.ID, res) {
 			break
 		}
@@ -416,10 +418,10 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 // Retry-After) the same call is repeated after the time Retry-After names, at
 // most throttleRetries more times; a wait longer than maxRetryAfterWait ends
 // the attempts at once. Every answer is logged; the result is the last one.
-func (e *Engine) callOne(ctx context.Context, account, roundID, apiID, token, path string, q url.Values) graph.Result {
+func (e *Engine) callOne(ctx context.Context, acct config.Account, roundID, apiID, token, path string, q url.Values) graph.Result {
 	for attempt := 0; ; attempt++ {
 		res := e.o.Graph.Call(ctx, token, path, q)
-		e.logCall(account, roundID, apiID, res)
+		e.logCall(acct, roundID, apiID, res)
 		if res.Class != graph.Throttled {
 			return res
 		}
@@ -452,8 +454,9 @@ func finishCalls(ctx context.Context, out outcome) outcome {
 }
 
 // logCall writes one call-log line: IDs and numbers only, never content.
-func (e *Engine) logCall(account, roundID, apiID string, res graph.Result) {
-	e.emit(store.Entry{TS: e.clock.Now(), Account: account, Round: roundID, API: apiID,
+func (e *Engine) logCall(acct config.Account, roundID, apiID string, res graph.Result) {
+	// The name is the one the round began with; the ID keeps the line with the account across a rename.
+	e.emit(store.Entry{TS: e.clock.Now(), Account: acct.Name, AccountID: acct.ID, Round: roundID, API: apiID,
 		Status: res.Status, Class: string(res.Class), LatencyMS: res.Latency.Milliseconds()})
 }
 
@@ -555,7 +558,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 	var cached string
 	var failedToday bool
 	e.withLock(func() {
-		if rt := e.rt[acct.Name]; rt != nil {
+		if rt := e.rt[acct.Key()]; rt != nil {
 			if rt.userID != "" && rt.userDay == day {
 				cached = rt.userID
 			}
@@ -571,7 +574,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 	}
 
 	ids, res := e.o.Graph.ListUserIDs(ctx, token)
-	e.logCall(acct.Name, roundID, "users.pick", res)
+	e.logCall(acct, roundID, "users.pick", res)
 	if res.Class != graph.OK || len(ids) == 0 {
 		if res.Class == graph.OK {
 			res.Class = graph.NotFound
@@ -581,7 +584,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 			// Temporary: try again next time.
 		default:
 			e.withLock(func() {
-				if rt := e.rt[acct.Name]; rt != nil {
+				if rt := e.rt[acct.Key()]; rt != nil {
 					rt.userFail = day
 				}
 			})
@@ -590,7 +593,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 	}
 	id := ids[e.intn(len(ids))]
 	e.withLock(func() {
-		if rt := e.rt[acct.Name]; rt != nil {
+		if rt := e.rt[acct.Key()]; rt != nil {
 			rt.userID, rt.userDay = id, day
 		}
 	})
@@ -621,7 +624,7 @@ func (e *Engine) saveHomeAccount(ctx context.Context, acct config.Account, tok a
 		return
 	}
 	e.withLock(func() {
-		if a, ok := e.cfg.Find(acct.Name); ok {
+		if a, ok := e.cfg.FindKey(acct.Key()); ok {
 			a.HomeAccountID = tok.HomeAccountID
 		}
 	})

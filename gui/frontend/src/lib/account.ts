@@ -1,5 +1,6 @@
 import type { AccountInput, AuthKind } from "@/api/types";
 import { isValidDate } from "@/lib/settings";
+import { categoriesToSave } from "@/lib/recommend";
 
 export const AUTH_KINDS: AuthKind[] = ["device_code", "browser", "client_secret", "password"];
 
@@ -46,13 +47,6 @@ export function validateAccountInput(
   return e;
 }
 
-/** Union of scopes of the usable APIs, sorted. This is "what was granted" as far as the catalog can tell. */
-export function grantedScopes(entries: { usable: boolean; scopes: string[] }[]): string[] {
-  const s = new Set<string>();
-  for (const e of entries) if (e.usable) e.scopes.forEach((x) => s.add(x));
-  return [...s].sort();
-}
-
 export function summarizeByCategory(entries: { category: string; usable: boolean }[]): { category: string; usable: number; total: number }[] {
   const m = new Map<string, { usable: number; total: number }>();
   for (const e of entries) {
@@ -79,4 +73,97 @@ export function appIdentityName(name: string, existing: readonly string[] = []):
   let candidate = make("-app");
   for (let n = 2; taken.has(candidate); n++) candidate = make(`-app${n}`);
   return candidate;
+}
+
+/** What the backend accepts as an account name (it also refuses a few reserved device names). */
+const EDIT_NAME_RE = /^[a-z0-9_-]{1,64}$/;
+
+/** Validates the whole edit form at once. The sign-in kind cannot change, so a stored secret is kept when the field is empty. */
+export function validateEditForm(i: AccountInput): Partial<Record<keyof AccountInput, AccountErrorCode>> {
+  const e = validateAccountInput(i, "edit", "identity", i.auth);
+  const name = i.name.trim();
+  if (!name) e.name = "required";
+  else if (!EDIT_NAME_RE.test(name)) e.name = "name";
+  if (i.categories.length === 0) e.categories = "categories";
+  return e;
+}
+
+/** True when saving would discard the saved sign-in: the tenant, the app or the user changed. */
+export function identityChanged(orig: AccountInput, next: AccountInput): boolean {
+  return orig.tenant.trim() !== next.tenant.trim() || orig.clientId.trim() !== next.clientId.trim() || orig.username.trim() !== next.username.trim();
+}
+
+/** The calls the edit form makes, in the order it makes them. */
+export interface EditApi {
+  /** Resolves to the warnings of a rename that went through. */
+  rename(from: string, to: string): Promise<string[]>;
+  update(input: AccountInput): Promise<void>;
+  pause(name: string): Promise<void>;
+  resume(name: string): Promise<void>;
+}
+
+export interface EditSaveResult {
+  /** The name the account has now. */
+  name: string;
+  renamed: boolean;
+  signInCleared: boolean;
+  /** Problems after a rename that went through; the rename itself succeeded. */
+  warnings: string[];
+}
+
+/** Which call of a save failed. */
+export type EditStage = "rename" | "update" | "paused";
+
+/**
+ * A save that failed. `account` is what the account is called now (the new name when the rename went through);
+ * `stage` says what failed: after "paused" the rename and the update are done.
+ */
+export class EditSaveError extends Error {
+  constructor(message: string, readonly account: string, readonly renamed: boolean, readonly stage: EditStage) {
+    super(message);
+  }
+}
+
+/**
+ * Saves the edit form: validate everything, then rename when the name changed, then the update under the (new)
+ * name, then the paused state when it changed. Nothing is sent when a field is invalid (errors are returned
+ * instead). The categories are validated as ticked; only then is a selection equal to the catalog defaults saved
+ * as an empty list, so new default categories keep applying.
+ */
+export async function saveAccountEdit(
+  api: EditApi, original: AccountInput, input: AccountInput, paused: { was: boolean; now: boolean }, defaultCategories: string[] = [],
+): Promise<{ errors: ReturnType<typeof validateEditForm> } | { result: EditSaveResult }> {
+  const errors = validateEditForm(input);
+  if (Object.keys(errors).length) return { errors };
+  const payload: AccountInput = {
+    ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim(),
+    secret: input.secret || undefined, categories: categoriesToSave(input.categories, defaultCategories),
+  };
+  const renamed = payload.name !== original.name;
+  let current = original.name;
+  let warnings: string[] = [];
+  const fail = (e: unknown, stage: EditStage): never => {
+    throw new EditSaveError(e instanceof Error ? e.message : String(e), current, current !== original.name, stage);
+  };
+  if (renamed) {
+    try {
+      warnings = await api.rename(original.name, payload.name);
+    } catch (e) {
+      fail(e, "rename");
+    }
+    current = payload.name;
+  }
+  try {
+    await api.update(payload);
+  } catch (e) {
+    fail(e, "update");
+  }
+  if (paused.was !== paused.now) {
+    try {
+      await (paused.now ? api.pause(current) : api.resume(current));
+    } catch (e) {
+      fail(e, "paused");
+    }
+  }
+  return { result: { name: current, renamed, signInCleared: identityChanged(original, payload), warnings } };
 }

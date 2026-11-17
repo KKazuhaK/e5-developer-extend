@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { CheckCircle2, KeyRound, LogIn, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users, XCircle } from "lucide-react";
+import { CheckCircle2, FlaskConical, KeyRound, LogIn, Pause, Pencil, Play, Plus, RefreshCw, Search, Trash2, Users, XCircle } from "lucide-react";
 import { api } from "@/api";
 import type { AccountSummary } from "@/api";
 import { useApp, type AccountFilter } from "@/state/app";
@@ -15,6 +15,8 @@ import { SecretExpiry } from "@/components/AccountCard";
 import { AccountNotes } from "@/components/AccountNotes";
 import { SignInFrequencyNotice } from "@/components/SignInFrequencyNotice";
 import { AccountWizard } from "./AccountWizard";
+import { AccountEdit } from "./AccountEdit";
+import { SignInDialog, TestDialog } from "./AccountDialogs";
 import { compareStatus, displayStatus, needsAction } from "@/lib/status";
 import { formatRelative } from "@/lib/time";
 import { isSignInFrequency, needsSecret } from "@/lib/account";
@@ -31,8 +33,11 @@ export function Accounts() {
   const [query, setQuery] = useState("");
   const [deleting, setDeleting] = useState<AccountSummary | null>(null);
   const [secretFor, setSecretFor] = useState<AccountSummary | null>(null);
+  const [signIn, setSignIn] = useState<string | null>(route.signIn ?? null);
+  const [testFor, setTestFor] = useState<string | null>(null);
 
   useEffect(() => {
+    setSignIn(route.signIn ?? null);
     setWizard(route.wizard ?? null);
     setFilter(route.filter ?? "all");
   }, [route]);
@@ -48,18 +53,14 @@ export function Accounts() {
   });
 
   if (wizard) {
-    return (
-      <AccountWizard
-        key={route.nonce}
-        mode={wizard.mode}
-        name={wizard.mode === "edit" ? wizard.name : undefined}
-        startStep={wizard.mode === "edit" ? wizard.step : undefined}
-        from={wizard.mode === "add" ? wizard.from : undefined}
-        onClose={() => {
-          setWizard(null);
-          void snapshot.refresh();
-        }}
-      />
+    const close = () => {
+      setWizard(null);
+      void snapshot.refresh();
+    };
+    return wizard.mode === "edit" ? (
+      <AccountEdit key={route.nonce} name={wizard.name} onClose={close} />
+    ) : (
+      <AccountWizard key={route.nonce} from={wizard.from} onClose={close} />
     );
   }
 
@@ -150,7 +151,7 @@ export function Accounts() {
                         </div>
                         <div className="flex shrink-0 items-center gap-0.5">
                           {attention ? (
-                            <Button size="sm" onClick={() => navigate("accounts", { wizard: { mode: "edit", name: a.name, step: 3 } })}>
+                            <Button size="sm" onClick={() => setSignIn(a.name)}>
                               <LogIn /> {a.status === "not_signed_in" ? t("account.signIn") : t("account.reLogin")}
                             </Button>
                           ) : (
@@ -163,6 +164,7 @@ export function Accounts() {
                           ) : (
                             <IconBtn label={t("account.pause")} disabled={busy} onClick={() => void act.pause(a.name)}><Pause /></IconBtn>
                           )}
+                          <IconBtn label={t("account.test")} disabled={attention} onClick={() => setTestFor(a.name)}><FlaskConical /></IconBtn>
                           <IconBtn label={t("common.edit")} onClick={() => setWizard({ mode: "edit", name: a.name })}><Pencil /></IconBtn>
                           {needsSecret(a.auth) && <IconBtn label={t("accounts.changeSecret")} onClick={() => setSecretFor(a)}><KeyRound /></IconBtn>}
                           <IconBtn label={t("common.delete")} onClick={() => setDeleting(a)} danger><Trash2 /></IconBtn>
@@ -210,6 +212,8 @@ export function Accounts() {
       </Dialog>
 
       <SecretDialog account={secretFor} onClose={() => setSecretFor(null)} />
+      <SignInDialog name={signIn} onClose={() => setSignIn(null)} />
+      <TestDialog name={testFor} onClose={() => setTestFor(null)} />
     </>
   );
 }

@@ -129,7 +129,7 @@ func TestPlanFor(t *testing.T) {
 	for _, c := range cases {
 		inst := *i
 		if c.keyless {
-			inst.PublicKey = PublicKeyText
+			inst.PublicKey = placeholderKey
 		}
 		p := inst.PlanFor(c.in, c.cur)
 		if p.Mode != c.mode || p.Reason != c.reason {

@@ -43,6 +43,9 @@ func runTray() error {
 	defer stop()
 
 	var ctl *trayhost.Controller
+	// On macOS Quit ends the process without running deferred calls, so the
+	// pid record is also removed from the shutdown hook.
+	unmarkTray := func() {}
 	app := application.New(application.Options{
 		Name:        AppName,
 		Description: "Keeps a Microsoft 365 developer tenant active",
@@ -50,6 +53,7 @@ func runTray() error {
 		Mac:         application.MacOptions{ActivationPolicy: application.ActivationPolicyAccessory},
 		// However the app ends (menu, SIGTERM, logout), stop the engine cleanly first.
 		OnShutdown: func() {
+			unmarkTray()
 			stop()
 			if ctl != nil {
 				ctl.Stop()
@@ -84,7 +88,7 @@ func runTray() error {
 	// This process holds the single-instance lock now (application.New exits
 	// when another tray has it): record it, so an upgrade can tell a tray runs
 	// and wait for it to exit.
-	unmarkTray := markTrayRunning()
+	unmarkTray = markTrayRunning()
 	defer unmarkTray()
 	// Any mark of an engine host found now is left from an earlier process.
 	ops.ClearEngineHost(dataDir)

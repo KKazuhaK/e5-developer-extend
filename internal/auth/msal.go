@@ -36,7 +36,7 @@ func (d *delegated) msal() (public.Client, error) {
 	}
 	c, err := public.New(d.acct.ClientID,
 		public.WithAuthority(d.opts.authority(d.acct.Tenant)),
-		public.WithCache(newVaultCache(d.store, d.acct.Name)),
+		public.WithCache(newVaultCache(d.store, d.acct.Key())),
 		public.WithHTTPClient(d.opts.HTTPClient),
 		public.WithInstanceDiscovery(!d.opts.DisableInstanceDiscovery),
 	)
@@ -75,10 +75,10 @@ func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silen
 	d.reauth.Lock()
 	defer d.reauth.Unlock()
 	// Signing in the first time is an explicit step, not something to do on the side.
-	if _, err := d.store.Get(vault.TokenCacheKey(d.acct.Name)); err != nil {
+	if _, err := d.store.Get(vault.TokenCacheKey(d.acct.Key())); err != nil {
 		return Token{}, silentErr
 	}
-	pw, err := d.store.Get(vault.SecretKey(d.acct.Name))
+	pw, err := d.store.Get(vault.SecretKey(d.acct.Key()))
 	if errors.Is(err, vault.ErrNotFound) {
 		return Token{}, fmt.Errorf("%w: account %q has no stored password to sign in again", ErrLoginRequired, d.acct.Name)
 	}
@@ -187,7 +187,7 @@ func (d *delegated) Login(ctx context.Context, ui LoginUI) (Token, error) {
 		}
 		res, err = c.AcquireTokenInteractive(ctx, scopes, opts...)
 	case config.AuthPassword:
-		pw, gerr := d.store.Get(vault.SecretKey(d.acct.Name))
+		pw, gerr := d.store.Get(vault.SecretKey(d.acct.Key()))
 		if gerr != nil {
 			return Token{}, fmt.Errorf("account %q: read password from vault: %w", d.acct.Name, gerr)
 		}
@@ -200,7 +200,7 @@ func (d *delegated) Login(ctx context.Context, ui LoginUI) (Token, error) {
 }
 
 func (d *delegated) Logout(context.Context) error {
-	return newVaultCache(d.store, d.acct.Name).clear()
+	return newVaultCache(d.store, d.acct.Key()).clear()
 }
 
 func (d *delegated) wrap(err error) error {
@@ -223,7 +223,7 @@ func (a *application) msal() (confidential.Client, error) {
 	if a.client != nil {
 		return *a.client, nil
 	}
-	secret, err := a.store.Get(vault.SecretKey(a.acct.Name))
+	secret, err := a.store.Get(vault.SecretKey(a.acct.Key()))
 	if errors.Is(err, vault.ErrNotFound) {
 		return confidential.Client{}, fmt.Errorf("%w: no client secret stored for account %q", ErrInvalidClient, a.acct.Name)
 	}
@@ -235,7 +235,7 @@ func (a *application) msal() (confidential.Client, error) {
 		return confidential.Client{}, fmt.Errorf("%w: account %q: %v", ErrInvalidClient, a.acct.Name, err)
 	}
 	c, err := confidential.New(a.opts.authority(a.acct.Tenant), a.acct.ClientID, cred,
-		confidential.WithCache(newVaultCache(a.store, a.acct.Name)),
+		confidential.WithCache(newVaultCache(a.store, a.acct.Key())),
 		confidential.WithHTTPClient(a.opts.HTTPClient),
 		confidential.WithInstanceDiscovery(!a.opts.DisableInstanceDiscovery),
 	)
@@ -271,7 +271,7 @@ func (a *application) Login(ctx context.Context, _ LoginUI) (Token, error) {
 }
 
 func (a *application) Logout(context.Context) error {
-	return newVaultCache(a.store, a.acct.Name).clear()
+	return newVaultCache(a.store, a.acct.Key()).clear()
 }
 
 func wrapErr(name string, err error) error {

@@ -134,6 +134,13 @@ func (o *Ops) BeginAppSetup(ctx context.Context, opts AppSetupOptions, ui auth.L
 		if err := ValidateAccount(config.Account{Name: opts.Account, Auth: config.AuthClientSecret, Tenant: "x", ClientID: testClientID}); err != nil {
 			return nil, fmt.Errorf("--account: %w", err)
 		}
+		// Before anything is created or written: the name must not be the key of
+		// another account, whose secret would be overwritten.
+		if cfg, _, err := o.LoadConfigOrDefault(); err == nil {
+			if owner, ok := cfg.KeyOwner(opts.Account); ok {
+				return nil, errNameIsKey(opts.Account, owner)
+			}
+		}
 	}
 	proxy := ""
 	if cfg, _, err := o.LoadConfigOrDefault(); err == nil {
@@ -193,6 +200,9 @@ func (s *AppSetupSession) checkSecretTarget(app appsetup.AppRef) error {
 	if err != nil {
 		return err
 	}
+	if owner, ok := cfg.KeyOwner(s.opts.Account); ok {
+		return errNameIsKey(s.opts.Account, owner)
+	}
 	acct, exists := cfg.Find(s.opts.Account)
 	if !exists {
 		return nil
@@ -238,7 +248,17 @@ func (s *AppSetupSession) storeSecret(secret string) error {
 	if err != nil {
 		return err
 	}
-	if err := v.Put(vault.SecretKey(s.opts.Account), []byte(secret)); err != nil {
+	// An account that exists keeps its secret under its key. For one that is
+	// not added yet the secret waits under the bare name; AddAccount moves it
+	// to the ID the account gets.
+	if owner, ok := cfg.KeyOwner(s.opts.Account); ok {
+		return errNameIsKey(s.opts.Account, owner)
+	}
+	key := s.opts.Account
+	if acct, ok := cfg.Find(s.opts.Account); ok {
+		key = acct.Key()
+	}
+	if err := v.Put(vault.SecretKey(key), []byte(secret)); err != nil {
 		return WithHint(fmt.Errorf("store secret: %w", err), s.opts.Account)
 	}
 	return nil
@@ -402,6 +422,11 @@ func (s *AppSetupSession) DiscardSecret(ctx context.Context, res *appsetup.Resul
 	if _, exists := cfg.Find(s.opts.Account); exists {
 		return false, nil
 	}
+	if _, owned := cfg.KeyOwner(s.opts.Account); owned {
+		// secret/<name> belongs to another account; it was never ours to delete.
+		return false, nil
+	}
+	// Not added: the secret waits under the bare name (see storeSecret).
 	revokeErr := s.revokeSecret(ctx, res)
 	var vaultErr error
 	if v, err := s.o.OpenVault(cfg); err != nil {
@@ -440,13 +465,19 @@ func (s *AppSetupSession) Apply(ctx context.Context, choice appsetup.Choice) (*a
 	if s.opts.AppOnly && !s.opts.Repair && res.SecretExpires != "" {
 		if cfg, _, err := s.o.LoadConfig(); err == nil {
 			if acct, ok := cfg.Find(s.opts.Account); ok && acct.Auth == config.AuthClientSecret {
-				if err := s.o.updateAccount(ctx, s.opts.Account, func(ac *config.Account) { ac.SecretExpires = res.SecretExpires }); err != nil {
+				if err := s.o.updateAccountKey(ctx, acct.Key(), func(ac *config.Account) { ac.SecretExpires = res.SecretExpires }); err != nil {
 					return res, fmt.Errorf("the secret was stored, but saving its expiry date failed: %w", err)
 				}
 			}
 		}
 	}
 	return res, nil
+}
+
+// errNameIsKey explains why a name that no account is called any more cannot be used.
+func errNameIsKey(name string, owner *config.Account) error {
+	return fmt.Errorf("the name %q is still used internally by account %q (its earlier name) and cannot be reused; choose another name (nothing was changed)",
+		name, owner.Name)
 }
 
 // PrepareAddAccount checks that an account could be added (valid, not taken)
@@ -468,6 +499,9 @@ func (o *Ops) PrepareAddAccount(in AccountInput) error {
 	}
 	if _, exists := cfg.Find(acct.Name); exists {
 		return fmt.Errorf("account %q already exists", acct.Name)
+	}
+	if owner, ok := cfg.KeyOwner(acct.Name); ok {
+		return errNameIsKey(acct.Name, owner)
 	}
 	return nil
 }

@@ -228,11 +228,15 @@ type ServiceResult struct {
 
 // CatalogEntry is one API call of the built-in catalog.
 type CatalogEntry struct {
-	ID       string   `json:"id"`
-	Category string   `json:"category"`
-	Name     string   `json:"name"`
-	Usable   bool     `json:"usable"`
-	Scopes   []string `json:"scopes"`
+	ID       string `json:"id"`
+	Category string `json:"category"`
+	Name     string `json:"name"`
+	Usable   bool   `json:"usable"`
+	// Scopes are the permissions of which any one is enough.
+	Scopes []string `json:"scopes"`
+	// ScopeSets are the combinations that must be granted together (all of
+	// each), another way in besides Scopes.
+	ScopeSets [][]string `json:"scopeSets"`
 }
 
 // TestResult is what a successful account test shows.

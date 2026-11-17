@@ -169,7 +169,7 @@ func Run(ctx context.Context, d Deps, o Options) []Check {
 		for _, acct := range cfg.Accounts {
 			groups = append(groups, group{"account." + acct.Name, "Account " + acct.Name,
 				func(ctx context.Context) []Check {
-					return checkAccount(ctx, d, cfg, acct, st.Accounts[acct.Name], o.Offline)
+					return checkAccount(ctx, d, cfg, acct, st.Accounts[acct.Key()], o.Offline)
 				}})
 		}
 	}

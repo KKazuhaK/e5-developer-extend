@@ -3,10 +3,8 @@ package ops
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
@@ -156,7 +154,7 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	today, _ := st.Read(store.Filter{Since: midnight})
 	todayBy := map[string][]store.Entry{}
 	for _, en := range today {
-		todayBy[en.Account] = append(todayBy[en.Account], en)
+		todayBy[en.Key()] = append(todayBy[en.Key()], en)
 	}
 
 	apis, _ := catalog.Load()
@@ -169,12 +167,12 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	}
 
 	for _, acct := range cfg.Accounts {
-		as := state.Accounts[acct.Name]
+		as := state.Accounts[acct.Key()]
 		sum := AccountSummary{
 			Name: acct.Name, Auth: acct.Auth, Tenant: acct.Tenant, Account: acct, State: as,
 			TotalAPIs: len(apis), Paused: acct.Paused,
 		}
-		cn := callstat.Tally(todayBy[acct.Name], midnight)
+		cn := callstat.Tally(todayBy[acct.Key()], midnight)
 		sum.TodayOK, sum.TodayFailed, sum.TodayThrottled = cn.OK, cn.Failed, cn.Throttled
 		if acct.SecretExpires != "" {
 			s := acct.SecretExpires
@@ -283,17 +281,19 @@ func EngineHost(dataDir string) string {
 	return HostGUI
 }
 
-// PidAlive reports whether a process with this id exists.
+// PidAlive reports whether a process with this id exists and belongs to this
+// user (another user's process counts as gone).
 func PidAlive(pid int) bool { return pidAlive(pid) }
 
-func pidAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
+// ProcStart is a token for when the process started ("" when unknown). With
+// the id it names one process even after the id is reused.
+func ProcStart(pid int) string { return procStart(pid) }
+
+// PidMatches reports whether the process with this id is alive and, when
+// start is known, is the one that started at that time.
+func PidMatches(pid int, start string) bool {
+	if !pidAlive(pid) {
 		return false
 	}
-	if runtime.GOOS == "windows" {
-		_ = p.Release()
-		return true
-	}
-	return p.Signal(syscall.Signal(0)) == nil
+	return start == "" || procStart(pid) == start
 }

@@ -195,7 +195,7 @@ func TestAccountAddAutoApplicationIdentity(t *testing.T) {
 	}
 	cfg := e.loadCfg()
 	v, _ := vault.Open(cfg.Vault.Backend)
-	if got, err := v.Get(vault.SecretKey("app1")); err != nil || string(got) != g.Secrets[0] {
+	if got, err := v.Get(vault.SecretKey(acct.Key())); err != nil || string(got) != g.Secrets[0] {
 		t.Errorf("vault secret: %v", err)
 	}
 	if !strings.Contains(out, "client secret verified") {

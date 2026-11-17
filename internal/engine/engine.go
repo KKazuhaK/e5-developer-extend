@@ -163,6 +163,10 @@ type Engine struct {
 	sched *schedule
 	state *store.State
 	rt    map[string]*accountRT
+	// index maps account keys to the configured account, for log lines written
+	// without e.mu (see entry). Guarded by idxMu.
+	idxMu sync.RWMutex
+	index map[string]config.Account
 	// unsaved is set when the state in memory differs from state.json because a save failed.
 	unsaved bool
 	// roundsDone is set when the first round has finished; the subscription
@@ -230,12 +234,14 @@ func New(o Options) (*Engine, error) {
 	if seed == 0 {
 		seed = rand.Uint64()
 	}
-	return &Engine{
+	e := &Engine{
 		o: o, store: store.New(o.DataDir), clock: o.Clock, log: o.Logger, apis: apis,
 		rng: rand.New(rand.NewPCG(seed, seed^0x9e3779b97f4a7c15)),
 		cfg: o.Config, sched: sc, rt: map[string]*accountRT{},
 		reload: make(chan struct{}, 1),
-	}, nil
+	}
+	e.indexAccounts(o.Config)
+	return e, nil
 }
 
 // Reload asks the main loop to reload the configuration at the next opportunity.
@@ -283,9 +289,40 @@ func (e *Engine) emit(ent store.Entry) {
 	}
 }
 
-func (e *Engine) event(account, name, msg string) {
-	e.emit(store.Entry{Account: account, Event: name, Message: msg})
-	e.log.Info("event", "event", name, "account", account, "detail", msg)
+// event logs an event of the account with the given key ("" for none). The
+// line carries the account's current name and, once it has one, its ID.
+func (e *Engine) event(key, name, msg string) {
+	ent := e.entry(key)
+	ent.Event, ent.Message = name, msg
+	e.emit(ent)
+	e.log.Info("event", "event", name, "account", ent.Account, "detail", msg)
+}
+
+// entry returns a log entry for the account with the given key, with its name
+// and ID filled in. An account the configuration no longer has is logged by its key.
+func (e *Engine) entry(key string) store.Entry {
+	if key == "" {
+		return store.Entry{}
+	}
+	e.idxMu.RLock()
+	a, ok := e.index[key]
+	e.idxMu.RUnlock()
+	if !ok {
+		return store.Entry{Account: key}
+	}
+	return store.Entry{Account: a.Name, AccountID: a.ID}
+}
+
+// indexAccounts records which name and ID the configured keys have, for the
+// log lines written without holding e.mu.
+func (e *Engine) indexAccounts(cfg *config.Config) {
+	idx := make(map[string]config.Account, len(cfg.Accounts))
+	for _, a := range cfg.Accounts {
+		idx[a.Key()] = a
+	}
+	e.idxMu.Lock()
+	e.index = idx
+	e.idxMu.Unlock()
 }
 
 // saveLocked writes the state; e.mu must be held. It reports whether the write worked.
@@ -356,7 +393,7 @@ func (e *Engine) adoptFile(path string) {
 	e.withLock(func() {
 		for name, as := range p.Accounts {
 			rt := e.rt[name]
-			switch _, inCfg := e.cfg.Find(name); {
+			switch _, inCfg := e.cfg.FindKey(name); {
 			case !inCfg:
 				if age < importWait {
 					later[name] = as
@@ -487,7 +524,7 @@ func (e *Engine) evalNotify() {
 				}
 			})
 		})
-		e.event(ev.Account, "alert", ev.Event)
+		e.event(ev.Key, "alert", ev.Event)
 	}
 }
 
@@ -506,7 +543,7 @@ func (e *Engine) recentCalls(now time.Time) map[string][]store.Entry {
 	calls := map[string][]store.Entry{}
 	for _, en := range entries {
 		if callstat.IsCall(en) {
-			calls[en.Account] = append(calls[en.Account], en)
+			calls[en.Key()] = append(calls[en.Key()], en)
 		}
 	}
 	return calls
@@ -574,8 +611,8 @@ func (e *Engine) init() {
 	})
 	e.reportClockFix(fixed)
 	for _, a := range e.cfg.Accounts { // in config order
-		if late, ok := overdue[a.Name]; ok {
-			e.event(a.Name, "catch_up", "the next round was overdue by "+late.Round(time.Minute).String()+"; one round runs soon, missed rounds are not made up")
+		if late, ok := overdue[a.Key()]; ok {
+			e.event(a.Key(), "catch_up", "the next round was overdue by "+late.Round(time.Minute).String()+"; one round runs soon, missed rounds are not made up")
 		}
 	}
 	e.applyPasswordResets()
@@ -594,11 +631,11 @@ func (e *Engine) init() {
 func (e *Engine) syncAccountsLocked(now time.Time, startup bool) (overdue map[string]time.Duration) {
 	names := map[string]bool{}
 	for _, a := range e.cfg.Accounts {
-		names[a.Name] = true
-		as := e.state.Accounts[a.Name]
+		names[a.Key()] = true
+		as := e.state.Accounts[a.Key()]
 		if as == nil {
 			as = &store.AccountState{Status: store.StatusOK}
-			e.state.Accounts[a.Name] = as
+			e.state.Accounts[a.Key()] = as
 			e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		} else if startup && (as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention) && !as.NextRun.After(now) {
 			// One round soon, however many were missed.
@@ -606,12 +643,12 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) (overdue map[st
 				if overdue == nil {
 					overdue = map[string]time.Duration{}
 				}
-				overdue[a.Name] = late
+				overdue[a.Key()] = late
 			}
 			e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		}
-		if e.rt[a.Name] == nil {
-			e.rt[a.Name] = &accountRT{}
+		if e.rt[a.Key()] == nil {
+			e.rt[a.Key()] = &accountRT{}
 		}
 	}
 	for n := range e.state.Accounts {
@@ -718,7 +755,7 @@ func (e *Engine) tick(ctx context.Context) {
 		fixed = e.fixFarFutureLocked(now)
 		changed := len(fixed) > 0
 		for _, acct := range e.cfg.Accounts {
-			as, rt := e.state.Accounts[acct.Name], e.rt[acct.Name]
+			as, rt := e.state.Accounts[acct.Key()], e.rt[acct.Key()]
 			if as == nil || rt == nil {
 				continue
 			}
@@ -748,7 +785,7 @@ func (e *Engine) tick(ctx context.Context) {
 				as.APISkipUntil = nil
 				e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 				changed = true
-				autoResumed = append(autoResumed, acct.Name)
+				autoResumed = append(autoResumed, acct.Key())
 				continue
 			}
 			if as.Status == store.StatusPaused {
@@ -773,10 +810,10 @@ func (e *Engine) tick(ctx context.Context) {
 				changed = true
 				continue
 			}
-			if manual[acct.Name] || !as.NextRun.After(now) {
+			if manual[acct.Key()] || !as.NextRun.After(now) {
 				rt.running = true
 				e.wg.Add(1)
-				go e.round(ctx, acct, manual[acct.Name])
+				go e.round(ctx, acct, manual[acct.Key()])
 			}
 		}
 		if changed || e.unsaved {
@@ -838,7 +875,7 @@ func (e *Engine) processTriggers(now time.Time) map[string]bool {
 				as := e.state.Accounts[name]
 				var acct *config.Account
 				if as != nil {
-					acct, _ = e.cfg.Find(name)
+					acct, _ = e.cfg.FindKey(name)
 				}
 				ok = acct != nil && !acct.Paused && as.Status != store.StatusPaused
 			})
@@ -905,6 +942,7 @@ func (e *Engine) reloadConfig() {
 	e.withLock(func() {
 		restart = cfg.Network.Proxy != e.cfg.Network.Proxy || cfg.Vault.Backend != e.cfg.Vault.Backend
 		e.cfg, e.sched = cfg, sc
+		e.indexAccounts(cfg)
 		e.syncAccountsLocked(e.clock.Now(), false)
 		e.pruneTenantsLocked()
 		e.saveLocked()
@@ -929,10 +967,10 @@ func firstLine(s string) string {
 func (e *Engine) authFor(acct config.Account) (auth.Authenticator, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	rt := e.rt[acct.Name]
+	rt := e.rt[acct.Key()]
 	if rt == nil {
 		rt = &accountRT{}
-		e.rt[acct.Name] = rt
+		e.rt[acct.Key()] = rt
 	}
 	if rt.au != nil && reflect.DeepEqual(rt.auAcct, acct) {
 		return rt.au, nil
@@ -967,23 +1005,23 @@ func RunOnce(ctx context.Context, o Options, names []string) error {
 			if len(names) > 0 && !contains(names, a.Name) {
 				continue
 			}
-			switch as := e.state.Accounts[a.Name]; {
+			switch as := e.state.Accounts[a.Key()]; {
 			case a.Paused:
-				skip[a.Name] = "account is paused; run: e5extend account resume " + a.Name
+				skip[a.Key()] = "account is paused; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPaused:
-				skip[a.Name] = "account was paused automatically; run: e5extend account resume " + a.Name
+				skip[a.Key()] = "account was paused automatically; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPeriodEnded:
-				skip[a.Name] = "the run period has ended"
+				skip[a.Key()] = "the run period has ended"
 			}
 			run = append(run, a)
 		}
 	})
 	for _, a := range run {
-		if why := skip[a.Name]; why != "" {
-			e.event(a.Name, "trigger_ignored", why)
+		if why := skip[a.Key()]; why != "" {
+			e.event(a.Key(), "trigger_ignored", why)
 			continue
 		}
-		e.withLock(func() { e.rt[a.Name].running = true })
+		e.withLock(func() { e.rt[a.Key()].running = true })
 		e.wg.Add(1)
 		e.round(ctx, a, true)
 	}

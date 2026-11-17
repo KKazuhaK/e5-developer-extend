@@ -71,9 +71,9 @@ func checkVault(d Deps, cfg *config.Config) Check {
 	var firstErr error
 	checked := 0
 	for _, acct := range cfg.Accounts {
-		keys := []string{vault.TokenCacheKey(acct.Name)}
+		keys := []string{vault.TokenCacheKey(acct.Key())}
 		if acct.NeedsSecret() {
-			keys = append([]string{vault.SecretKey(acct.Name)}, keys...)
+			keys = append([]string{vault.SecretKey(acct.Key())}, keys...)
 		}
 		for i, key := range keys {
 			has, herr := v.Has(key)
@@ -273,9 +273,9 @@ func staleKey(d Deps, cfg *config.Config, st service.Status) (Msg, bool) {
 		return M("headless.keyUnreadable", "reason", firstLines(err, 1)), true
 	}
 	for _, acct := range cfg.Accounts {
-		keys := []string{vault.TokenCacheKey(acct.Name)}
+		keys := []string{vault.TokenCacheKey(acct.Key())}
 		if acct.NeedsSecret() {
-			keys = append([]string{vault.SecretKey(acct.Name)}, keys...)
+			keys = append([]string{vault.SecretKey(acct.Key())}, keys...)
 		}
 		for _, key := range keys {
 			if has, err := v.Has(key); err != nil || !has {
@@ -846,7 +846,7 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 		return c
 	}
 	category := callstat.CategoryIndex(apis)
-	entries, err := store.New(d.DataDir).Read(store.Filter{Account: acct.Name, Since: d.now().Add(-failingWindow)})
+	entries, err := store.New(d.DataDir).Read(store.Filter{Account: acct.Key(), Since: d.now().Add(-failingWindow)})
 	if err != nil {
 		c.Level = OK
 		c.setDetail(M("apis.logUnreadable"))

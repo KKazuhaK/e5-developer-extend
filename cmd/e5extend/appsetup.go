@@ -343,6 +343,9 @@ func (a *app) dropStoredSecret(name string) {
 	if err != nil {
 		return
 	}
+	if _, owned := cfg.KeyOwner(name); owned {
+		return // secret/<name> belongs to another account (its earlier name)
+	}
 	v, err := a.openVault(cfg)
 	if err != nil {
 		return

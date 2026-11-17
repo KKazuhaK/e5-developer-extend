@@ -459,7 +459,7 @@ func TestRunNowQueuesForARunningEngine(t *testing.T) {
 	if err := NewStatusService(r.b).RunNow([]string{"me"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(filepath.Join(r.dataDir, "trigger", "me")); err != nil {
+	if _, err := os.Stat(filepath.Join(r.dataDir, "trigger", func() string { c, _, _ := r.b.Ops.LoadConfig(); a, _ := c.Find("me"); return a.Key() }())); err != nil {
 		t.Fatalf("no trigger: %v", err)
 	}
 }
@@ -706,5 +706,47 @@ func TestRecommendProbesTheSignedInAccount(t *testing.T) {
 	}
 	if _, err := acc.Recommend("nobody"); err == nil {
 		t.Error("unknown account must be an error")
+	}
+}
+
+func TestAccountRenameMovesTheAccountAndAllowsUpdate(t *testing.T) {
+	r := newRig(t)
+	acc := NewAccountService(r.b)
+	if err := acc.Add(AccountInput{Name: "app", Auth: config.AuthClientSecret, Tenant: "t.example", ClientID: testGUID, Secret: secretValue}); err != nil {
+		t.Fatal(err)
+	}
+	if err := acc.Add(AccountInput{Name: "taken", Auth: config.AuthDeviceCode, Tenant: "t.example", ClientID: testGUID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := acc.Rename("app", "taken"); err == nil {
+		t.Fatal("renamed onto an existing account")
+	}
+	if _, err := acc.Rename("app", "Not Valid"); err == nil {
+		t.Fatal("renamed to an invalid name")
+	}
+	appKey := func() string { c, _, _ := r.b.Ops.LoadConfig(); a, _ := c.Find("app"); return a.Key() }()
+	if warns, err := acc.Rename("app", "work"); err != nil || warns == nil || len(warns) != 0 {
+		t.Fatalf("rename: %v %#v", err, warns)
+	}
+	if _, err := acc.Get("app"); err == nil {
+		t.Error("the old name still exists")
+	}
+	in, err := acc.Get("work")
+	if err != nil || in.Secret != "" || in.Tenant != "t.example" {
+		t.Fatalf("get: %+v %v", in, err)
+	}
+	// The edit flow: rename first, then the usual update under the new name.
+	in.ClientID = "99999999-2222-3333-4444-555555555555"
+	if err := acc.Update(in); err != nil {
+		t.Fatal(err)
+	}
+	v := vault.New(filepath.Join(r.dataDir, "vault"), nil)
+	if ok, _ := v.Has("secret/" + appKey); !ok {
+		t.Error("the secret did not follow the account")
+	}
+	if c, _, _ := r.b.Ops.LoadConfig(); c != nil {
+		if a, _ := c.Find("work"); a == nil || a.Key() != appKey {
+			t.Errorf("the key changed: %+v", a)
+		}
 	}
 }

@@ -13,11 +13,12 @@ func TestAPIStatsRows(t *testing.T) {
 	e.addDevice(t, "b")
 	now := time.Now()
 	state := store.NewState()
-	state.Accounts["a"] = &store.AccountState{Status: store.StatusOK, APIStats: map[string]*store.APIStat{
+	ka, kb := e.keyOf(t, "a"), e.keyOf(t, "b")
+	state.Accounts[ka] = &store.AccountState{Status: store.StatusOK, APIStats: map[string]*store.APIStat{
 		"user.me":    {OK: 3, Failed: 1, LastClass: "ok", LastStatus: 200, LastAt: now},
 		"mail.rules": {Failed: 2, LastClass: "forbidden", LastStatus: 403, LastAt: now},
 	}}
-	state.Accounts["b"] = &store.AccountState{Status: store.StatusOK, APIStats: map[string]*store.APIStat{
+	state.Accounts[kb] = &store.AccountState{Status: store.StatusOK, APIStats: map[string]*store.APIStat{
 		"user.me": {OK: 2, LastClass: "ok", LastStatus: 200, LastAt: now.Add(time.Hour)},
 	}}
 	// An account that was removed from the configuration is not counted.

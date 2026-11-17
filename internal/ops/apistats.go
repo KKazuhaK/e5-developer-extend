@@ -32,16 +32,19 @@ func (o *Ops) APIStats(account string) ([]APIStatRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	var only string // the key of the one account asked for
 	if account != "" {
-		if _, err := o.FindAccount(cfg, account); err != nil {
+		acct, err := o.FindAccount(cfg, account)
+		if err != nil {
 			return nil, err
 		}
+		only = acct.Key()
 	}
 	// Only accounts that are in the configuration count: the state may still
 	// hold one that was removed.
 	inConfig := map[string]bool{}
 	for _, a := range cfg.Accounts {
-		inConfig[a.Name] = true
+		inConfig[a.Key()] = true
 	}
 	dataDir, err := paths.DataDir()
 	if err != nil {
@@ -53,7 +56,7 @@ func (o *Ops) APIStats(account string) ([]APIStatRow, error) {
 	}
 	sum := map[string]*store.APIStat{}
 	for name, as := range state.Accounts {
-		if !inConfig[name] || (account != "" && name != account) {
+		if !inConfig[name] || (only != "" && name != only) {
 			continue
 		}
 		for id, st := range as.APIStats {

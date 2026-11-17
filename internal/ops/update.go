@@ -316,11 +316,20 @@ func (o *Ops) restartService() (state, note string) {
 		}
 		return "failed", err.Error()
 	}
-	return restartManaged(m)
+	return restartManaged(m, func() (bool, bool) {
+		dir, err := paths.DataDir()
+		if err != nil {
+			return false, false
+		}
+		// The engine runs as the service when it runs and no window hosts it.
+		return engine.Running(dir) && EngineHost(dir) == HostService, true
+	})
 }
 
 // restartManaged restarts the service of m unless it is stopped or its state is unknown.
-func restartManaged(m service.Manager) (state, note string) {
+// serviceRunning says whether the engine runs as the service (known is false
+// when that cannot be told); it settles the states the manager cannot report.
+func restartManaged(m service.Manager, serviceRunning func() (running, known bool)) (state, note string) {
 	// A service that was stopped on purpose stays stopped: it runs the new
 	// program whenever it is started next.
 	st, serr := m.Status()
@@ -330,6 +339,17 @@ func restartManaged(m service.Manager) (state, note string) {
 	}
 	if st.Installed && st.Running == service.No {
 		return "not_running", ""
+	}
+	if st.Installed && st.Running == service.Unknown {
+		// Task Scheduler cannot tell whether the task runs; the engine's lock
+		// does. Restarting could start a task the user stopped on purpose.
+		running, known := serviceRunning()
+		if !known {
+			return "failed", "cannot tell whether the service is running; restart it yourself if it is"
+		}
+		if !running {
+			return "not_running", ""
+		}
 	}
 	if _, err := m.Restart(); err != nil {
 		if errors.Is(err, service.ErrNotInstalled) {

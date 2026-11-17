@@ -59,7 +59,7 @@ export function AutoStartForm({ input, method, errors, locked, onChange, onMetho
   const err = (f: string) => (errors[f] ? t(errors[f] === "name" ? "wizard.err.name" : "wizard.err.required") : undefined);
   const pick = (i: AutoIdentity) => onChange({ auth: authOfIdentity(i) });
   return (
-    <div className="mt-4 grid gap-4">
+    <div className="grid gap-4">
       <Field id="a-name" label={t("wizard.name")} hint={t("wizard.nameHint")} error={err("name")}>
         <Input {...fieldAria("a-name", err("name"), "x")} value={input.name} disabled={locked} maxLength={32} onChange={(e) => onChange({ name: e.target.value })} autoComplete="off" />
       </Field>

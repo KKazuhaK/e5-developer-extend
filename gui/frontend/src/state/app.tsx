@@ -14,8 +14,10 @@ export interface Route {
   page: Page;
   /** account list filter to preselect */
   filter?: AccountFilter;
-  /** open the wizard (add) or edit the named account */
-  wizard?: { mode: "add"; from?: string } | { mode: "edit"; name: string; step?: number };
+  /** open the add wizard, or the edit form of the named account */
+  wizard?: { mode: "add"; from?: string } | { mode: "edit"; name: string };
+  /** open the sign-in dialog of the named account */
+  signIn?: string;
   /** bumps on every navigate so the same target can be opened twice */
   nonce: number;
 }
@@ -32,7 +34,7 @@ interface SnapshotState {
 
 interface AppCtx {
   route: Route;
-  navigate: (page: Page, opts?: Pick<Route, "filter" | "wizard">) => void;
+  navigate: (page: Page, opts?: Pick<Route, "filter" | "wizard" | "signIn">) => void;
   snapshot: SnapshotState;
   prefs: { language: LangPref; theme: ThemePref };
   setPrefs: (p: { language: LangPref; theme: ThemePref }) => void;

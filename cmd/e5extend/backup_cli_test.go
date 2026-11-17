@@ -52,7 +52,7 @@ func TestBackupExportImportCLI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := v.Get("secret/main"); err != nil || string(got) != "CLI-SECRET-VALUE" {
+	if got, err := v.Get("secret/" + b.keyOf("main")); err != nil || string(got) != "CLI-SECRET-VALUE" {
 		t.Fatalf("secret after import: %q %v", got, err)
 	}
 
