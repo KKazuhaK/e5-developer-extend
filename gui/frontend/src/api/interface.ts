@@ -1,6 +1,6 @@
 import type {
   AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
-  RecommendResult, TestResult, ValidationError,
+  RecommendResult, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
 } from "./types";
 
 /**
@@ -60,9 +60,16 @@ export interface Api {
     save(s: Settings): Promise<ValidationError[]>;
     /** Turns the tray's login entry on or off at once; not part of save. */
     setStartAtLogin(on: boolean): Promise<void>;
-    setWebhook(url: string): Promise<void>;
-    clearWebhook(): Promise<void>;
-    testWebhook(): Promise<void>;
+    /** The notification channels; secrets are only reported as set or not set. */
+    listChannels(): Promise<ChannelView[]>;
+    /** Creates (create true) or updates a channel; returns the problems, one per field, when it is not valid. */
+    saveChannel(c: ChannelInput, create: boolean): Promise<ValidationError[]>;
+    removeChannel(id: string): Promise<void>;
+    /** Sends a test message through one channel, or all of them when id is empty. */
+    testChannel(id: string): Promise<ChannelTest[]>;
+    /** Renders an example event with an optional custom template; sends nothing. Rejects when the template is broken. */
+    previewMessage(type: ChannelType, language: string, template: string, format: string, event: string): Promise<MessagePreview>;
+    emailPresets(): Promise<EmailPreset[]>;
   };
   backup: {
     /** True when this machine already has accounts or vault data, so an import must merge or replace. */

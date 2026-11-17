@@ -4,6 +4,7 @@
 import type { Api } from "./interface";
 import type {
   AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
+  ChannelInput, ChannelType, ChannelView, ChannelTest, MessagePreview, EmailPreset, SecretStatus,
   Settings, Snapshot, ValidationError,
 } from "./types";
 
@@ -334,7 +335,10 @@ let settings: Settings = {
     periodStart: "", periodEnd: day(300),
   },
   network: { proxy: "" },
-  notify: { staleAfter: "72h", events: ["needs_attention", "auto_paused", "stale"], webhookConfigured: false },
+  notify: {
+    staleAfter: "72h", events: ["needs_attention", "auto_paused", "stale"], webhookConfigured: false, channels: 0,
+    cooldown: "6h", quietHours: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5,
+  },
   ui: { language: (["zh", "en"].includes(q.get("lang") ?? "") ? q.get("lang") : "auto") as "auto" | "zh" | "en", theme: "system", startAtLogin: false },
 };
 // ?service=stopped starts with the service installed but not running
@@ -387,9 +391,42 @@ function find(name: string): MockAccount {
   return a;
 }
 
+// ---- notification channels (secrets never leave this closure) ----
+const SECRETS: Record<ChannelType, [string, boolean][]> = {
+  telegram: [["bot_token", true]], email: [["password", false]], wecom: [["url", true]], feishu: [["url", true], ["secret", false]],
+  dingtalk: [["url", true], ["secret", false]], discord: [["url", true]], slack: [["url", true]], bark: [["device_key", true]],
+  ntfy: [["token", false]], serverchan: [["sendkey", true]], webhook: [["url", true]],
+};
+interface MockChannel { view: ChannelView; secrets: Record<string, string> }
+let mockChannels: MockChannel[] = q.get("channels") === "some" ? seedChannels() : [];
+function seedChannels(): MockChannel[] {
+  const base = (c: Partial<ChannelView> & Pick<ChannelInput, "id" | "type">): ChannelView => ({
+    minLevel: "", events: [], language: "", template: "", chatId: "", apiBase: "", smtpHost: "", smtpPort: 0, security: "", username: "",
+    from: "", to: [], server: "", topic: "", format: "", secrets: {}, clearSecrets: [],
+    secretFields: SECRETS[c.type].map(([name, required]): SecretStatus => ({ name, required, set: true })),
+    legacy: false, lastResult: null, warnings: [], ...c,
+  });
+  return [
+    { view: base({ id: "tg", type: "telegram", chatId: "123456789", minLevel: "warning", lastResult: { at: iso(Date.now() - 20 * MIN), ok: true } }), secrets: { bot_token: "x" } },
+    { view: base({ id: "mail", type: "email", smtpHost: "smtp.gmail.com", smtpPort: 587, security: "starttls", username: "me@gmail.com", from: "me@gmail.com", to: ["me@gmail.com"], minLevel: "critical", lastResult: { at: iso(Date.now() - 3 * 60 * MIN), ok: false, error: "email: 535 5.7.8 Username and Password not accepted" } }), secrets: { password: "x" } },
+  ];
+}
+function syncChannelCount() {
+  settings.notify.channels = mockChannels.length;
+  settings.notify.webhookConfigured = mockChannels.some((c) => c.view.id === "webhook");
+}
+syncChannelCount();
+const EVENT_LABEL: Record<string, [string, string]> = {
+  needs_attention: ["需要处理", "Needs attention"], recovered: ["已恢复", "Recovered"], auto_paused: ["已自动暂停", "Paused automatically"],
+  stale: ["长时间没有成功调用", "No successful call for a long time"], secret_expiring: ["密钥即将过期", "Client secret expiring"],
+  period_ended: ["运行周期已结束", "Run period ended"], failure_spike: ["调用失败率过高", "High failure rate"],
+  all_failing: ["所有账号同时异常", "All accounts failing"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
+};
+
 function validateSettings(s: Settings): ValidationError[] {
   const out: ValidationError[] = [];
   if (s.network.proxy && /bad/.test(s.network.proxy)) out.push({ field: "network.proxy", message: "not a valid URL: " + s.network.proxy });
+  if (s.notify.quietHours && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(s.notify.quietHours)) out.push({ field: "notify.quietHours", message: "use the form 23:00-08:00" });
   if (s.schedule.apisPerRoundMax > 12) out.push({ field: "schedule.apisPerRoundMax", message: "must be at most 12 (this catalog has only 12 read-only categories)" });
   return out;
 }
@@ -656,26 +693,88 @@ export const mockApi: Api = {
       const errs = validateSettings(s);
       if (errs.length) return errs;
       // start at login is applied by setStartAtLogin, never by save
-      settings = { ...structuredClone(s), notify: { ...s.notify, webhookConfigured: settings.notify.webhookConfigured }, ui: { ...s.ui, startAtLogin: settings.ui.startAtLogin } };
+      settings = { ...structuredClone(s), notify: { ...s.notify, webhookConfigured: settings.notify.webhookConfigured, channels: settings.notify.channels }, ui: { ...s.ui, startAtLogin: settings.ui.startAtLogin } };
       return [];
-    },
-    async setWebhook(url) {
-      await wait(300);
-      if (!/^https:\/\//.test(url)) throw new Error("Webhook 地址必须以 https:// 开头");
-      settings.notify.webhookConfigured = true;
     },
     async setStartAtLogin(on) {
       await lag();
       if (q.get("autostart") === "fail") throw new Error("start at login: permission denied");
       settings.ui.startAtLogin = on;
     },
-    async clearWebhook() {
+    async listChannels() {
       await lag();
-      settings.notify.webhookConfigured = false;
+      return structuredClone(mockChannels.map((c) => c.view));
     },
-    async testWebhook() {
+    async saveChannel(c, create) {
+      await wait(300);
+      const bad: ValidationError[] = [];
+      const need = (field: string, v: string) => !v.trim() && bad.push({ field, message: `is required for type ${c.type}` });
+      if (!/^[a-z0-9-]{1,32}$/.test(c.id)) bad.push({ field: "id", message: "must be 1-32 of a-z, 0-9 and -" });
+      if (c.type === "telegram") need("chatId", c.chatId);
+      if (c.type === "email") { need("smtpHost", c.smtpHost); need("from", c.from); if (c.to.length === 0) bad.push({ field: "to", message: "is required for type email" }); }
+      if (c.type === "ntfy") need("topic", c.topic);
+      if (c.template.includes("{{.Nope}}")) bad.push({ field: "template", message: "template: can't evaluate field Nope (checked with the example needs_attention event)" });
+      const idx = mockChannels.findIndex((x) => x.view.id === c.id);
+      if (create && idx >= 0) bad.push({ field: "id", message: "a channel with this id already exists" });
+      const prev = idx >= 0 ? mockChannels[idx].secrets : {};
+      const secrets: Record<string, string> = { ...prev };
+      for (const [k, v] of Object.entries(c.secrets)) {
+        if (!v.trim()) continue;
+        if (k === "url" && !/^https:\/\//.test(v)) bad.push({ field: "secrets.url", message: "the address must be an https:// URL" });
+        secrets[k] = v;
+      }
+      for (const k of c.clearSecrets) delete secrets[k];
+      for (const [name, required] of SECRETS[c.type]) if (required && !secrets[name]) bad.push({ field: `secrets.${name}`, message: "is required" });
+      if (bad.length) return bad;
+      const view: ChannelView = {
+        ...structuredClone(c), secrets: {}, clearSecrets: [],
+        secretFields: SECRETS[c.type].map(([name, required]): SecretStatus => ({ name, required, set: !!secrets[name] })),
+        legacy: false, lastResult: idx >= 0 ? mockChannels[idx].view.lastResult : null,
+        warnings: c.server.startsWith("http://") ? ["server_http"] : c.type === "email" && c.security === "none" ? ["email_plain"] : [],
+      };
+      if (idx >= 0) mockChannels[idx] = { view, secrets };
+      else mockChannels.push({ view, secrets });
+      syncChannelCount();
+      return [];
+    },
+    async removeChannel(id) {
+      await lag();
+      mockChannels = mockChannels.filter((c) => c.view.id !== id);
+      syncChannelCount();
+    },
+    async testChannel(id) {
       await wait(700);
-      if (!settings.notify.webhookConfigured) throw new Error("还没有设置 Webhook");
+      const targets = mockChannels.filter((c) => !id || c.view.id === id);
+      if (targets.length === 0) throw new Error(id ? `no channel named "${id}"` : "no notification channel is set; run: e5extend notify channel add <id> --type <type>");
+      return targets.map((c): ChannelTest => {
+        const fail = c.view.id.includes("bad") || (c.view.type === "email" && c.view.lastResult?.ok === false);
+        c.view.lastResult = fail ? { at: iso(Date.now()), ok: false, error: `${c.view.type} answered HTTP 500` } : { at: iso(Date.now()), ok: true };
+        return { id: c.view.id, ok: !fail, error: fail ? `${c.view.type} answered HTTP 500` : "" };
+      });
+    },
+    async previewMessage(type, language, template, _format, event) {
+      await wait(150);
+      if (template.includes("{{.Nope}}")) throw new Error("template: can't evaluate field Nope (checked with the example needs_attention event)");
+      const zh = language === "zh" || (language === "" && (settings.ui.language === "zh" || (settings.ui.language === "auto" && navigator.language.startsWith("zh"))));
+      const label = (EVENT_LABEL[event] ?? [event, event])[zh ? 0 : 1];
+      const msg = event === "failure_spike" ? "9 of the last 12 calls failed (75%) over the last 3 rounds" : "needs attention: login required; run: e5extend account login demo";
+      const bold = (x: string) => (type === "telegram" ? `<b>${x}</b>` : type === "slack" ? `*${x}*` : ["wecom", "dingtalk", "discord", "serverchan"].includes(type) ? `**${x}**` : x);
+      const body = template.trim()
+        ? template.replace(/\{\{\s*\.(\w+)\s*\}\}/g, (_m, k: string) => (k === "Event" ? event : k === "Account" ? "demo" : k === "Message" ? msg : k === "Level" ? "warning" : ""))
+        : [bold(`[${zh ? "警告" : "Warning"}] ${label}`) + " · demo", msg, `2026-11-16 20:44 PST · dev-box`].join(type === "wecom" || type === "dingtalk" ? "\n\n" : "\n");
+      return {
+        title: `E5 Developer Extend · ${label} · demo`, body, html: type === "email" ? `<html><body><h2>${label}</h2><p>${msg}</p></body></html>` : "",
+        format: type === "telegram" ? "html" : type === "webhook" ? "json" : ["wecom", "dingtalk", "discord", "slack", "serverchan"].includes(type) ? "markdown" : "text",
+      } satisfies MessagePreview;
+    },
+    async emailPresets() {
+      await lag();
+      return [
+        { name: "gmail", host: "smtp.gmail.com", port: 587, security: "starttls", note: "an app password" },
+        { name: "outlook", host: "smtp-mail.outlook.com", port: 587, security: "starttls", note: "an app password" },
+        { name: "qq", host: "smtp.qq.com", port: 465, security: "tls", note: "the SMTP authorization code" },
+        { name: "163", host: "smtp.163.com", port: 465, security: "tls", note: "the SMTP authorization code" },
+      ] satisfies EmailPreset[];
     },
   },
   backup: {
@@ -749,7 +848,7 @@ export const mockApi: Api = {
         ...(accounts.some((a) => a.input.name === "dev-app")
           ? [{ id: "account.dev-app.secret", title: "dev-app client secret", level: "warn", detail: `expires in 12 days (${day(12)})`, fix: "create a new secret in Entra, then run: e5extend account set-secret dev-app" } as DoctorCheck]
           : []),
-        { id: "notify", title: "Alerts", level: settings.notify.webhookConfigured ? "ok" : "warn", detail: settings.notify.webhookConfigured ? "webhook configured" : "no webhook configured", fix: settings.notify.webhookConfigured ? "" : "set one in Settings" },
+        { id: "notify", title: "Alerts", level: settings.notify.channels > 0 ? "ok" : "warn", detail: settings.notify.channels > 0 ? `${settings.notify.channels} notification channels set` : "no alert destination is set; you will not hear about problems", fix: settings.notify.channels > 0 ? "" : "add one in Settings > Advanced > Alerts" },
         { id: "future.check", title: "Some future check", level: "ok", detail: "unknown ids fall back to the backend title", fix: "" },
       ];
       return checks;

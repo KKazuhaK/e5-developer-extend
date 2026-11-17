@@ -1,7 +1,9 @@
 import type { Settings, ValidationError } from "@/api/types";
 
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
-export const NOTIFY_EVENTS = ["needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended"] as const;
+export const NOTIFY_EVENTS = [
+  "needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
+] as const;
 /** Shortest allowed interval_min in the engine config. */
 export const MIN_INTERVAL_MS = 5 * 60_000;
 
@@ -78,7 +80,7 @@ export function errorsByField(errs: ValidationError[]): Record<string, string> {
 /** Message codes understood by the UI; the i18n layer turns them into text. */
 export type LocalCode =
   | "duration" | "minInterval" | "intervalOrder" | "posInt" | "apisOrder" | "time" | "timeOrder"
-  | "date" | "periodOrder" | "proxy" | "days";
+  | "date" | "periodOrder" | "proxy" | "days" | "cooldown" | "quiet" | "spikeRounds" | "spikeRate" | "spikeMin";
 
 /**
  * Client side pre-check, mirroring internal/config/validate.go so most
@@ -113,5 +115,13 @@ export function validateSettings(s: Settings): Record<string, LocalCode> {
 
   const stale = parseDuration(s.notify.staleAfter);
   if (stale === null || stale <= 0) e["notify.staleAfter"] = "duration";
+
+  const n = s.notify;
+  if (n.cooldown.trim() !== "0" && ((parseDuration(n.cooldown) ?? 0) <= 0)) e["notify.cooldown"] = "cooldown";
+  if (n.quietHours && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(n.quietHours)) e["notify.quietHours"] = "quiet";
+  else if (n.quietHours && n.quietHours.slice(0, 5) === n.quietHours.slice(6)) e["notify.quietHours"] = "quiet";
+  if (!Number.isInteger(n.spikeRounds) || n.spikeRounds < 1 || n.spikeRounds > 50) e["notify.spikeRounds"] = "spikeRounds";
+  if (!(n.spikeRate > 0 && n.spikeRate <= 1)) e["notify.spikeRate"] = "spikeRate";
+  if (!Number.isInteger(n.spikeMinFailures) || n.spikeMinFailures < 1) e["notify.spikeMinFailures"] = "spikeMin";
   return e;
 }
