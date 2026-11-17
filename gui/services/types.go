@@ -1,6 +1,9 @@
 package services
 
-import "github.com/KKazuhaK/e5-developer-extend/internal/ops"
+import (
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+)
 
 // The types below mirror the TypeScript contract. Types shared with ops are
 // aliases, so there is one definition and one set of JSON tags.
@@ -150,6 +153,16 @@ type (
 	ScheduleSettings = ops.ScheduleSettings
 	NetworkSettings  = ops.NetworkSettings
 	NotifySettings   = ops.NotifySettings
+)
+
+// Notification channels, as the settings page edits them. Secrets are never part
+// of a view: only whether each one is set.
+type (
+	ChannelView    = ops.ChannelView
+	ChannelInput   = ops.ChannelInput
+	ChannelTest    = ops.TestResult
+	MessagePreview = ops.Preview
+	EmailPreset    = notify.EmailPreset
 )
 
 // UISettings only concern the interface; they live in gui.json.

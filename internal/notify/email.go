@@ -24,12 +24,12 @@ import (
 
 // EmailPreset is the server settings of a well-known mail provider.
 type EmailPreset struct {
-	Name     string
-	Host     string
-	Port     int
-	Security string
+	Name     string `json:"name"`
+	Host     string `json:"host"`
+	Port     int    `json:"port"`
+	Security string `json:"security"`
 	// Note says what the password has to be, in English; the UIs translate it.
-	Note string
+	Note string `json:"note"`
 }
 
 // EmailPresets lists the providers the CLI and the app can fill in.
