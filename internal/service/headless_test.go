@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -23,7 +25,7 @@ func headlessEnv(t *testing.T) (InstallOptions, Env, *FakeRunner, map[string][]b
 		if _, ok := files[path]; !ok {
 			return vault.KeyFileAudit{Missing: true}
 		}
-		return vault.KeyFileAudit{}
+		return vault.KeyFileAudit{Dir: filepath.Dir(path)}
 	}
 	o.Headless = true
 	o.MasterKey = func() ([]byte, error) { return make([]byte, 32), nil }
@@ -131,7 +133,7 @@ func TestHeadlessAccessDeniedPrintsElevatedCommand(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "elevated") {
 		t.Fatalf("err = %v", err)
 	}
-	if len(res.Manual) != 1 || !strings.Contains(res.Manual[0], `C:\tools\e5extend.exe service install --headless`) ||
+	if len(res.Manual) != 1 || !strings.Contains(res.Manual[0], `C:\tools\e5extend.exe --config-dir`) || !strings.HasSuffix(res.Manual[0], "service install --headless") ||
 		!strings.Contains(res.Manual[0], "Run as administrator") {
 		t.Errorf("manual = %v", res.Manual)
 	}
@@ -147,7 +149,7 @@ func TestHeadlessAccessDeniedPrintsElevatedCommand(t *testing.T) {
 }
 
 func TestHeadlessElevatedCommandKeepsCustomDirs(t *testing.T) {
-	got := ElevatedInstallCommand(InstallOptions{Exe: `C:\Program Files\E5\e5extend.exe`, ConfigDir: `D:\cfg`, DataDir: `D:\my data`, ExplicitDirs: true})
+	got := ElevatedInstallCommand(InstallOptions{Exe: `C:\Program Files\E5\e5extend.exe`, ConfigDir: `D:\cfg`, DataDir: `D:\my data`, ExplicitDirs: true, Headless: true})
 	want := `"C:\Program Files\E5\e5extend.exe" --config-dir D:\cfg --data-dir "D:\my data" service install --headless`
 	if got != want {
 		t.Errorf("got %s\nwant %s", got, want)
@@ -164,9 +166,89 @@ func TestHeadlessBatchRightHint(t *testing.T) {
 	if _, err := m.Install(o); err == nil || strings.Contains(err.Error(), "batch job") {
 		t.Errorf("unexpected hint: %v", err)
 	}
-	err := (&schtasks{env: env}).headlessFailure(o, &Result{}, errors.New("schtasks: ERROR: Logon failure: the user has not been granted the requested logon type (1385)"))
-	if !strings.Contains(err.Error(), "Log on as a batch job") {
-		t.Errorf("no batch-right hint: %v", err)
+	// The hint also fires on the codes, whatever language the text is in.
+	for _, msg := range []string{
+		"schtasks: ERROR: Logon failure: the user has not been granted the requested logon type (1385)",
+		"schtasks /Create: exit status 1: FEHLER: 0x80070569",
+		"schtasks: Fehler 1385",
+	} {
+		err := (&schtasks{env: env}).installFailure(o, &Result{}, errors.New(msg), false)
+		if !strings.Contains(err.Error(), "Log on as a batch job") {
+			t.Errorf("no batch-right hint for %q: %v", msg, err)
+		}
+	}
+	// A plain install has no batch-right hint.
+	plain := o
+	plain.Headless = false
+	if err := (&schtasks{env: env}).installFailure(plain, &Result{}, errors.New("1385"), false); strings.Contains(err.Error(), "batch") {
+		t.Errorf("hint for a plain install: %v", err)
+	}
+}
+
+func TestStartFailureKeepsTheKeyAndSaysHowToStart(t *testing.T) {
+	o, env, fr, files := headlessEnv(t)
+	fr.FailOn = []string{"schtasks /Run"}
+	m, _ := New(env)
+	res, err := m.Install(o)
+	if err == nil || !strings.Contains(err.Error(), "registered but did not start") {
+		t.Fatalf("err = %v", err)
+	}
+	if len(res.Manual) != 1 || !strings.Contains(res.Manual[0], "schtasks /Run /TN e5extend") {
+		t.Errorf("manual = %v", res.Manual)
+	}
+	if len(files) != 1 {
+		t.Errorf("the key file was rolled back although the task exists: %v", files)
+	}
+	keyPath := join(Windows, o.ConfigDir, vault.DPAPIKeyFileName)
+	if !slices.Contains(res.Files, keyPath) {
+		t.Errorf("key file not reported: %v", res.Files)
+	}
+}
+
+func TestAccessDeniedHintInAnyMode(t *testing.T) {
+	o, env, fr := testOpts(t, Windows)
+	env.User = `PC\alice`
+	env.Runner = deniedRunner{fr}
+	fr.FailOn = []string{"schtasks /Create"}
+	m, _ := New(env)
+	res, err := m.Install(o)
+	if err == nil || len(res.Manual) != 1 || strings.Contains(res.Manual[0], "--headless") || !strings.Contains(res.Manual[0], "service install") {
+		t.Errorf("res = %+v err = %v", res, err)
+	}
+}
+
+func TestPlainInstallRemovesAHeadlessKeyFile(t *testing.T) {
+	o, env, _ := testOpts(t, Windows)
+	env.User = `PC\alice`
+	if err := os.MkdirAll(o.ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	key := join(Windows, o.ConfigDir, vault.DPAPIKeyFileName)
+	if err := os.WriteFile(key, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := New(env)
+	res, err := m.Install(o)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(key); !os.IsNotExist(err) {
+		t.Errorf("the stale key file is still there: %v", err)
+	}
+	if !strings.Contains(strings.Join(res.Actions, "\n"), "removed the headless key file") {
+		t.Errorf("actions = %v", res.Actions)
+	}
+}
+
+func TestHeadlessTaskPassesDirectoriesExplicitly(t *testing.T) {
+	o, env, _, _ := headlessEnv(t)
+	m, _ := New(env)
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	x := taskXMLOnDisk(t, env)
+	if !strings.Contains(x, "--config-dir") || !strings.Contains(x, "--data-dir") {
+		t.Errorf("directories not passed:\n%s", x)
 	}
 }
 
@@ -226,15 +308,35 @@ func TestUninstallRemovesOnlyAHeadlessKeyFile(t *testing.T) {
 	}
 	xml := strings.Replace(s4uTaskXML, `C:\Users\a b\cfg\master.key.dpapi`, key, 1)
 
-	// An interactive task: the file is not ours to remove.
+	// An interactive task over a leftover key file: the file only ever comes
+	// from --headless, so it goes too, found next to the configuration.
 	_, env, fr := testOpts(t, Windows)
+	env.ConfigDir = filepath.Join(dir, "cfg")
+	if err := os.MkdirAll(env.ConfigDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	stale := join(Windows, env.ConfigDir, vault.DPAPIKeyFileName)
+	if err := os.WriteFile(stale, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	m, _ := New(env)
-	fr.Replies = map[string]Output{"schtasks /Query": {Stdout: strings.Replace(xml, "S4U", "InteractiveToken", 1)}}
+	fr.Replies = map[string]Output{"schtasks /Query": {Stdout: "<Task><Principals><Principal><LogonType>InteractiveToken</LogonType></Principal></Principals></Task>"}}
 	if _, err := m.Uninstall(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(key); err != nil {
-		t.Fatalf("an interactive uninstall removed the key file: %v", err)
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("an interactive uninstall left the key file: %v", err)
+	}
+	// With no task at all, a stray key file is removed as well.
+	if err := os.WriteFile(stale, []byte("x"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	fr.Replies = map[string]Output{"schtasks /Query": {ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified."}}
+	if _, err := m.Uninstall(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Fatalf("a stray key file was kept: %v", err)
 	}
 
 	// A headless task: the key file goes, and the message says what stays.

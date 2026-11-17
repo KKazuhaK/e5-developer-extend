@@ -4,6 +4,7 @@ package vault
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"unsafe"
 
@@ -11,7 +12,7 @@ import (
 )
 
 func platformKeyFileOS() keyFileOS {
-	return keyFileOS{protect: dpapiProtect, unprotect: dpapiUnprotect, create: createRestricted, readACL: readACL}
+	return keyFileOS{protect: dpapiProtect, unprotect: dpapiUnprotect, create: createRestricted, readACL: readACL, mkdir: mkdirRestrictedOS}
 }
 
 func blob(b []byte) *windows.DataBlob {
@@ -58,36 +59,67 @@ func currentUserSID() (*windows.SID, error) {
 	return u.User.Sid, nil
 }
 
-// createRestricted creates a new file and, while it is still empty, replaces
-// its access list with: full control for the current user, SYSTEM and
-// Administrators, and nothing inherited from the folder.
-func createRestricted(path string) (*os.File, error) {
+// restrictedAttributes returns SECURITY_ATTRIBUTES whose descriptor holds a
+// protected DACL (no inheritance from the parent): full control for SYSTEM,
+// Administrators and the current user. Passing it to CreateFile or
+// CreateDirectory means the object never exists with another access list.
+// The user's SID is explicit because under UAC the Administrators group in a
+// limited token is deny-only. For a directory the entries are inherited by
+// what is created inside it.
+func restrictedAttributes(dir bool) (*windows.SecurityAttributes, error) {
 	sid, err := currentUserSID()
 	if err != nil {
 		return nil, fmt.Errorf("find the current user: %w", err)
 	}
-	// D:P = DACL, protected (no inheritance); FA = file all access;
-	// SY = SYSTEM, BA = Administrators.
-	sd, err := windows.SecurityDescriptorFromString("D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;" + sid.String() + ")")
+	flags := ""
+	if dir {
+		flags = "OICI"
+	}
+	// D:P = DACL, protected; FA = full access; SY = SYSTEM, BA = Administrators.
+	sddl := "D:P(A;" + flags + ";FA;;;SY)(A;" + flags + ";FA;;;BA)(A;" + flags + ";FA;;;" + sid.String() + ")"
+	sd, err := windows.SecurityDescriptorFromString(sddl)
 	if err != nil {
 		return nil, err
 	}
-	dacl, _, err := sd.DACL()
+	return &windows.SecurityAttributes{Length: uint32(unsafe.Sizeof(windows.SecurityAttributes{})), SecurityDescriptor: sd}, nil
+}
+
+// createRestricted creates a new file that is born with the restricted access
+// list, opened for writing with no sharing, so nobody can open it between its
+// creation and the rename that puts it in place.
+func createRestricted(path string) (*os.File, error) {
+	sa, err := restrictedAttributes(false)
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
+	name, err := windows.UTF16PtrFromString(path)
 	if err != nil {
 		return nil, err
 	}
-	err = windows.SetNamedSecurityInfo(path, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION, nil, nil, dacl, nil)
+	h, err := windows.CreateFile(name, windows.GENERIC_WRITE, 0, sa, windows.CREATE_NEW, windows.FILE_ATTRIBUTE_NORMAL, 0)
 	if err != nil {
-		_ = f.Close()
-		_ = os.Remove(path)
-		return nil, fmt.Errorf("restrict access to the key file: %w", err)
+		return nil, &os.PathError{Op: "create", Path: path, Err: err}
 	}
-	return f, nil
+	return os.NewFile(uintptr(h), path), nil
+}
+
+// mkdirRestrictedOS creates one directory with the restricted access list.
+func mkdirRestrictedOS(path string) error {
+	sa, err := restrictedAttributes(true)
+	if err != nil {
+		return err
+	}
+	name, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return err
+	}
+	if err := windows.CreateDirectory(name, sa); err != nil {
+		if err == windows.ERROR_ALREADY_EXISTS {
+			return fs.ErrExist
+		}
+		return &os.PathError{Op: "mkdir", Path: path, Err: err}
+	}
+	return nil
 }
 
 func readACL(path string) (ACLInfo, error) {
@@ -117,6 +149,9 @@ func readACL(path string) (ACLInfo, error) {
 			SID:       sid.String(),
 			Allow:     ace.Header.AceType == windows.ACCESS_ALLOWED_ACE_TYPE,
 			Inherited: ace.Header.AceFlags&windows.INHERITED_ACE != 0,
+			// INHERIT_ONLY_ACE (0x08): applies to children only.
+			InheritOnly: ace.Header.AceFlags&0x08 != 0,
+			Mask:        uint32(ace.Mask),
 		}
 		e.Name = e.SID
 		if acc, dom, _, err := sid.LookupAccount(""); err == nil {

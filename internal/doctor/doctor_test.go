@@ -279,6 +279,38 @@ func TestHeadlessCheck(t *testing.T) {
 	}
 }
 
+type staleVault struct{ err error }
+
+func (staleVault) Has(string) (bool, error)     { return true, nil }
+func (v staleVault) Get(string) ([]byte, error) { return []byte("x"), v.err }
+
+func TestHeadlessCheckAclAndStaleKey(t *testing.T) {
+	r := newRig(t)
+	d := r.deps()
+	d.GOOS = "windows"
+	st := service.Status{Installed: true, Enabled: service.Yes, Headless: service.Yes, KeyFile: `C:\c\master.key.dpapi`}
+	d.Service = func() (service.Status, error) { return st, nil }
+	run := func() map[string]Check {
+		out := map[string]Check{}
+		for _, c := range Run(context.Background(), d, Options{Offline: true}) {
+			out[c.ID] = c
+		}
+		return out
+	}
+	st.KeyFileACLErr = "Access is denied."
+	expect(t, run(), "headless", Warn, "Access is denied.")
+	st.KeyFileACLErr = ""
+	st.KeyFileDir, st.KeyFileDirBroad = `C:\c`, []string{`BUILTIN\Users`}
+	got := run()
+	expect(t, got, "headless", Warn, `C:\c can be changed by BUILTIN\Users`)
+	st.KeyFileDirBroad = nil
+	// The key from the file opens the vault: fine. A wrong key: stale.
+	d.OpenVaultWithKeyFile = func(*config.Config, string) (Vault, error) { return staleVault{}, nil }
+	expect(t, run(), "headless", OK, "signed in")
+	d.OpenVaultWithKeyFile = func(*config.Config, string) (Vault, error) { return staleVault{vault.ErrWrongKey}, nil }
+	expect(t, run(), "headless", Fail, "does not match the vault")
+}
+
 func TestTokenChecks(t *testing.T) {
 	r := newRig(t)
 	cases := []struct {

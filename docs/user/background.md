@@ -118,7 +118,7 @@ e5extend service status
 
 - 任务主体的登录类型是 **S4U**（Service-for-User）：以当前用户的身份运行，**不需要、也不保存 Windows 密码**。除原有的登录触发器和每 5 分钟重复的触发器外，再加一个**开机触发器**（开机后延迟 30 秒启动，网络没好时引擎自己会重试）。失败重启、电池、`IgnoreNew` 等设置不变，仍是 `LeastPrivilege`（不提升权限）。
 - **主密钥文件**：S4U 会话没有密码，Windows 不会为它加载你的 DPAPI 用户主密钥，也看不到你的凭据管理器，所以任务读不到默认的主密钥。`--headless` 把当前主密钥复制成 `%APPDATA%\e5extend\master.key.dpapi`（配置目录里），内容用 **DPAPI 本机范围**（`CryptProtectData` + `CRYPTPROTECT_LOCAL_MACHINE`）加密，任务通过 `--dpapi-key-file <路径>` 参数读取（任务动作不能设环境变量）。程序不会打印这个密钥。
-- **文件权限（ACL）**：本机范围的 DPAPI 数据，本机任何账户的进程都能解密，所以真正的保护是 NTFS 权限：文件的 ACL 只授予当前用户、SYSTEM 和 Administrators，并且去掉了继承自文件夹的权限项。管理员本来就能读到这个文件（和任何本机范围的 DPAPI 数据一样）。文件被复制到别的机器上无法解密。
+- **文件权限（ACL）**：本机范围的 DPAPI 数据，本机任何账户的进程都能解密，所以真正的保护是 NTFS 权限：文件的 ACL 只授予当前用户、SYSTEM 和 Administrators，并且去掉了继承自文件夹的权限项。管理员本来就能读到这个文件（和任何本机范围的 DPAPI 数据一样）。文件创建时就带着这个 ACL（用 `CreateFile` 的安全属性，不是先创建再改权限），并且不共享，写完才改名到位。配置目录如果是 `--headless` 新建的，也只授予这三者；已经存在的目录不会改动，但如果别的账户能在里面写入、删除或改权限（他们能替换密钥文件），`doctor` 会警告并写出目录。文件被复制到别的机器上无法解密。
 - 这个文件只是主密钥的**一份副本**：原来的密钥（凭据管理器，或你保存的 `E5EXTEND_MASTER_KEY`）不受影响。你之后换了主密钥的话，重新执行 `service install --headless`。
 
 #### 前提和限制
@@ -145,6 +145,8 @@ e5extend service status
 3. 验证：`e5extend service status` 里应有 `installed: yes`、`headless: yes`，且 `engine: running`；`e5extend doctor` 的“Headless mode”项为 ok。重启机器后不登录，等一两分钟再看一次。运行日志在 `%LOCALAPPDATA%\e5extend\engine.log`。
 
 `service status` 和 `doctor` 会报告：任务是不是 headless、主密钥文件是否存在并能解密（读不到时引擎无法打开保险库，`doctor` 标为失败）、文件的 ACL 是否比“用户 + SYSTEM + Administrators”更宽（警告；重新执行 `service install --headless` 会重置）。
+
+在 headless 和普通任务之间切换：普通的 `service install` 覆盖 headless 任务时会删除不再使用的 `master.key.dpapi`；`service uninstall` 只要配置目录里有这个文件（它只会由 `--headless` 创建）就删除，不管任务当前是什么类型。任务注册成功但启动失败时，密钥文件保留，并提示用 `schtasks /Run /TN e5extend` 启动。`doctor` 还会用密钥文件里的密钥解密保险库里的一项数据，密钥换过之后文件变旧会报错，重新执行 `service install --headless` 即可。
 
 卸载（`service uninstall`）会删除任务；**只有任务是用 `--headless` 装的**才会同时删除 `master.key.dpapi`，并说明主密钥本身、保险库和配置都没有动。普通任务的卸载不碰任何密钥文件。
 

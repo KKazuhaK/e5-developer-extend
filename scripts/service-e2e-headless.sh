@@ -72,6 +72,24 @@ until tasklist //FI "IMAGENAME eq e5extend-bg.exe" //FO CSV //NH | grep -qi e5ex
 done
 log "e5extend-bg.exe is running after ${waited}s"
 
+# A live process is not enough (it could be stuck or failing to open the
+# vault): the engine must hold its lock and keep its heartbeat fresh.
+log "engine heartbeat"
+waited=0
+while :; do
+  engine=$( { "$E" doctor --offline --json 2>/dev/null || true; } |
+    "$PY" -c 'import json,sys; print(next((c["level"] for c in json.load(sys.stdin) if c["id"]=="engine"), "missing"))' || echo error)
+  [ "$engine" = "ok" ] && break
+  [ "$waited" -ge 120 ] && fail "the engine is not healthy after 120s (doctor engine: $engine)"
+  sleep 5
+  waited=$((waited + 5))
+done
+log "engine ok after ${waited}s"
+sleep 70   # the heartbeat must keep updating, not just have been written once
+engine=$( { "$E" doctor --offline --json 2>/dev/null || true; } |
+  "$PY" -c 'import json,sys; print(next((c["level"] for c in json.load(sys.stdin) if c["id"]=="engine"), "missing"))')
+[ "$engine" = "ok" ] || fail "the engine heartbeat went stale (doctor engine: $engine)"
+
 log "uninstall"
 "$E" service uninstall
 if schtasks //Query //TN e5extend >/dev/null 2>&1; then fail "the task is still registered"; fi

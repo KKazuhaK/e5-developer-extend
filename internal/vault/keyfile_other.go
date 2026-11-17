@@ -14,5 +14,6 @@ func platformKeyFileOS() keyFileOS {
 			return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		},
 		readACL: func(string) (ACLInfo, error) { return ACLInfo{}, ErrDPAPIUnsupported },
+		mkdir:   func(path string) error { return os.Mkdir(path, 0o700) },
 	}
 }

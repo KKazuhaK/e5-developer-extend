@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 	"unicode/utf16"
@@ -184,7 +185,9 @@ func (m *schtasks) Plan(o InstallOptions) (Plan, error) {
 		return Plan{}, errors.New("service: cannot tell which Windows user to register the task for")
 	}
 	tp := TaskParams{Exe: o.Exe, UserID: m.env.User, LogFile: join(Windows, o.DataDir, "engine.log")}
-	if o.ExplicitDirs {
+	// A headless task runs without a profile, so it must not depend on how the
+	// directories are derived from the environment: pass them explicitly.
+	if o.ExplicitDirs || o.Headless {
 		tp.ConfigDir, tp.DataDir = o.ConfigDir, o.DataDir
 	}
 	var files []File
@@ -197,7 +200,7 @@ func (m *schtasks) Plan(o InstallOptions) (Plan, error) {
 		}
 		tp.Headless = true
 		tp.KeyFile = m.keyFilePath(o.ConfigDir)
-		files = append(files, File{Path: tp.KeyFile, Mode: 0o600, Secret: true,
+		files = append(files, File{Path: tp.KeyFile, Secret: true,
 			Note: "(the master key, encrypted with DPAPI at machine scope; access limited to you, SYSTEM and Administrators)",
 			Lazy: func() ([]byte, error) {
 				key, err := o.MasterKey()
@@ -231,17 +234,26 @@ func (m *schtasks) Install(o InstallOptions) (Result, error) {
 	keyPath := m.keyFilePath(o.ConfigDir)
 	keyExisted := o.Headless && fileExists(keyPath)
 	if err := apply(context.Background(), m.env.Runner, p, false, &res); err != nil {
-		if o.Headless {
+		registered := slices.Contains(res.Actions, "ran "+createCommand(p))
+		if o.Headless && !registered && !keyExisted {
 			// Do not leave a freshly written secret behind for a task that
 			// was never registered.
-			if !keyExisted {
-				_, _ = removeFile(keyPath)
-				res.Files = removeString(res.Files, keyPath)
-				res.Actions = removeString(res.Actions, "wrote "+keyPath)
-			}
-			err = m.headlessFailure(o, &res, err)
+			_, _ = removeFile(keyPath)
+			res.Files = removeString(res.Files, keyPath)
+			res.Actions = removeString(res.Actions, "wrote "+keyPath)
 		}
-		return res, err
+		return res, m.installFailure(o, &res, err, registered)
+	}
+	if !o.Headless && o.ConfigDir != "" {
+		// A headless install made this file; the interactive task does not use
+		// it, and a secret copy nobody needs should not stay behind.
+		switch ok, err := removeFile(keyPath); {
+		case err != nil:
+			res.Warnings = append(res.Warnings, "the headless key file "+keyPath+" is no longer used but could not be removed ("+err.Error()+"); delete it yourself")
+		case ok:
+			res.Files = append(res.Files, keyPath)
+			res.Actions = append(res.Actions, "removed the headless key file "+keyPath+" (this task does not use it)")
+		}
 	}
 	res.Warnings = append(res.Warnings, "run log: "+join(Windows, o.DataDir, "engine.log")+" (the task has no console)")
 	if o.Headless {
@@ -280,23 +292,50 @@ func consoleExe(exe string) string {
 // "Run as administrator", as the same user.
 func ElevatedInstallCommand(o InstallOptions) string {
 	var dirs string
-	if o.ExplicitDirs {
+	if o.ExplicitDirs || o.Headless {
 		dirs = " --config-dir " + winQuote(o.ConfigDir) + " --data-dir " + winQuote(o.DataDir)
 	}
-	return winQuote(consoleExe(o.Exe)) + dirs + " service install --headless"
+	cmd := winQuote(consoleExe(o.Exe)) + dirs + " service install"
+	if o.Headless {
+		cmd += " --headless"
+	}
+	return cmd
 }
 
-// headlessFailure explains a failed headless install: most often the prompt
-// is not elevated, otherwise the account lacks the batch logon right.
-func (m *schtasks) headlessFailure(o InstallOptions, res *Result, err error) error {
+// createCommand is the schtasks /Create command line of a plan.
+func createCommand(p Plan) string {
+	for _, c := range p.Commands {
+		if len(c.Args) > 1 && c.Args[1] == "/Create" {
+			return strings.Join(c.Args, " ")
+		}
+	}
+	return ""
+}
+
+// Codes that mean "the account may not log on as a batch job": Win32 1385
+// (ERROR_LOGON_TYPE_NOT_GRANTED) and its HRESULT.
+var batchRightRe = regexp.MustCompile(`(?i)\b1385\b|0x80070569|80070569`)
+
+// installFailure explains a failed install. Registered says the task exists
+// although a later step failed. Access denied can happen in any mode and
+// gets the elevated command; a headless install that is not elevated gets it
+// too, and a refused S4U logon gets a hint about the batch logon right.
+func (m *schtasks) installFailure(o InstallOptions, res *Result, err error, registered bool) error {
 	low := strings.ToLower(err.Error())
-	notElevated := m.env.Elevated != nil && !m.env.Elevated()
+	notElevated := o.Headless && m.env.Elevated != nil && !m.env.Elevated()
 	switch {
+	case registered:
+		res.Manual = append(res.Manual, "schtasks /Run /TN "+TaskName+"   (or sign out and in, or restart the computer)")
+		return fmt.Errorf("the task %s is registered but did not start: %w", TaskName, err)
 	case strings.Contains(low, "denied") || notElevated:
 		res.Manual = append(res.Manual,
 			"open a prompt with Run as administrator (as this same user, "+m.env.User+") and run: "+ElevatedInstallCommand(o))
-		return fmt.Errorf("registering a headless task needs an elevated (administrator) prompt: %w", err)
-	case strings.Contains(low, "1385") || strings.Contains(low, "logon failure") || strings.Contains(low, "logon type") || strings.Contains(low, "batch job"):
+		if o.Headless {
+			return fmt.Errorf("registering a headless task needs an elevated (administrator) prompt: %w", err)
+		}
+		return fmt.Errorf("Task Scheduler refused (access denied); try from an elevated prompt: %w", err)
+	case o.Headless && (batchRightRe.MatchString(low) || strings.Contains(low, "logon failure") ||
+		strings.Contains(low, "logon type") || strings.Contains(low, "batch job")):
 		return fmt.Errorf("%w (the account needs the \"Log on as a batch job\" right: Local Security Policy > Local Policies > "+
 			"User Rights Assignment; administrators have it by default)", err)
 	}
@@ -312,11 +351,12 @@ func (m *schtasks) Uninstall() (Result, error) {
 	if err != nil {
 		if missing(out, err) {
 			res.Actions = append(res.Actions, "nothing to remove: no scheduled task named "+TaskName)
+			// A key file can outlive its task; only --headless ever creates one.
+			m.removeKeyFiles("", &res)
 			return res, nil
 		}
 		return res, fmt.Errorf("ask Task Scheduler: %w", err)
 	}
-	// Only a task that was installed with --headless has a key file of ours.
 	def := parseTask(decodeConsole(out.Stdout))
 	if _, err := m.env.Runner.Run(ctx, "schtasks", "/End", "/TN", TaskName); err == nil {
 		res.Actions = append(res.Actions, "ran schtasks /End /TN "+TaskName)
@@ -327,9 +367,7 @@ func (m *schtasks) Uninstall() (Result, error) {
 		}
 		return res, err
 	}
-	if def.Headless && def.KeyFile != "" {
-		m.removeKeyFile(def.KeyFile, &res)
-	}
+	m.removeKeyFiles(def.KeyFile, &res)
 	res.Actions = append(res.Actions, "ran schtasks /Delete /TN "+TaskName+" /F")
 	if m.env.DataDir != "" {
 		file := m.taskFile(m.env.DataDir)
@@ -343,20 +381,38 @@ func (m *schtasks) Uninstall() (Result, error) {
 	return res, nil
 }
 
-// removeKeyFile deletes the DPAPI key file a headless install created. It
-// only touches a file with the name this program gives it, whatever path the
-// task definition holds.
-func (m *schtasks) removeKeyFile(path string, res *Result) {
-	if !strings.EqualFold(winBase(path), vault.DPAPIKeyFileName) {
-		res.Warnings = append(res.Warnings, "the task named a key file that is not "+vault.DPAPIKeyFileName+"; it was left alone")
-		return
+// removeKeyFiles deletes the DPAPI key file(s) a headless install created:
+// the one the task definition names (when it has the file's usual name, so a
+// doctored task can never make us delete another file) and the one next to the
+// configuration. The file is only ever created by --headless, so it goes
+// whatever the task's logon type is now (a plain install over a headless one
+// removes it too, but an interrupted switch may leave it).
+func (m *schtasks) removeKeyFiles(fromTask string, res *Result) {
+	var paths []string
+	if fromTask != "" {
+		if !strings.EqualFold(winBase(fromTask), vault.DPAPIKeyFileName) {
+			res.Warnings = append(res.Warnings, "the task named a key file that is not "+vault.DPAPIKeyFileName+"; it was left alone")
+		} else {
+			paths = append(paths, fromTask)
+		}
 	}
-	switch ok, err := removeFile(path); {
-	case err != nil:
-		res.Warnings = append(res.Warnings, "could not remove the key file "+path+": "+err.Error()+"; delete it yourself")
-	case ok:
-		res.Files = append(res.Files, path)
-		res.Actions = append(res.Actions, "removed the headless key file "+path)
+	if m.env.ConfigDir != "" {
+		if p := m.keyFilePath(m.env.ConfigDir); !slices.ContainsFunc(paths, func(q string) bool { return strings.EqualFold(p, q) }) {
+			paths = append(paths, p)
+		}
+	}
+	removed := false
+	for _, path := range paths {
+		switch ok, err := removeFile(path); {
+		case err != nil:
+			res.Warnings = append(res.Warnings, "could not remove the key file "+path+": "+err.Error()+"; delete it yourself")
+		case ok:
+			removed = true
+			res.Files = append(res.Files, path)
+			res.Actions = append(res.Actions, "removed the headless key file "+path)
+		}
+	}
+	if removed {
 		res.Warnings = append(res.Warnings, "the key file was only a copy for the headless task: your master key itself "+
 			"(Credential Manager, or wherever you keep "+vault.EnvMasterKey+"), the vault and the configuration were left in place")
 	}
@@ -484,6 +540,7 @@ func (m *schtasks) auditHeadless(st *Status) {
 	}
 	a := m.auditKey(st.KeyFile)
 	st.KeyFileMissing, st.KeyFileErr, st.KeyFileBroad = a.Missing, a.ReadErr, a.Broad
+	st.KeyFileACLErr, st.KeyFileDir, st.KeyFileDirBroad = a.ACLErr, a.Dir, a.DirBroad
 	switch {
 	case a.Missing:
 		st.Details = append(st.Details, "the headless key file is missing; install again with --headless")
@@ -495,6 +552,10 @@ func (m *schtasks) auditHeadless(st *Status) {
 	if len(a.Broad) > 0 {
 		st.Details = append(st.Details, "WARNING: the key file's access list also admits "+strings.Join(a.Broad, ", ")+
 			"; install again with --headless to reset it")
+	}
+	if len(a.DirBroad) > 0 {
+		st.Details = append(st.Details, "WARNING: "+a.Dir+" can be changed by "+strings.Join(a.DirBroad, ", ")+
+			", who could swap the key file; restrict that folder to you, SYSTEM and Administrators")
 	}
 	if a.ACLErr != "" {
 		st.Details = append(st.Details, "could not read the key file's access list: "+a.ACLErr)

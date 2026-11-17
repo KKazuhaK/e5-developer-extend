@@ -35,6 +35,13 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 		OpenVault: func(cfg *config.Config) (doctor.Vault, error) {
 			return o.OpenVault(cfg)
 		},
+		OpenVaultWithKeyFile: func(cfg *config.Config, keyFile string) (doctor.Vault, error) {
+			dir, err := paths.VaultDir()
+			if err != nil {
+				return nil, err
+			}
+			return vault.New(dir, func() ([]byte, error) { return vault.ReadDPAPIKeyFile(keyFile) }), nil
+		},
 		NewAuth: func(cfg *config.Config, acct config.Account) (auth.Authenticator, error) {
 			return o.Authenticator(cfg, acct)
 		},
@@ -84,6 +91,9 @@ func (o *Ops) ServiceEnv() (service.Env, error) {
 		return env, err
 	}
 	env.DataDir = dir
+	if cdir, err := paths.ConfigDir(); err == nil {
+		env.ConfigDir = cdir
+	}
 	return env, nil
 }
 

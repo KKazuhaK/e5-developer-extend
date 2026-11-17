@@ -162,7 +162,7 @@ func checkEngine(d Deps) Check {
 	return c
 }
 
-func checkService(d Deps) []Check {
+func checkService(d Deps, cfg *config.Config) []Check {
 	c := Check{ID: "service", Title: "Background service"}
 	if d.Service == nil {
 		c.Level = Warn
@@ -210,34 +210,87 @@ func checkService(d Deps) []Check {
 		}
 	}
 	if d.GOOS == service.Windows && err == nil && st.Installed && st.Headless == service.Yes {
-		out = append(out, checkHeadless(st))
+		out = append(out, checkHeadless(d, cfg, st))
 	}
 	return out
 }
 
 // checkHeadless looks at the key file a headless Windows task depends on: the
-// task runs without a user profile, so without that file the engine cannot
-// open the vault.
-func checkHeadless(st service.Status) Check {
-	h := Check{ID: "headless", Title: "Headless mode"}
+// task runs without a user profile, so without that file (or with a stale
+// copy of the key) the engine cannot open the vault. Problems add up: the
+// level is the worst of them.
+func checkHeadless(d Deps, cfg *config.Config, st service.Status) Check {
+	h := Check{ID: "headless", Title: "Headless mode", Level: OK}
+	var msgs []Msg
+	worse := func(l Level) {
+		if l == Fail || (l == Warn && h.Level == OK) {
+			h.Level = l
+		}
+	}
 	switch {
 	case st.KeyFileMissing:
-		h.Level = Fail
-		h.setDetail(M("headless.keyMissing"))
-		h.setFix(M("fix.headlessInstall"))
+		worse(Fail)
+		msgs = append(msgs, M("headless.keyMissing"))
 	case st.KeyFileErr != "":
-		h.Level = Fail
-		h.setDetail(M("headless.keyUnreadable", "reason", st.KeyFileErr))
-		h.setFix(M("fix.headlessInstall"))
-	case len(st.KeyFileBroad) > 0:
-		h.Level = Warn
-		h.setDetail(M("headless.keyAcl", "principals", strings.Join(st.KeyFileBroad, ", ")))
-		h.setFix(M("fix.headlessInstall"))
+		worse(Fail)
+		msgs = append(msgs, M("headless.keyUnreadable", "reason", st.KeyFileErr))
 	default:
-		h.Level = OK
-		h.setDetail(M("headless.ok"))
+		if m, ok := staleKey(d, cfg, st); ok {
+			worse(Fail)
+			msgs = append(msgs, m)
+		}
 	}
+	if len(st.KeyFileBroad) > 0 {
+		worse(Warn)
+		msgs = append(msgs, M("headless.keyAcl", "principals", strings.Join(st.KeyFileBroad, ", ")))
+	}
+	if len(st.KeyFileDirBroad) > 0 {
+		worse(Warn)
+		msgs = append(msgs, M("headless.dirAcl", "dir", st.KeyFileDir, "principals", strings.Join(st.KeyFileDirBroad, ", ")))
+	}
+	if st.KeyFileACLErr != "" {
+		worse(Warn)
+		msgs = append(msgs, M("headless.aclUnreadable", "reason", st.KeyFileACLErr))
+	}
+	if len(msgs) == 0 {
+		msgs = append(msgs, M("headless.ok"))
+	} else {
+		h.setFix(M("fix.headlessInstall"))
+	}
+	h.setDetail(msgs...)
 	return h
+}
+
+// staleKey decrypts one stored item with the key from the key file, as the
+// vault check does with the normal key. A key that cannot decrypt what the
+// vault holds is a stale copy (the master key changed after the install).
+func staleKey(d Deps, cfg *config.Config, st service.Status) (Msg, bool) {
+	if d.OpenVaultWithKeyFile == nil || cfg == nil || st.KeyFile == "" {
+		return Msg{}, false
+	}
+	v, err := d.OpenVaultWithKeyFile(cfg, st.KeyFile)
+	if err != nil {
+		return M("headless.keyUnreadable", "reason", firstLines(err, 1)), true
+	}
+	for _, acct := range cfg.Accounts {
+		keys := []string{vault.TokenCacheKey(acct.Name)}
+		if acct.NeedsSecret() {
+			keys = append([]string{vault.SecretKey(acct.Name)}, keys...)
+		}
+		for _, key := range keys {
+			if has, err := v.Has(key); err != nil || !has {
+				continue
+			}
+			if _, err := v.Get(key); err != nil {
+				if errors.Is(err, vault.ErrWrongKey) {
+					return M("headless.staleKey", "account", acct.Name), true
+				}
+				return M("headless.keyUnreadable", "reason", firstLines(err, 1)), true
+			}
+			return Msg{}, false // one item decrypted: the key is right
+		}
+	}
+	return Msg{}, false
 }
 
 func checkAccount(ctx context.Context, d Deps, cfg *config.Config, acct config.Account, as *store.AccountState, offline bool) []Check {

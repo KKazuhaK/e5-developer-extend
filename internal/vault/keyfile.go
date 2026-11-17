@@ -52,6 +52,10 @@ type ACE struct {
 	Name      string // DOMAIN\name, or the SID when it cannot be resolved
 	Allow     bool   // an allow entry (deny entries never widen access)
 	Inherited bool
+	// InheritOnly entries do not apply to the object itself, only to what is
+	// created inside it (CREATOR OWNER is the usual one).
+	InheritOnly bool
+	Mask        uint32 // access rights granted
 }
 
 // ACLInfo is the access list of a file.
@@ -70,6 +74,9 @@ type keyFileOS struct {
 	// Administrators can open, before any content is written to it.
 	create  func(path string) (*os.File, error)
 	readACL func(path string) (ACLInfo, error)
+	// mkdir creates one directory that only the user, SYSTEM and
+	// Administrators can use (children inherit that).
+	mkdir func(path string) error
 }
 
 var keyFileOps = platformKeyFileOS()
@@ -89,7 +96,7 @@ func WriteDPAPIKeyFile(path string, key []byte) error {
 	data := []byte(dpapiHeader + "\n" + base64.StdEncoding.EncodeToString(blob) + "\n")
 
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := mkdirRestricted(dir); err != nil {
 		return fmt.Errorf("vault: create %s: %w", dir, err)
 	}
 	var rnd [6]byte
@@ -119,6 +126,30 @@ func WriteDPAPIKeyFile(path string, key []byte) error {
 	if err := os.Rename(tmp, path); err != nil {
 		_ = os.Remove(tmp)
 		return fmt.Errorf("vault: write the key file: %w", err)
+	}
+	return nil
+}
+
+// mkdirRestricted creates dir and any missing parents. Directories it creates
+// get the restricted access list (on Windows); one that already exists is left
+// as it is, and AuditDPAPIKeyFile reports it when others can write to it.
+func mkdirRestricted(dir string) error {
+	var missing []string
+	for d := dir; ; {
+		if _, err := os.Stat(d); err == nil {
+			break
+		}
+		missing = append(missing, d)
+		parent := filepath.Dir(d)
+		if parent == d {
+			break
+		}
+		d = parent
+	}
+	for i := len(missing) - 1; i >= 0; i-- {
+		if err := keyFileOps.mkdir(missing[i]); err != nil && !errors.Is(err, fs.ErrExist) {
+			return err
+		}
 	}
 	return nil
 }
@@ -158,6 +189,11 @@ type KeyFileAudit struct {
 	Broad []string
 	// ACLErr says why the ACL could not be read (the check is then skipped).
 	ACLErr string
+	// Dir is the folder holding the key file; DirBroad lists the accounts,
+	// other than the user, SYSTEM and Administrators, that can write to it,
+	// delete from it or change its permissions (they could swap the key file).
+	Dir      string
+	DirBroad []string
 }
 
 // AuditDPAPIKeyFile checks that the key file exists, can be decrypted by this
@@ -180,6 +216,10 @@ func AuditDPAPIKeyFile(path string) KeyFileAudit {
 		return a
 	}
 	a.Broad = BroadPrincipals(info)
+	a.Dir = filepath.Dir(path)
+	if dinfo, err := keyFileOps.readACL(a.Dir); err == nil {
+		a.DirBroad = WritePrincipals(dinfo)
+	}
 	return a
 }
 
@@ -202,7 +242,7 @@ func BroadPrincipals(info ACLInfo) []string {
 	seen := map[string]bool{}
 	var out []string
 	for _, e := range info.ACEs {
-		if !e.Allow || e.SID == sidSystem || e.SID == sidAdministrators || (info.UserSID != "" && e.SID == info.UserSID) {
+		if !e.Allow || e.InheritOnly || e.SID == sidSystem || e.SID == sidAdministrators || (info.UserSID != "" && e.SID == info.UserSID) {
 			continue
 		}
 		name := e.Name
@@ -216,4 +256,33 @@ func BroadPrincipals(info ACLInfo) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// Rights that let an account change a folder's content or permissions.
+const (
+	rightAddFile      = 0x2     // FILE_ADD_FILE / FILE_WRITE_DATA
+	rightAddSubdir    = 0x4     // FILE_ADD_SUBDIRECTORY / FILE_APPEND_DATA
+	rightDeleteChild  = 0x40    // FILE_DELETE_CHILD
+	rightDelete       = 0x10000 // DELETE
+	rightWriteDAC     = 0x40000
+	rightWriteOwner   = 0x80000
+	rightGenericAll   = 0x10000000
+	rightGenericWrite = 0x40000000
+	writeRights       = rightAddFile | rightAddSubdir | rightDeleteChild | rightDelete | rightWriteDAC | rightWriteOwner | rightGenericAll | rightGenericWrite
+)
+
+// WritePrincipals lists who, besides the user, SYSTEM and Administrators,
+// can add to, delete from or re-permission the object an ACL belongs to.
+func WritePrincipals(info ACLInfo) []string {
+	if info.NoDACL {
+		return []string{"Everyone (no access list)"}
+	}
+	narrowed := info
+	narrowed.ACEs = nil
+	for _, e := range info.ACEs {
+		if e.Mask&writeRights != 0 {
+			narrowed.ACEs = append(narrowed.ACEs, e)
+		}
+	}
+	return BroadPrincipals(narrowed)
 }

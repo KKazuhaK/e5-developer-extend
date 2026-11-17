@@ -37,6 +37,7 @@ func fakeDPAPI(t *testing.T) *ACLInfo {
 			return os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600)
 		},
 		readACL: func(string) (ACLInfo, error) { return *acl, nil },
+		mkdir:   func(path string) error { return os.Mkdir(path, 0o700) },
 	}
 	return acl
 }
@@ -143,6 +144,47 @@ func TestAuditDPAPIKeyFile(t *testing.T) {
 	keyFileOps.readACL = func(string) (ACLInfo, error) { return ACLInfo{}, errors.New("no access") }
 	if a = AuditDPAPIKeyFile(path); a.ACLErr == "" {
 		t.Errorf("acl error lost: %+v", a)
+	}
+}
+
+func TestAuditReportsAFolderOthersCanWriteTo(t *testing.T) {
+	acl := fakeDPAPI(t)
+	path := filepath.Join(t.TempDir(), DPAPIKeyFileName)
+	if err := WriteDPAPIKeyFile(path, testKey()); err != nil {
+		t.Fatal(err)
+	}
+	// Read-only access for others is not a problem for the folder; write,
+	// delete and change-permissions are (the key file could be swapped).
+	acl.ACEs = append(acl.ACEs,
+		ACE{SID: "S-1-5-32-545", Name: `BUILTIN\Users`, Allow: true, Mask: 0x1200a9},                 // read & execute
+		ACE{SID: "S-1-5-11", Name: `NT AUTHORITY\Authenticated Users`, Allow: true, Mask: 0x1301bf},  // modify
+		ACE{SID: "S-1-3-0", Name: "CREATOR OWNER", Allow: true, InheritOnly: true, Mask: 0x10000000}, // children only
+		ACE{SID: "S-1-5-32-547", Name: `BUILTIN\Power Users`, Allow: true, Mask: rightDelete})
+	a := AuditDPAPIKeyFile(path)
+	if a.Dir != filepath.Dir(path) || strings.Join(a.DirBroad, ",") != `BUILTIN\Power Users,NT AUTHORITY\Authenticated Users` {
+		t.Errorf("dir = %q broad = %v", a.Dir, a.DirBroad)
+	}
+	// The inherit-only entry is not counted for the file either.
+	if got := BroadPrincipals(*acl); strings.Contains(strings.Join(got, ","), "CREATOR") {
+		t.Errorf("inherit-only entry counted: %v", got)
+	}
+}
+
+func TestWriteCreatesMissingFolders(t *testing.T) {
+	fakeDPAPI(t)
+	var made []string
+	keyFileOps.mkdir = func(p string) error { made = append(made, filepath.Base(p)); return os.Mkdir(p, 0o700) }
+	root := t.TempDir()
+	path := filepath.Join(root, "a", "b", DPAPIKeyFileName)
+	if err := WriteDPAPIKeyFile(path, testKey()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(made, ",") != "a,b" {
+		t.Errorf("created %v, want a then b (parents first, the existing root untouched)", made)
+	}
+	made = nil
+	if err := WriteDPAPIKeyFile(path, testKey()); err != nil || len(made) != 0 {
+		t.Errorf("an existing folder was touched: %v %v", err, made)
 	}
 }
 
