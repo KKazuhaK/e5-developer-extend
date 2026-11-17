@@ -61,6 +61,38 @@ func TestTaskXMLGolden(t *testing.T) {
 		Exe: `C:\Program Files\e5extend\e5extend.exe`, UserID: `PC\u`, LogFile: `C:\Users\u\My Data\engine.log`}))
 }
 
+func TestTaskXMLHeadlessGolden(t *testing.T) {
+	p := TaskParams{
+		Exe: `C:\Users\u\bin\e5extend-bg.exe`, UserID: `PC\u`, LogFile: `C:\Users\u\AppData\Local\e5extend\engine.log`,
+		Headless: true, KeyFile: `C:\Users\u\AppData\Roaming\e5extend\master.key.dpapi`}
+	golden(t, "task_headless", TaskXML(p))
+	p.ConfigDir, p.DataDir = `D:\my config`, `D:\data`
+	golden(t, "task_headless_dirs", TaskXML(p))
+}
+
+func TestTaskXMLHeadlessDiffersOnlyWhereExpected(t *testing.T) {
+	base := TaskParams{Exe: `C:\e.exe`, UserID: `PC\u`, LogFile: `C:\l.log`}
+	head := base
+	head.Headless, head.KeyFile = true, `C:\c\master.key.dpapi`
+	b, h := TaskXML(base), TaskXML(head)
+	if strings.Contains(b, "S4U") || strings.Contains(b, "BootTrigger") || strings.Contains(b, "dpapi") {
+		t.Error("the default task must stay interactive")
+	}
+	for _, want := range []string{
+		"<LogonType>S4U</LogonType>", "<BootTrigger>", "<Delay>PT30S</Delay>", "<LogonTrigger>", "<Interval>PT5M</Interval>",
+		"<RunLevel>LeastPrivilege</RunLevel>", "<MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>",
+		"<DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>", "<Interval>PT1M</Interval>", "<Count>999</Count>",
+		"--dpapi-key-file C:\\c\\master.key.dpapi run",
+	} {
+		if !strings.Contains(h, want) {
+			t.Errorf("headless task lacks %s", want)
+		}
+	}
+	if strings.Contains(h, "InteractiveToken") {
+		t.Error("headless task still interactive")
+	}
+}
+
 func TestTaskXMLKeyDefaults(t *testing.T) {
 	x := TaskXML(TaskParams{Exe: `C:\e.exe`, UserID: `PC\u`, LogFile: `C:\l.log`})
 	for _, want := range []string{

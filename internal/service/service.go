@@ -20,6 +20,8 @@ import (
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 // Names of the registered job.
@@ -31,6 +33,8 @@ const (
 	// KeyFileName is the master key file written by `--key-file`.
 	KeyFileName = "master.key"
 )
+
+const headlessWindowsOnly = "--headless is only for Windows"
 
 // Platforms accepted by New.
 const (
@@ -118,7 +122,17 @@ type Env struct {
 	// DataDir is where the Windows installer keeps the task definition it
 	// imported; Uninstall removes it from there.
 	DataDir string
-	Runner  Runner
+	// ConfigDir is where a headless install keeps its key file; Uninstall
+	// removes a leftover one from there.
+	ConfigDir string
+	Runner    Runner
+	// Elevated says whether this process runs with administrator rights
+	// (Windows). Nil means unknown; it only shapes error advice.
+	Elevated func() bool
+	// WriteKeyFile and AuditKeyFile handle the DPAPI key file of a headless
+	// Windows install; nil uses the real ones in package vault.
+	WriteKeyFile func(path string, key []byte) error
+	AuditKeyFile func(path string) vault.KeyFileAudit
 }
 
 // InstallOptions say what to install.
@@ -136,6 +150,11 @@ type InstallOptions struct {
 	// SystemdVersion (Linux) is the major version of systemd; zero means
 	// unknown, which Install fills in by asking `systemctl --version`.
 	SystemdVersion int
+	// Headless (Windows) makes the task run whether or not the user is signed
+	// in (logon type S4U) and starts it at boot; the master key (MasterKey)
+	// goes to ConfigDir/master.key.dpapi, encrypted with DPAPI at machine
+	// scope and restricted to the user, SYSTEM and Administrators.
+	Headless bool
 	// ExplicitDirs hands ConfigDir and DataDir to the job when they come from
 	// E5EXTEND_*_DIR overrides: as environment on macOS, as --config-dir and
 	// --data-dir arguments on Windows (systemd units always carry them).
@@ -184,8 +203,25 @@ type Status struct {
 	Enabled   Tri
 	Running   Tri
 	// Linger is only meaningful on Linux.
-	Linger  Tri
-	Details []string
+	Linger Tri
+	// Headless is only meaningful on Windows: the task runs whether or not
+	// the user is signed in (logon type S4U).
+	Headless Tri
+	// KeyFile, KeyFileMissing, KeyFileErr and KeyFileBroad describe the DPAPI
+	// key file of a headless task: its path (from the task definition), that
+	// it does not exist, why it cannot be read or decrypted (no path in it),
+	// and the accounts beyond user, SYSTEM and Administrators its ACL admits.
+	KeyFile        string
+	KeyFileMissing bool
+	KeyFileErr     string
+	KeyFileBroad   []string
+	// KeyFileACLErr: why the key file's access list could not be read.
+	// KeyFileDir is its folder and KeyFileDirBroad the accounts besides the
+	// user, SYSTEM and Administrators that can change that folder.
+	KeyFileACLErr   string
+	KeyFileDir      string
+	KeyFileDirBroad []string
+	Details         []string
 }
 
 // File is a file the installation writes.
@@ -198,6 +234,11 @@ type File struct {
 	Lazy   func() ([]byte, error)
 	Secret bool   // never printed
 	Show   string // printed instead of Data when set (Data may be UTF-16)
+	// Write, when set, stores the data instead of the plain writeFile (the
+	// DPAPI key file needs its own encryption and ACL).
+	Write func(path string, data []byte) error
+	// Note is printed under the file in a plan.
+	Note string
 }
 
 // Command is an external command of the installation.
@@ -240,10 +281,18 @@ func (p Plan) Format() string {
 		sb.WriteString("\n")
 	}
 	for _, f := range p.Files {
-		fmt.Fprintf(&sb, "write %s (mode %04o)\n", f.Path, f.Mode.Perm())
+		if f.Write != nil {
+			fmt.Fprintf(&sb, "write %s\n", f.Path)
+		} else {
+			fmt.Fprintf(&sb, "write %s (mode %04o)\n", f.Path, f.Mode.Perm())
+		}
 		switch {
 		case f.Secret:
-			sb.WriteString("  <secret content not shown>\n\n")
+			sb.WriteString("  <secret content not shown>\n")
+			if f.Note != "" {
+				sb.WriteString("  " + f.Note + "\n")
+			}
+			sb.WriteString("\n")
 		default:
 			body := f.Show
 			if body == "" {
@@ -336,7 +385,11 @@ func apply(ctx context.Context, r Runner, p Plan, installed bool, res *Result) e
 				return err
 			}
 		}
-		if err := writeFile(f.Path, data, f.Mode); err != nil {
+		write := writeFile
+		if f.Write != nil {
+			write = func(path string, data []byte, _ fs.FileMode) error { return f.Write(path, data) }
+		}
+		if err := write(f.Path, data, f.Mode); err != nil {
 			return err
 		}
 		res.Files = append(res.Files, f.Path)
