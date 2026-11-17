@@ -82,7 +82,7 @@ interface AccountInput {        // 新增和编辑共用
   secret?: string;              // 只在新增或更换时传；后端永远不会把它返回给前端
 }
 interface LoginEvent {          // 通过 Wails 事件 "login:<name>" 推送
-  kind: "device_code" | "browser_opened" | "done" | "error";
+  kind: "device_code" | "browser_opened" | "progress" | "done" | "error";
   message: string; userCode?: string; verificationUri?: string;
 }
 interface LogEntry { ts: string; account: string; api: string; status: number; class: string; latencyMs: number; event?: string; detail?: string; }
@@ -105,7 +105,8 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 | 服务 | 方法 |
 |---|---|
 | `StatusService` | `Snapshot()`、`RunNow(names: string[])` |
-| `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
+| `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
+| `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Apply(id, choice)`、`Cancel(id)`；`id` 由前端生成，好在调用前先订阅事件 |
 | `LogService` | `Read(account, sinceHours, limit)` |
 | `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
 | `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`UninstallService()` |
@@ -126,11 +127,14 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
   - 有账号需要处理时，最上方显示醒目的提示条，带“去处理”按钮。
   - 一个账号都没有时，显示引导：一个按钮进入添加账号向导，再给一个应用注册文档的链接。
 - **账号**：列表，可按“出错 / 暂停”筛选，也能搜索。
-  - 添加和编辑是一个分步向导：
-    1. 选登录方式（每种方式附一句说明：什么情况适合用它）；
-    2. 填租户、Client ID，需要时填 Secret 或密码；
+  - 添加和编辑是一个分步向导（添加时第一步先选“自动创建应用注册（推荐）/ 我已经有应用注册”，编辑只有后者）：
+    1. 选登录方式（每种方式附一句说明：什么情况适合用它）；选“自动”时改为：账号名、身份（用户身份：设备码 / 浏览器；高级里有应用身份 Client Secret，需要填目标用户）、
+       管理员的登录方式，并说明登录页会显示“Microsoft Graph Command Line Tools”（微软的官方工具，只用这一次）；
+    2. 填租户、Client ID，需要时填 Secret 或密码；选“自动”时这一步是“创建应用”：管理员登录（设备码或浏览器）→ 显示计划（应用名、权限列表、“不会删除任何已有内容”、将要执行的事项；
+       发现手工建的同名应用时给“采用 X（客户端 ID）/ 新建”单选，采用时有“改为规范名称”复选框，默认勾选；没有要做的事就说一切已就绪）→ 确认 → 进度（含“等待微软同步…”）→ 把租户 ID、客户端 ID 填进账号；
     3. 选 API 分类；
     4. 登录：设备码模式显示代码和链接，带“复制”和“打开浏览器”按钮；浏览器模式显示“请在浏览器中完成登录”；
+       自动创建之后用 `LoginAfterSetup`，新应用还没同步时显示“等待微软同步…”并自动重试；管理员同意没成功时账号照常保存，这一步显示管理员同意链接（打开、复制）并说明同意之后再登录；
     5. 测试：显示已授予的权限和可用的 API 数量；
     6. 完成。
   - 删除账号要二次确认。“更换 Secret” 是单独的对话框。
@@ -193,7 +197,12 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
 `gui/frontend/bindings/github.com/KKazuhaK/e5-developer-extend/gui/services/<服务名小写>.ts`（模型在同目录 `models.ts`，`ops` 包的模型在 `.../internal/ops/models.ts`）。
 
 **对第 3 节契约的补充**
-- 事件：`login:<name>`（`LoginEvent`，最后一条是 `done` 或 `error`）；`run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。
+- 事件：`login:<name>`（`LoginEvent`，最后一条是 `done` 或 `error`；`progress` 是需要告诉用户的等待，如“等待微软同步”）；
+  `appsetup:<id>`（`AppSetupEvent`）：`device_code` / `browser_opened`（管理员登录，同上）→ `signed_in` → `plan`（`AppSetupPlan`：应用名、标签、权限、缺的权限、已有应用、候选、事项（`code` 稳定，`text` 为英文）、`needsChoice`）→ 前端调 `Apply` → 若干 `progress`（英文原文，前端按前缀翻译，认不出的原样显示）→ `result`（`AppSetupResult`：租户 ID、客户端 ID、应用名、是否创建 / 采用 / 改名、`consentGranted`、`adminConsentUrl`、`consentError`、`secretExpires`）；
+  任何失败以 `error` 结束，带 `code`：`forbidden`（`roles` 列出能做这件事的角色）、`blocked`（租户禁止 Graph Command Line Tools）、`unknown_permission`、`cancelled`、`other`。
+  同一时间只有一个创建会话；离开向导或点取消就 `Cancel`，已经在微软那边建好的应用保留（下次复用），不留半个账号。
+  管理员的令牌只在后端内存里；事件里没有令牌、Secret，也没有管理员的登录名。应用身份的 Secret 由后端直接存进 vault（以账号名为键），向导随后用 `AccountInput.useStoredSecret` 添加账号。
+  `run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。
   `browser_opened` 的 `message` 是固定文字，登录地址不放进事件（里面带请求状态）；`device_code` 事件的 `userCode`、`verificationUri` 是从微软给的提示文字里解析出来的，解析不到就为空，`message` 总是完整文字。
 - `AccountService.Test(name)` 返回 `{ scopes, usableApis, totalApis, expiresOn }`，不含登录名。
 - `HealthService.InstallService()` / `UninstallService()` 返回 `{ actions, warnings, manual }`（`manual` 是要用户自己执行的命令）。
