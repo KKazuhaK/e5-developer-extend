@@ -32,7 +32,7 @@ const (
 	ReasonNoOneDrive        = "no_onedrive"
 	ReasonNoTeams           = "no_teams_license"
 	ReasonNoSharePoint      = "no_sharepoint"
-	ReasonNoBookings        = "no_bookings"
+	ReasonOptional          = "optional"
 	ReasonNeedsAdminRole    = "needs_admin_role"
 	ReasonNotSupported      = "not_supported"
 	ReasonProbeFailed       = "probe_failed"
@@ -124,8 +124,7 @@ type probe struct {
 // result is only the user's own teams). Every other probe API is a collection
 // and is asked for one item with only its id (probeQuery), so a probe never
 // downloads bulk data.
-var noQuery = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true, "teams.joined": true,
-	"bookings.businesses": true}
+var noQuery = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true, "teams.joined": true}
 
 func probeQuery(api catalog.API) url.Values {
 	if noQuery[api.ID] {
@@ -165,19 +164,13 @@ var probes = []probe{
 		Absent:     []int{http.StatusNotFound},
 		Reason:     ReasonNoSharePoint,
 	},
-	{
-		// The list does not support $top or $select; Bookings may be switched off for the tenant.
-		Name:       "bookings",
-		APIs:       []string{"bookings.businesses"},
-		Categories: []string{"bookings"},
-		Absent:     []int{http.StatusNotFound},
-		Reason:     ReasonNoBookings,
-	},
 }
 
 // noProbe lists categories that cannot be probed safely and what they need.
 var noProbe = map[string]string{
 	"reports": ReasonNeedsAdminRole,
+	// Off by default and not every tenant has Bookings: never switched on for you.
+	"bookings": ReasonOptional,
 }
 
 // ProbeInfo describes one row of the probe table.

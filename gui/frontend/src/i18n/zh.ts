@@ -209,7 +209,7 @@ export const zh = {
   "rec.reason.no_onedrive": "没有 OneDrive",
   "rec.reason.no_teams_license": "没有 Teams 许可",
   "rec.reason.no_sharepoint": "没有 SharePoint 站点",
-  "rec.reason.no_bookings": "没有 Bookings 业务",
+  "rec.reason.optional": "可选：不是每个租户都开了 Bookings，需要的话自己勾选",
   "rec.reason.needs_admin_role": "需要管理员角色，未检查",
   "rec.reason.not_supported": "这种登录方式不支持",
   "rec.reason.probe_failed": "暂时无法确认",

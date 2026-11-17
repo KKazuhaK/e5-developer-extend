@@ -151,6 +151,10 @@ func TestFullE5User(t *testing.T) {
 			if c.Status != Maybe || c.Reason != ReasonNeedsAdminRole {
 				t.Errorf("reports = %+v", c)
 			}
+		case "bookings":
+			if c.Status != Maybe || c.Reason != ReasonOptional {
+				t.Errorf("bookings = %+v", c)
+			}
 		default:
 			if c.Status != Recommended || c.Reason != "" {
 				t.Errorf("%s = %+v, want recommended", c.Category, c)
@@ -158,7 +162,7 @@ func TestFullE5User(t *testing.T) {
 		}
 	}
 	rec := r.Recommended()
-	if len(rec) != len(r.Categories)-1 {
+	if len(rec) != len(r.Categories)-2 {
 		t.Errorf("recommended %v of %d", rec, len(r.Categories))
 	}
 	if !r.Delegated || r.Account != "a" {

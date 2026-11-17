@@ -210,7 +210,7 @@ export const en: Dict = {
   "rec.reason.no_onedrive": "No OneDrive",
   "rec.reason.no_teams_license": "No Teams license",
   "rec.reason.no_sharepoint": "No SharePoint site",
-  "rec.reason.no_bookings": "No Bookings business",
+  "rec.reason.optional": "Optional: not every tenant has Bookings; tick it yourself if you want it",
   "rec.reason.needs_admin_role": "Needs an administrator role; not checked",
   "rec.reason.not_supported": "Not supported by this sign-in type",
   "rec.reason.probe_failed": "Could not be confirmed right now",
