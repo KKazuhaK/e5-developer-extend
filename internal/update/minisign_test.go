@@ -132,8 +132,8 @@ func TestSecretKeyEncoding(t *testing.T) {
 }
 
 func TestHasPublicKey(t *testing.T) {
-	if HasPublicKey(PublicKeyText) {
-		t.Fatal("the committed key must be the placeholder until the owner sets a real one")
+	if !HasPublicKey(PublicKeyText) {
+		t.Fatal("the committed release key must be a real minisign public key")
 	}
 	if HasPublicKey("") || HasPublicKey(placeholderKey) || HasPublicKey("RWQnotbase64!!") {
 		t.Fatal("accepted a non-key")
@@ -214,7 +214,7 @@ func TestVerifyBundle(t *testing.T) {
 
 	// The placeholder key can verify nothing.
 	dir = signedDir(t, key, files, true)
-	if err := VerifyBundle(PublicKeyText, dir, []string{"a.bin"}); !errors.Is(err, ErrNoPublicKey) {
+	if err := VerifyBundle(placeholderKey, dir, []string{"a.bin"}); !errors.Is(err, ErrNoPublicKey) {
 		t.Fatalf("placeholder: %v", err)
 	}
 	if err := VerifyBundle("", dir, []string{"a.bin"}); !errors.Is(err, ErrNoPublicKey) {

@@ -18,7 +18,7 @@
 | 为什么不用 minisign 默认的 `ED`（预哈希） | 不支持 | 预哈希要 BLAKE2b，标准库没有；`SHA256SUMS` 很小，不预哈希没有任何损失 |
 | 谁来签名 | 发布流水线的 `publish` 任务，用 `go run scripts/release/sign-sums.go`，私钥来自仓库密钥 `RELEASE_SIGNING_KEY` | 不需要在 runner 上安装 minisign；格式由同一份代码生成和验证 |
 | 没有私钥密钥时 | `publish` 任务照常成功，只是不产生 `.minisig`，打印警告 | 不能因为没配密钥让发版失败；程序侧看到没有签名就拒绝自动安装 |
-| 公钥 | 编进 `internal/update/pubkey.go`；仓库里是**明显的占位符**，由所有者运行 `scripts/release/gen-signing-key.go` 生成后替换 | 密钥只能由所有者生成，AI 或脚本不能代劳、不能提交私钥 |
+| 公钥 | 编进 `internal/update/pubkey.go`（2026-11-17 用 `scripts/release/gen-signing-key.go` 生成；在那之前是一个明显的占位符）。私钥只存在仓库密钥 `RELEASE_SIGNING_KEY` 和所有者的离线备份里 | 私钥绝不提交进仓库；换钥匙意味着旧版本不能再自动升级到新版本，只能手动装一次 |
 | 公钥是占位符时 | 仍然能“发现新版本”，但**只提供“打开发布页”**，不下载、不安装 | 没有信任根就不能装任何东西 |
 | 检查结果存在哪 | 数据目录里的 `update.json`（不是 `state.json`） | `state.json` 只有引擎一个写者（引擎把整份状态放在内存里反复整体写回）；命令行和桌面窗口也会检查，写进去会被引擎覆盖，甚至覆盖掉引擎刚写的内容 |
 | “每个版本只通知一次” | 记在 `state.json` 的全局通知记录里（`update_available`，key 是版本号） | 沿用现有告警机制：冷却、免打扰、投递失败重试都直接可用；这份记录只有引擎写 |
