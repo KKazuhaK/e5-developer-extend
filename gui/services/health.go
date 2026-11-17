@@ -5,6 +5,7 @@ import (
 	"errors"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
@@ -22,9 +23,30 @@ func (s *HealthService) Doctor(offline bool) ([]DoctorCheck, error) {
 	}
 	out := make([]DoctorCheck, 0, len(checks))
 	for _, c := range checks {
-		out = append(out, DoctorCheck{ID: c.ID, Title: c.Title, Level: string(c.Level), Detail: c.Detail, Fix: c.Fix})
+		out = append(out, DoctorCheck{
+			ID: c.ID, Title: c.Title, Level: string(c.Level), Detail: c.Detail, Fix: c.Fix,
+			Parts:    doctorParts(c.Code, c.Params, c.Parts),
+			FixParts: doctorParts(c.FixCode, c.FixParams, c.FixParts),
+		})
 	}
 	return out, nil
+}
+
+// doctorParts turns a check's single message or its list of messages into one
+// list, never nil, with every Params map set.
+func doctorParts(code string, params map[string]string, parts []doctor.Msg) []DoctorMsg {
+	if code != "" {
+		parts = []doctor.Msg{{Code: code, Params: params}}
+	}
+	out := make([]DoctorMsg, 0, len(parts))
+	for _, m := range parts {
+		p := make(map[string]string, len(m.Params))
+		for k, v := range m.Params {
+			p[k] = v
+		}
+		out = append(out, DoctorMsg{Code: m.Code, Params: p})
+	}
+	return out
 }
 
 // ServiceInfo tells whether the background service is installed and running.

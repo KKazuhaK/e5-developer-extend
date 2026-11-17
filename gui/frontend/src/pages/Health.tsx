@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { HeartPulse, Info, RefreshCw, Server, Trash2, Download } from "lucide-react";
 import { api } from "@/api";
 import type { DoctorCheck, ServiceInfo, ServiceResult } from "@/api";
-import { doctorTitle } from "@/lib/doctor";
+import { doctorMessage, doctorTitle } from "@/lib/doctor";
 import { useI18n } from "@/i18n";
 import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { ErrorBlock, LevelBadge, LoadingBlock, PageHeader, Spinner } from "@/com
 import { cn, errMsg } from "@/lib/utils";
 
 export function Health() {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const toast = useToast();
   const [offline, setOffline] = useState(false);
   const [checks, setChecks] = useState<DoctorCheck[] | null>(null);
@@ -114,11 +114,11 @@ export function Health() {
                 <div className="w-20 shrink-0 pt-0.5"><LevelBadge level={c.level} /></div>
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{checkTitle(c)}</p>
-                  {c.detail && <p className="text-[13px] text-muted-foreground">{c.detail}</p>}
+                  {c.detail && <p className="text-[13px] text-muted-foreground">{doctorMessage(lang, c.parts, c.detail)}</p>}
                   {c.fix && c.level !== "ok" && (
                     <p className="mt-0.5 text-[13px]">
                       <span className="font-medium">{t("health.fix")}</span>
-                      {c.fix}
+                      {doctorMessage(lang, c.fixParts, c.fix)}
                     </p>
                   )}
                 </div>

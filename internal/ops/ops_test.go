@@ -17,6 +17,7 @@ import (
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
@@ -527,6 +528,35 @@ func TestHintSuggestsNextStep(t *testing.T) {
 	if h := Hint(ca, "x"); !strings.Contains(h, "Conditional Access") || !strings.Contains(h, "account login x") ||
 		!strings.Contains(h, "account add x-app --auto --auth client_secret") || !strings.Contains(h, "(a)") || !strings.Contains(h, "(b)") || !strings.Contains(h, "(c)") {
 		t.Fatalf("sign-in frequency hint: %q", h)
+	}
+}
+
+// Every suggestion has a code the doctor knows, and every code is reachable.
+func TestHintCodes(t *testing.T) {
+	errs := []error{
+		errors.New("AADSTS7000218"), errors.New("AADSTS70043"), errors.New("AADSTS50126"), errors.New("AADSTS53003"),
+		errors.New("AADSTS50053"), errors.New("AADSTS50055"), errors.New("AADSTS50057"), errors.New("AADSTS50076"),
+		fmt.Errorf("%w: %w", auth.ErrLoginRequired, vault.ErrWrongKey), auth.ErrLoginRequired, auth.ErrInvalidClient,
+		auth.ErrConsentRequired, auth.ErrTransient, vault.ErrRemoteSession, vault.ErrNoMasterKey, vault.ErrWrongKey,
+	}
+	seen := map[string]bool{}
+	for _, err := range errs {
+		code := HintCode(err)
+		if code == "" || !slices.Contains(doctor.HintCodes, code) {
+			t.Errorf("%v: code %q", err, code)
+		}
+		if Hint(err, "x") == "" {
+			t.Errorf("%v: no text", err)
+		}
+		seen[code] = true
+	}
+	for _, c := range doctor.HintCodes {
+		if !seen[c] {
+			t.Errorf("hint code %s is never returned", c)
+		}
+	}
+	if HintCode(errors.New("plain")) != "" {
+		t.Error("an unknown error has no code")
 	}
 }
 

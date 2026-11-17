@@ -83,6 +83,29 @@ export function daysUntil(date: string | null | undefined, now: number = Date.no
   return Math.ceil((t - now) / DAY);
 }
 
+/**
+ * A length of time in the UI language, with at most the two largest units:
+ * "1 小时 5 分钟" / "1h 5m". Negative input keeps its sign.
+ */
+export function formatDuration(totalSeconds: number, lang: Lang): string {
+  const neg = totalSeconds < 0;
+  let s = Math.floor(Math.abs(totalSeconds));
+  const units: [number, string, string][] = [
+    [86_400, "天", "d"],
+    [3_600, "小时", "h"],
+    [60, "分钟", "m"],
+    [1, "秒", "s"],
+  ];
+  const parts: string[] = [];
+  for (const [size, zhName, enName] of units) {
+    const n = Math.floor(s / size);
+    s -= n * size;
+    if (n > 0 && parts.length < 2) parts.push(lang === "zh" ? `${n} ${zhName}` : `${n}${enName}`);
+  }
+  if (parts.length === 0) parts.push(lang === "zh" ? "0 秒" : "0s");
+  return (neg ? "-" : "") + parts.join(" ");
+}
+
 /** Resolves the "auto" language setting from a navigator.language-like value. */
 export function resolveLang(pref: "auto" | Lang, systemLang: string | undefined): Lang {
   if (pref !== "auto") return pref;

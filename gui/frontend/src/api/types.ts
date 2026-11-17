@@ -217,8 +217,16 @@ export interface DoctorCheck {
   id: string;
   title: string;
   level: Level;
+  /** English text; shown as is for a code this version cannot translate. */
   detail: string;
   fix: string;
+  /** detail and fix as codes with values, translated in the UI language. */
+  parts?: DoctorMsg[];
+  fixParts?: DoctorMsg[];
+}
+export interface DoctorMsg {
+  code: string;
+  params: Record<string, string>;
 }
 export interface CatalogEntry {
   id: string;

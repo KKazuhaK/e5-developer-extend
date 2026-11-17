@@ -45,7 +45,7 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 			}
 			return auth.NewHTTPClient(proxy)
 		},
-		Hint: Hint,
+		Hint: Hint, HintCode: HintCode,
 	}
 	if m, err := o.ServiceManager(); err == nil {
 		d.Service = m.Status
