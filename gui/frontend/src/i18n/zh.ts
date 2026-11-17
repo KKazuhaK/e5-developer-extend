@@ -546,6 +546,7 @@ export const zh = {
   "event.subscription_expiring": "E5 订阅快到期",
   "event.subscription_status": "E5 订阅状态变化",
   "event.subscription_renewed": "E5 订阅已续期",
+  "overview.accountsTitle": "账号（{count}）",
   "sub.title": "E5 订阅",
   "sub.desc": "到期日来自 Microsoft Graph，每天检查一次；只有 SKU 以 {skus} 开头的订阅会提醒。",
   "sub.refresh": "全部刷新",

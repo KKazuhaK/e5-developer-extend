@@ -546,6 +546,7 @@ export const en: Dict = {
   "event.subscription_expiring": "Subscription about to expire",
   "event.subscription_status": "Subscription status changed",
   "event.subscription_renewed": "Subscription renewed",
+  "overview.accountsTitle": "Accounts ({count})",
   "sub.title": "E5 subscription",
   "sub.desc": "End dates come from Microsoft Graph and are checked once a day; only subscriptions whose SKU starts with {skus} alert.",
   "sub.refresh": "Refresh all",
