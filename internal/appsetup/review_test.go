@@ -158,6 +158,8 @@ func TestAdoptWithNewIsAlwaysAnError(t *testing.T) {
 // writeMatchers says which writes each action code stands for.
 var writeMatchers = map[string]*regexp.Regexp{
 	"create_app":               regexp.MustCompile(`^POST /v1.0/applications$`),
+	"rename_app":               regexp.MustCompile(`^PATCH /v1.0/applications/`),
+	"set_notes":                regexp.MustCompile(`^PATCH /v1.0/applications/`),
 	"add_tags":                 regexp.MustCompile(`^PATCH /v1.0/applications/`),
 	"add_redirect_uri":         regexp.MustCompile(`^PATCH /v1.0/applications/`),
 	"set_public_client":        regexp.MustCompile(`^PATCH /v1.0/applications/`),
@@ -447,5 +449,55 @@ func TestBeforeSecretRefusesBeforeAnySecretExists(t *testing.T) {
 	}
 	if len(r.g.Secrets) != 0 || r.g.Count("POST /v1.0/servicePrincipals") != 0 {
 		t.Errorf("went on: %v", r.g.Writes())
+	}
+}
+
+// What PlanFor says about a choice is what Apply then writes for that choice.
+func TestApplyWritesWhatPlanForListed(t *testing.T) {
+	for _, kind := range []appsetup.Kind{appsetup.KindDelegated, appsetup.KindApp} {
+		for _, tc := range []struct {
+			name   string
+			choice func(clientID string) appsetup.Choice
+		}{
+			{"adopt and rename", func(c string) appsetup.Choice { return appsetup.Choice{Adopt: c, Rename: true} }},
+			{"adopt keep name", func(c string) appsetup.Choice { return appsetup.Choice{Adopt: c} }},
+			{"create new", func(string) appsetup.Choice { return appsetup.Choice{CreateNew: true} }},
+		} {
+			t.Run(string(kind)+"/"+tc.name, func(t *testing.T) {
+				r := newRig(t)
+				id := r.g.AddApp(map[string]any{"displayName": "e5renew"})
+				choice := tc.choice(r.g.App(id)["appId"].(string))
+				s := r.setup(kind)
+				plan, err := s.PlanFor(context.Background(), &choice)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if len(r.g.Writes()) != 0 {
+					t.Fatalf("PlanFor wrote: %v", r.g.Writes())
+				}
+				var codes []string
+				for _, a := range plan.Actions {
+					codes = append(codes, a.Code)
+				}
+				apply(t, s, choice)
+				covered := map[string]bool{}
+				for _, w := range r.g.Writes() {
+					ok := false
+					for _, c := range codes {
+						if m := writeMatchers[c]; m != nil && m.MatchString(w) {
+							ok, covered[c] = true, true
+						}
+					}
+					if !ok {
+						t.Errorf("write %q is not in the plan %v", w, codes)
+					}
+				}
+				for _, c := range codes {
+					if writeMatchers[c] != nil && !covered[c] {
+						t.Errorf("plan promised %s but nothing was written (%v)", c, r.g.Writes())
+					}
+				}
+			})
+		}
 	}
 }

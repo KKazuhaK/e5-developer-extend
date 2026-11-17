@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -549,4 +550,155 @@ func TestAppSetupCancelSaysWhichSecretStaysLive(t *testing.T) {
 	if strings.Contains(c.Error, r.g.Secrets[0]) {
 		t.Error("the secret is in the error")
 	}
+}
+
+func TestAppSetupAddRacingCancelNeverLeavesAnAccountWithoutItsSecret(t *testing.T) {
+	for i := 0; i < 8; i++ {
+		r := newSetupRig(t)
+		id, res := appOnlyDone(t, r)
+		acc := NewAccountService(r.b)
+		in := AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: res.TenantID, ClientID: res.ClientID,
+			Username: "user@contoso.example", Categories: []string{"user"}, SecretExpires: res.SecretExpires, UseStoredSecret: true}
+		var addErr error
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() { defer wg.Done(); addErr = acc.Add(in) }()
+		go func() { defer wg.Done(); r.svc.Cancel(id) }()
+		wg.Wait()
+		cfg, _, _ := r.b.Ops.LoadConfigOrDefault()
+		_, saved := cfg.Find("app1")
+		v, err := r.b.Ops.OpenVault(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		has, _ := v.Has(vault.SecretKey("app1"))
+		switch {
+		case saved && (!has || liveSecrets(r) != 1):
+			t.Fatalf("round %d: account saved without its secret (vault %v, %d live, add err %v)", i, has, liveSecrets(r), addErr)
+		case !saved && (has || liveSecrets(r) != 0):
+			t.Fatalf("round %d: no account but a secret remains (vault %v, %d live)", i, has, liveSecrets(r))
+		case !saved && addErr == nil:
+			t.Fatalf("round %d: Add reported success for nothing", i)
+		}
+	}
+}
+
+func TestAppSetupCancelRightAfterApplyStillUndoesTheSecret(t *testing.T) {
+	r := newSetupRig(t)
+	// The context dies between Apply's return and the result (only the context, not Cancel).
+	r.b.afterApply = func(sess *setupSession) { sess.cancel() }
+	id := r.id()
+	if err := r.svc.Begin(id, AppSetupStart{Name: "app1", AppOnly: true, Username: "user@contoso.example"}); err != nil {
+		t.Fatal(err)
+	}
+	r.wait(id, "plan")
+	if err := r.svc.Apply(id, AppSetupChoice{}); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+	if liveSecrets(r) != 0 {
+		t.Error("the secret is still live in Entra")
+	}
+	cfg, _, _ := r.b.Ops.LoadConfigOrDefault()
+	v, _ := r.b.Ops.OpenVault(cfg)
+	if has, _ := v.Has(vault.SecretKey("app1")); has {
+		t.Error("the secret is still in the vault")
+	}
+}
+
+func TestAppSetupBackendCloseUndoesUnusedSecrets(t *testing.T) {
+	r := newSetupRig(t)
+	appOnlyDone(t, r)
+	r.b.Close()
+	if liveSecrets(r) != 0 {
+		t.Error("the secret is still live after Close")
+	}
+	r.b.mu.Lock()
+	n := len(r.b.setups)
+	r.b.mu.Unlock()
+	if n != 0 {
+		t.Errorf("%d sessions left", n)
+	}
+}
+
+func TestAppSetupIdleSessionsExpire(t *testing.T) {
+	r := newSetupRig(t)
+	clock := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	var mu sync.Mutex
+	r.b.Now = func() time.Time { mu.Lock(); defer mu.Unlock(); return clock }
+	advance := func(d time.Duration) { mu.Lock(); clock = clock.Add(d); mu.Unlock() }
+
+	// A plan nobody answers.
+	id := r.id()
+	if err := r.svc.Begin(id, AppSetupStart{Name: "new1", Auth: config.AuthDeviceCode}); err != nil {
+		t.Fatal(err)
+	}
+	r.wait(id, "plan")
+	advance(20 * time.Minute)
+	r.b.expireSetups()
+	if r.b.setups[id] == nil || r.b.setups[id].ctx.Err() != nil {
+		t.Fatal("expired too early")
+	}
+	// Using it keeps it alive.
+	if _, err := r.svc.Preview(id, AppSetupChoice{}); err != nil {
+		t.Fatal(err)
+	}
+	advance(20 * time.Minute)
+	r.b.expireSetups()
+	if r.b.setups[id] == nil || r.b.setups[id].ctx.Err() != nil {
+		t.Fatal("activity did not extend the session")
+	}
+	advance(11 * time.Minute)
+	r.b.expireSetups()
+	if ev := last(r.wait(id, "error")); ev.Code != "cancelled" {
+		t.Fatalf("event: %+v", ev)
+	}
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+
+	// A result nobody used: the secret goes.
+	id2, _ := appOnlyDone(t, r)
+	advance(31 * time.Minute)
+	r.b.expireSetups()
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+	if liveSecrets(r) != 0 {
+		t.Errorf("session %s: the secret is still live", id2)
+	}
+}
+
+func TestAppSetupRefusesAnIdInUse(t *testing.T) {
+	r := newSetupRig(t)
+	id := r.id()
+	if err := r.svc.Begin(id, AppSetupStart{Name: "new1", Auth: config.AuthDeviceCode}); err != nil {
+		t.Fatal(err)
+	}
+	r.wait(id, "plan")
+	if err := r.svc.Begin(id, AppSetupStart{Name: "new2", Auth: config.AuthDeviceCode}); err == nil || !strings.Contains(err.Error(), "in use") {
+		t.Fatalf("err = %v", err)
+	}
+	r.svc.Cancel(id)
+}
+
+func TestAppSetupCancelDuringPreviewIsRaceFree(t *testing.T) {
+	r := newSetupRig(t)
+	r.g.AddApp(map[string]any{"displayName": "e5renew"})
+	id := r.id()
+	if err := r.svc.Begin(id, AppSetupStart{Name: "new1", Auth: config.AuthDeviceCode}); err != nil {
+		t.Fatal(err)
+	}
+	plan := last(r.wait(id, "plan")).Plan
+	choice := AppSetupChoice{Adopt: plan.Candidates[0].ClientID, Rename: true}
+	var wg sync.WaitGroup
+	for i := 0; i < 6; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 5; j++ {
+				_, _ = r.svc.Preview(id, choice)
+			}
+		}()
+	}
+	time.Sleep(3 * time.Millisecond)
+	r.svc.Cancel(id)
+	wg.Wait()
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
 }

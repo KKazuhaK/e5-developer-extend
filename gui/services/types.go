@@ -66,8 +66,9 @@ type AppSetupApp struct {
 }
 
 // AppSetupAction is one thing the setup will do. Code is stable (create_app,
-// adopt_or_create, update_app, create_service_principal, grant_consent,
-// assign_roles, create_secret); Text is English.
+// adopt_or_create, adopt_app, rename_app, set_notes, add_tags, add_redirect_uri,
+// set_public_client, add_permissions, update_app, create_service_principal,
+// grant_consent, assign_roles, create_secret); Text is English.
 type AppSetupAction struct {
 	Code string `json:"code"`
 	Text string `json:"text"`

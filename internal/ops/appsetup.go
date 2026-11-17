@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/appsetup"
@@ -42,6 +43,24 @@ type AppSetupSession struct {
 	setup  *appsetup.Setup
 	admin  string
 	tenant string
+
+	// mu guards the administrator's token: operations hold it shared while
+	// they use it, Close takes it exclusively before dropping the token.
+	mu     sync.RWMutex
+	closed bool
+}
+
+var errSessionClosed = errors.New("the app setup session is closed")
+
+// enter marks the start of an operation that uses the token; call the
+// returned function when it ends.
+func (s *AppSetupSession) enter() (func(), error) {
+	s.mu.RLock()
+	if s.closed {
+		s.mu.RUnlock()
+		return nil, errSessionClosed
+	}
+	return s.mu.RUnlock, nil
 }
 
 // Admin is the sign-in name of the administrator, for the user to confirm.
@@ -50,8 +69,12 @@ func (s *AppSetupSession) Admin() string { return s.admin }
 // TenantID is the tenant the administrator signed in to.
 func (s *AppSetupSession) TenantID() string { return s.tenant }
 
-// Close drops the administrator's token.
+// Close drops the administrator's token. It waits for operations in flight
+// (they are short once their context is cancelled); later ones fail.
 func (s *AppSetupSession) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.closed = true
 	if s.setup != nil {
 		s.setup.Token = ""
 	}
@@ -201,6 +224,11 @@ func (s *AppSetupSession) storeSecret(secret string) error {
 // identity it also fails early when the account's vault entry must not be
 // overwritten (see checkSecretTarget).
 func (s *AppSetupSession) Plan(ctx context.Context) (*appsetup.Plan, error) {
+	done, err := s.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	p, err := s.setup.Plan(ctx)
 	if err != nil || !s.opts.AppOnly {
 		return p, err
@@ -214,6 +242,11 @@ func (s *AppSetupSession) Plan(ctx context.Context) (*appsetup.Plan, error) {
 // PlanFor previews the actions of a choice the user has not confirmed yet
 // (see appsetup.Setup.PlanFor); it changes nothing.
 func (s *AppSetupSession) PlanFor(ctx context.Context, choice appsetup.Choice) (*appsetup.Plan, error) {
+	done, err := s.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	return s.setup.PlanFor(ctx, &choice)
 }
 
@@ -247,6 +280,15 @@ func (s *AppSetupSession) checkPlanTarget(p *appsetup.Plan) error {
 // caller that could not use it (e.g. adding the account failed). If Entra
 // cannot be reached the error says which secret is still live there.
 func (s *AppSetupSession) RevokeSecret(ctx context.Context, res *appsetup.Result) error {
+	done, err := s.enter()
+	if err != nil {
+		return err
+	}
+	defer done()
+	return s.revokeSecret(ctx, res)
+}
+
+func (s *AppSetupSession) revokeSecret(ctx context.Context, res *appsetup.Result) error {
 	if res == nil || res.SecretKeyID == "" {
 		return nil
 	}
@@ -262,6 +304,22 @@ func (s *AppSetupSession) DiscardSecret(ctx context.Context, res *appsetup.Resul
 	if res == nil || res.SecretKeyID == "" || !s.opts.AppOnly {
 		return false, nil
 	}
+	done, err := s.enter()
+	if err != nil {
+		return false, err
+	}
+	defer done()
+	// Whatever the caller's context says, this must run to its end. Holding
+	// the config lock makes it atomic with AddAccount: either the account is
+	// saved first (and keeps its secret) or the secret is gone first (and
+	// AddAccount refuses for want of a stored secret).
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 90*time.Second)
+	defer cancel()
+	unlock, err := s.o.LockConfig(ctx)
+	if err != nil {
+		return false, err
+	}
+	defer unlock()
 	cfg, _, err := s.o.LoadConfigOrDefault()
 	if err != nil {
 		return false, err
@@ -269,7 +327,7 @@ func (s *AppSetupSession) DiscardSecret(ctx context.Context, res *appsetup.Resul
 	if _, exists := cfg.Find(s.opts.Account); exists {
 		return false, nil
 	}
-	revokeErr := s.RevokeSecret(ctx, res)
+	revokeErr := s.revokeSecret(ctx, res)
 	var vaultErr error
 	if v, err := s.o.OpenVault(cfg); err != nil {
 		vaultErr = err
@@ -284,6 +342,11 @@ func (s *AppSetupSession) DiscardSecret(ctx context.Context, res *appsetup.Resul
 // vault under the account's name; if that account already exists its
 // secret_expires is updated.
 func (s *AppSetupSession) Apply(ctx context.Context, choice appsetup.Choice) (*appsetup.Result, error) {
+	done, err := s.enter()
+	if err != nil {
+		return nil, err
+	}
+	defer done()
 	res, err := s.setup.Apply(ctx, choice)
 	if err != nil {
 		return nil, err

@@ -47,13 +47,23 @@ type Backend struct {
 	// CancelHandover withdraws a handover request and tells the tray to take the engine back.
 	CancelHandover func()
 
-	mu       sync.Mutex
-	logins   map[string]context.CancelFunc
-	setups   map[string]*setupSession
-	runBusy  bool
-	busy     int // install, uninstall and similar jobs in progress
-	bgCtx    context.Context
-	bgCancel context.CancelFunc
+	// Now is the clock of the app setup idle expiry; nil means time.Now.
+	Now func() time.Time
+	// SetupIdle is how long an app setup may wait for the user (default 30 minutes).
+	SetupIdle time.Duration
+
+	// afterApply is a test hook: it runs right after Apply returned.
+	afterApply func(*setupSession)
+
+	mu         sync.Mutex
+	setupWG    sync.WaitGroup
+	reaperOnce sync.Once
+	logins     map[string]context.CancelFunc
+	setups     map[string]*setupSession
+	runBusy    bool
+	busy       int // install, uninstall and similar jobs in progress
+	bgCtx      context.Context
+	bgCancel   context.CancelFunc
 }
 
 // NewBackend fills in the pieces of b that are left nil and returns it.
@@ -105,5 +115,15 @@ func (b *Backend) WaitIdle(timeout time.Duration) bool {
 	return true
 }
 
-// Close cancels background work (sign-ins in progress).
-func (b *Backend) Close() { b.bgCancel() }
+// Close cancels background work (sign-ins in progress) and ends the app setup
+// sessions: each deletes an unused client secret and drops the administrator's
+// token. It waits for that, for at most two minutes.
+func (b *Backend) Close() {
+	b.bgCancel()
+	done := make(chan struct{})
+	go func() { b.setupWG.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Minute):
+	}
+}
