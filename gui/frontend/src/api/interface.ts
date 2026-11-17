@@ -1,5 +1,5 @@
 import type {
-  AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
+  APIStat, AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
   RecommendResult, SubscriptionRefresh, TenantSubscriptions, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
 } from "./types";
 
@@ -62,6 +62,8 @@ export interface Api {
   };
   logs: {
     read(account: string, sinceHours: number, limit: number): Promise<LogEntry[]>;
+    /** Per-API call counters of one account ("" adds up all accounts); only APIs that were called. */
+    apiStats(account: string): Promise<APIStat[]>;
   };
   settings: {
     get(): Promise<Settings>;

@@ -8,7 +8,8 @@ package catalog
 var RecommendedDelegated = []string{
 	"User.Read", "User.ReadBasic.All", "Organization.Read.All", "GroupMember.Read.All", "Mail.ReadBasic",
 	"MailboxSettings.Read", "Calendars.ReadBasic", "Contacts.Read", "Files.Read",
-	"Sites.Read.All", "Notes.Read", "Tasks.Read", "Team.ReadBasic.All", "offline_access",
+	"Sites.Read.All", "Notes.Read", "Tasks.Read", "Team.ReadBasic.All", "People.Read", "Presence.Read",
+	"Bookings.Read.All", "offline_access",
 }
 
 // RecommendedApplication is the set of Microsoft Graph application permissions
@@ -17,7 +18,7 @@ var RecommendedDelegated = []string{
 var RecommendedApplication = []string{
 	"User.Read.All", "Organization.Read.All", "Group.Read.All", "Mail.ReadBasic.All",
 	"MailboxSettings.Read", "Calendars.Read", "Contacts.Read", "Files.Read.All",
-	"Sites.Read.All", "Tasks.Read.All", "Team.ReadBasic.All",
+	"Sites.Read.All", "Tasks.Read.All", "Team.ReadBasic.All", "Presence.Read.All", "Bookings.Read.All",
 }
 
 // SubscriptionPermission is what the subscription expiry check needs to read

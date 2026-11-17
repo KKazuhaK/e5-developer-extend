@@ -5,7 +5,7 @@
 import type { Api } from "./interface";
 import { doctorMessage } from "@/lib/doctor";
 import type {
-  AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
+  AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, APIStat, LoginEvent, RunDone, ServiceInfo,
   ChannelInput, ChannelType, ChannelView, ChannelTest, MessagePreview, EmailPreset, SecretStatus,
   Settings, Snapshot, SubscriptionView, TenantSubscriptions, ValidationError,
 } from "./types";
@@ -214,6 +214,10 @@ const CATALOG: { id: string; category: string; name: string; scopes: string[] }[
   { id: "notes.books", category: "notes", name: "OneNote 笔记本", scopes: ["Notes.Read"] },
   { id: "reports.mail", category: "reports", name: "邮件活动报告", scopes: ["Reports.Read.All"] },
   { id: "apps.list", category: "apps", name: "应用注册", scopes: ["Application.Read.All"] },
+  { id: "insights.trending", category: "insights", name: "热门文档", scopes: ["Sites.Read.All"] },
+  { id: "people.list", category: "people", name: "相关人员", scopes: ["People.Read"] },
+  { id: "presence.me", category: "presence", name: "在线状态", scopes: ["Presence.Read"] },
+  { id: "bookings.businesses", category: "bookings", name: "Bookings 业务", scopes: ["Bookings.Read.All"] },
 ];
 const categories = () => [...new Set(CATALOG.map((c) => c.category))];
 
@@ -418,7 +422,7 @@ function mockProgress(plan: AppSetupPlan, actions: AppSetupAction[], account: st
 let settings: Settings = {
   schedule: {
     intervalMin: "20m", intervalMax: "45m", apisPerRoundMin: 3, apisPerRoundMax: 6, randomOrder: true,
-    workDays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], workStart: "00:00", workEnd: "23:59",
+    workDays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], workStart: "00:00", workEnd: "00:00",
     periodStart: "", periodEnd: day(300),
   },
   network: { proxy: "" },
@@ -825,6 +829,22 @@ export const mockApi: Api = {
         .filter((l) => (!account || l.account === account) && Date.parse(l.ts) >= since)
         .slice(-limit)
         .reverse();
+    },
+    async apiStats(account) {
+      await lag();
+      tick();
+      const m = new Map<string, APIStat>();
+      for (const l of logs) {
+        if (!l.api || l.api === "users.pick" || (account && l.account !== account)) continue;
+        const c = CATALOG.find((x) => x.id === l.api);
+        const st = m.get(l.api) ?? { id: l.api, category: c?.category ?? "", name: c?.name ?? l.api, ok: 0, failed: 0, total: 0, lastClass: "", lastStatus: 0, lastAt: null };
+        if (l.class === "ok") st.ok++;
+        else st.failed++;
+        st.total++;
+        if (!st.lastAt || Date.parse(l.ts) >= Date.parse(st.lastAt)) Object.assign(st, { lastClass: l.class, lastStatus: l.status, lastAt: l.ts });
+        m.set(l.api, st);
+      }
+      return [...m.values()];
     },
   },
   settings: {

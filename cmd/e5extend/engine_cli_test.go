@@ -171,6 +171,17 @@ func TestRunNowSuccessAndLogs(t *testing.T) {
 		t.Errorf("--since:\n%s", out)
 	}
 
+	out = e.mustRun("", "stats", "main")
+	if !strings.Contains(out, "CATEGORY") || !strings.Contains(out, "FAILED") || !strings.Contains(out, "ok (200)") {
+		t.Errorf("stats:\n%s", out)
+	}
+	if out := e.mustRun("", "stats"); !strings.Contains(out, "ok (200)") {
+		t.Errorf("stats of all accounts:\n%s", out)
+	}
+	if _, _, err := e.run("", "stats", "nobody"); err == nil {
+		t.Error("stats of an unknown account succeeded")
+	}
+
 	out = e.mustRun("", "status")
 	if !strings.Contains(out, "main") || !strings.Contains(out, " ok ") {
 		t.Errorf("status:\n%s", out)

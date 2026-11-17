@@ -8,6 +8,7 @@ import { useI18n, type DictKey } from "@/i18n";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { ApiStats } from "./ApiStats";
 import { EmptyBlock, ErrorBlock, LoadingBlock, PageHeader, Spinner } from "@/components/common";
 import { formatLatency, formatLogTime } from "@/lib/time";
 import { isFailedLog } from "@/lib/status";
@@ -23,6 +24,7 @@ export function Logs() {
   const [account, setAccount] = useState(ALL);
   const [hours, setHours] = useState(24);
   const [auto, setAuto] = useState(true);
+  const [tab, setTab] = useState<"calls" | "stats">("calls");
   const [rows, setRows] = useState<LogEntry[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -73,6 +75,23 @@ export function Logs() {
   return (
     <>
       <PageHeader title={t("nav.logs")} description={t("logs.desc")} />
+      <div role="tablist" aria-label={t("nav.logs")} className="mb-3 flex gap-1 border-b">
+        {(["calls", "stats"] as const).map((k) => (
+          <button
+            key={k}
+            type="button"
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => setTab(k)}
+            className={cn(
+              "-mb-px cursor-pointer border-b-2 px-3 py-1.5 text-[13px] font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              tab === k ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground",
+            )}
+          >
+            {t(k === "calls" ? "logs.tabCalls" : "logs.tabStats")}
+          </button>
+        ))}
+      </div>
       <div className="mb-3 flex flex-wrap items-center gap-3">
         <div className="w-44">
           <Select value={account} onValueChange={setAccount}>
@@ -83,26 +102,30 @@ export function Logs() {
             </SelectContent>
           </Select>
         </div>
-        <div className="w-40">
+        {tab === "calls" && <div className="w-40">
           <Select value={String(hours)} onValueChange={(v) => setHours(Number(v))}>
             <SelectTrigger aria-label={t("logs.range")}><SelectValue /></SelectTrigger>
             <SelectContent>
               {RANGES.map(([h, k]) => <SelectItem key={h} value={String(h)}>{t(k)}</SelectItem>)}
             </SelectContent>
           </Select>
-        </div>
+        </div>}
         <label className="ml-auto flex cursor-pointer items-center gap-2 text-[13px]">
           <Switch checked={auto} onCheckedChange={setAuto} aria-label={t("logs.auto")} />
           {t("logs.auto")}
         </label>
-        <Button variant="outline" size="sm" onClick={() => void load()} disabled={fetching}>
-          {fetching ? <Spinner /> : <RefreshCw />} {t("common.refresh")}
-        </Button>
+        {tab === "calls" && (
+          <Button variant="outline" size="sm" onClick={() => void load()} disabled={fetching}>
+            {fetching ? <Spinner /> : <RefreshCw />} {t("common.refresh")}
+          </Button>
+        )}
       </div>
 
-      {error && <ErrorBlock className="mb-3" message={error} onRetry={() => void load()} />}
+      {tab === "stats" && <ApiStats account={account === ALL ? "" : account} auto={auto} />}
 
-      {!rows ? (
+      {tab === "calls" && error && <ErrorBlock className="mb-3" message={error} onRetry={() => void load()} />}
+
+      {tab !== "calls" ? null : !rows ? (
         error ? null : <LoadingBlock rows={4} />
       ) : rows.length === 0 ? (
         <EmptyBlock icon={<ScrollText />} title={t("logs.empty")} hint={t("logs.emptyHint")} />

@@ -111,6 +111,18 @@ export interface LogEntry {
   event?: string;
   detail?: string;
 }
+/** Calls of one API: of one account, or added up over all accounts. */
+export interface APIStat {
+  id: string;
+  category: string;
+  name: string;
+  ok: number;
+  failed: number;
+  total: number;
+  lastClass: string;
+  lastStatus: number;
+  lastAt: string | null;
+}
 export interface Settings {
   schedule: {
     intervalMin: string;
@@ -257,7 +269,7 @@ export type AdviceStatus = "recommended" | "unavailable" | "maybe";
 export interface CategoryAdvice {
   category: string;
   status: AdviceStatus;
-  /** "", or a code: no_mailbox, no_onedrive, no_teams_license, no_sharepoint, needs_admin_role, not_supported, probe_failed, probe_arbitrary_user, missing_permission:<scopes> */
+  /** "", or a code: no_mailbox, no_onedrive, no_teams_license, no_sharepoint, needs_admin_role, optional, not_supported, probe_failed, probe_arbitrary_user, missing_permission:<scopes> */
   reason: string;
   /** True when the category runs for an account without a categories setting (catalog default). */
   default: boolean;

@@ -151,6 +151,10 @@ func TestFullE5User(t *testing.T) {
 			if c.Status != Maybe || c.Reason != ReasonNeedsAdminRole {
 				t.Errorf("reports = %+v", c)
 			}
+		case "bookings":
+			if c.Status != Maybe || c.Reason != ReasonOptional {
+				t.Errorf("bookings = %+v", c)
+			}
 		default:
 			if c.Status != Recommended || c.Reason != "" {
 				t.Errorf("%s = %+v, want recommended", c.Category, c)
@@ -158,12 +162,31 @@ func TestFullE5User(t *testing.T) {
 		}
 	}
 	rec := r.Recommended()
-	if len(rec) != len(r.Categories)-1 {
+	if len(rec) != len(r.Categories)-2 {
 		t.Errorf("recommended %v of %d", rec, len(r.Categories))
 	}
 	if !r.Delegated || r.Account != "a" {
 		t.Errorf("header %+v", r)
 	}
+}
+
+// people needs a mailbox, insights (trending documents) needs OneDrive and
+// SharePoint, presence needs Teams.
+func TestNewCategoriesFollowTheirService(t *testing.T) {
+	run := func(missing map[string]int) (*fake, Recommendation) {
+		f := newFake(t, missing)
+		return f, Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
+	}
+	f, r := run(map[string]int{"/me/mailboxSettings": 404})
+	expect(t, f, r, "people", Unavailable, ReasonNoMailbox)
+	expect(t, f, r, "insights", Recommended, "")
+	expect(t, f, r, "presence", Recommended, "")
+	f, r = run(map[string]int{"/me/drive": 404})
+	expect(t, f, r, "insights", Unavailable, ReasonNoOneDrive)
+	expect(t, f, r, "people", Recommended, "")
+	f, r = run(map[string]int{"/me/joinedTeams": 404})
+	expect(t, f, r, "presence", Unavailable, ReasonNoTeams)
+	expect(t, f, r, "insights", Recommended, "")
 }
 
 func TestNoMailbox(t *testing.T) {
@@ -368,7 +391,7 @@ func TestDefaultFlagFollowsTheCatalog(t *testing.T) {
 	f := newFake(t, nil)
 	r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
 	for _, c := range r.Categories {
-		if want := c.Category != "reports"; c.Default != want {
+		if want := c.Category != "reports" && c.Category != "bookings"; c.Default != want {
 			t.Errorf("%s default = %v", c.Category, c.Default)
 		}
 	}
