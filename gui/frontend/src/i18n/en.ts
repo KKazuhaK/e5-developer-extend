@@ -924,6 +924,7 @@ export const en: Dict = {
   "dx.state.autoResume": "it is tried again automatically in {dur}",
   "dx.apis.manyRefused": "mail and OneDrive calls were refused (403/404) and none has succeeded yet",
   "dx.apis.firstSignIn": "if this account is new, sign in once at https://www.office.com (and open Outlook and OneDrive) with it so Microsoft provisions the mailbox and OneDrive; this can take up to 24 hours",
+  "dx.apis.firstSignInApp": "the user this app identity reads may have no mailbox or OneDrive license; if that is not intended, assign one and have the user sign in once at https://www.office.com",
   "dx.apis.paused": "{count} APIs paused for 24 h (the account was refused: 403 or 404)",
   "dx.state.needsAttention": "needs attention: {reason}",
   "dx.state.ok": "ok",

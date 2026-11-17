@@ -9,6 +9,7 @@
   "apis.failingNoSharePoint",
   "apis.failingNoTeams",
   "apis.firstSignIn",
+  "apis.firstSignInApp",
   "apis.logUnreadable",
   "apis.manyRefused",
   "apis.ok",

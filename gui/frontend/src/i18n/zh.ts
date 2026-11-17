@@ -923,6 +923,7 @@ export const zh = {
   "dx.state.autoResume": "将在 {dur}后自动再试",
   "dx.apis.manyRefused": "邮件和 OneDrive 的调用被拒绝（403/404），至今没有成功过",
   "dx.apis.firstSignIn": "如果这是新账号，请先用它在 https://www.office.com 登录一次（并打开 Outlook 和 OneDrive），让微软开通邮箱和 OneDrive；最长可能需要 24 小时",
+  "dx.apis.firstSignInApp": "这个应用身份读取的用户可能没有邮箱或 OneDrive 许可；如果不是有意如此，请分配许可并让该用户在 https://www.office.com 登录一次",
   "dx.apis.paused": "{count} 个 API 暂停 24 小时（该账号被拒绝：403 或 404）",
   "dx.state.needsAttention": "需要处理：{reason}",
   "dx.state.ok": "正常",

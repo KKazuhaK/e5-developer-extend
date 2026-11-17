@@ -185,7 +185,7 @@ func throttledFixture(t *testing.T, n int, retry string) *fixture {
 	t.Helper()
 	f := newFixture(t, delegatedAcct("main"))
 	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 3, 3
-	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks
+	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks, planner.plans
 	left := n
 	var mu sync.Mutex
 	f.h.setStatus(func(p string) (int, map[string]string) {

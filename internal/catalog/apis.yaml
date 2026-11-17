@@ -278,7 +278,7 @@
     app: [Sites.Read.All]
   default: true
 
-# No application path: followed sites belong to a signed-in user.
+# No application path: followed sites belong to a signed-in user (backed by OneDrive for Business).
 - id: sites.followed
   category: sites
   name: Followed sites
@@ -326,14 +326,13 @@
     app: [Tasks.Read.All]
   default: true
 
+# No application path: listing a user's plans is not supported with app-only access.
 - id: planner.plans
   category: tasks
   name: Planner plans
   delegated: /me/planner/plans
-  app: /users/{user}/planner/plans
   scopes:
     delegated: [Tasks.Read, Group.Read.All]
-    app: [Tasks.Read.All]
   default: true
 
 - id: teams.joined

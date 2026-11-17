@@ -863,7 +863,8 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 	// A brand-new mailbox or OneDrive answers 403/404 until the person has
 	// signed in to office.com once: the account never got a mail or files
 	// call through, but was refused some.
-	mailFilesOK, mailFilesRefused := false, false
+	// Mail and OneDrive are judged separately.
+	cameThrough, refusedSince := map[string]bool{}, map[string]time.Time{}
 	for _, e := range entries {
 		cat, known := category[e.API]
 		if !callstat.IsCall(e) || !known {
@@ -871,9 +872,11 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 		}
 		if cat == "mail" || cat == "files" {
 			if callstat.IsUnavailable(e.Class) {
-				mailFilesRefused = true
+				if t, ok := refusedSince[cat]; !ok || e.TS.Before(t) {
+					refusedSince[cat] = e.TS
+				}
 			} else if e.Status >= 200 && e.Status < 300 {
-				mailFilesOK = true
+				cameThrough[cat] = true
 			}
 		}
 		missing := callstat.IsMissing(e.Class, e.Status)
@@ -893,8 +896,13 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 	enabled := callstat.EnabledCategories(apis, acct.Categories)
 	// APIs the account was refused (403/404) are left out for 24 hours.
 	var paused []Msg
-	pausedN := 0
+	pausedN, pausedMailFiles := 0, 0
 	if as != nil {
+		for id, until := range as.APISkipUntil {
+			if until.After(d.now()) && (category[id] == "mail" || category[id] == "files") {
+				pausedMailFiles++
+			}
+		}
 		if n := callstat.PausedAPIs(as.APISkipUntil, d.now()); n > 0 {
 			pausedN = n
 			paused = append(paused, M("apis.paused", "count", itoa(n)))
@@ -903,7 +911,15 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 	var parts []Msg
 	// Hint at the first sign-in when the account keeps being refused and has
 	// never had a mail or OneDrive call succeed.
-	firstSignIn := mailFilesRefused && !mailFilesOK && (enabled["mail"] || enabled["files"])
+	firstSignIn, persistent := false, false
+	for _, cat := range []string{"mail", "files"} {
+		since, refused := refusedSince[cat]
+		if refused && !cameThrough[cat] && enabled[cat] {
+			firstSignIn = true
+			// Refused for over a week without one success: probably intentional.
+			persistent = persistent || d.now().Sub(since) > persistentRefusal
+		}
+	}
 	for _, cat := range order {
 		if !enabled[strings.ToLower(cat)] {
 			continue
@@ -920,8 +936,10 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 			parts = append(parts, M(missingCode(cat), "category", cat))
 		}
 	}
-	if firstSignIn && len(parts) == 0 && pausedN >= manyPausedAPIs {
+	manyRefused := false
+	if firstSignIn && len(parts) == 0 && pausedMailFiles >= manyPausedAPIs && pausedMailFiles*2 > pausedN {
 		parts = append(parts, M("apis.manyRefused"))
+		manyRefused = true
 	}
 	if len(parts) == 0 {
 		c.Level = OK
@@ -929,9 +947,16 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 		return c
 	}
 	if firstSignIn {
-		paused = append(paused, M("apis.firstSignIn"))
+		code := "apis.firstSignIn"
+		if !acct.Delegated() {
+			code = "apis.firstSignInApp" // no one signs in for an app identity
+		}
+		paused = append(paused, M(code))
 	}
 	c.Level = Warn
+	if manyRefused && persistent {
+		c.Level = OK // an information line: likely no mailbox on purpose
+	}
 	c.setDetail(append(parts, paused...)...)
 	c.setFix(M("fix.recommend", "account", acct.Name))
 	return c

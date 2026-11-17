@@ -176,7 +176,7 @@
    - `Network`：本轮立即停止，**不算失败**，按网络问题处理（同第 1 步）。
 6. 一轮结束：
    - 至少一次成功：`last_success = now`，`consecutive_failed_rounds = 0`。
-   - 有调用但全部失败（不含网络问题）：`consecutive_failed_rounds++`。达到 3 时自动暂停：状态 `paused`，原因写最近的失败类别。`schedule.auto_pause = false` 时只计数、不暂停（也就没有探测），`failure_spike` / `all_failing` 告警照常。
+   - 有调用但全部失败（不含网络问题）：`consecutive_failed_rounds++`。达到 3 时自动暂停：状态 `paused`，原因写最近的失败类别。`schedule.auto_pause = false` 时只计数、不暂停（也就没有探测），`failure_spike` / `all_failing` 告警照常；开关关闭时 tick 会把已有的自动暂停（`state.json` 里的 `paused`，不含配置里的手动暂停）恢复成 `ok` 并清掉探测计划，所以重载配置和重启后都生效。`resume` 对状态为 `ok` 的账号也会清空 `api_skip_until`。
    - 计算 `next_run`，保存状态。
 7. 整轮包在 `recover` 里：panic 记录日志（带堆栈），本轮算失败，下一轮照常。
 

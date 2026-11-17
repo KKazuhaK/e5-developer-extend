@@ -55,6 +55,9 @@ const (
 	// manyPausedAPIs is how many APIs held back for 24 h make an account that
 	// never reached its mailbox or OneDrive look like a first sign-in is missing.
 	manyPausedAPIs = 3
+	// persistentRefusal is how long mail or OneDrive may be refused with no success
+	// before the first sign-in hint is only information (probably no mailbox on purpose).
+	persistentRefusal = 7 * 24 * time.Hour
 )
 
 // Check is one result. Detail and Fix are English text, for the CLI. The

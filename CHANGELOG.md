@@ -22,8 +22,8 @@
 - 桌面版概览页新增红色描边的“续期失败？”按钮，打开检查清单（旧版沙盒订阅退役、开发者控制面板、订阅卡片、健康检查、没有保证），清单也写进了 [常见问题](docs/user/faq.md)。
 
 - 新账号提示：新建的用户或租户在第一次登录 office.com 之前，邮箱和 OneDrive 常常返回 403 / 404。`doctor` 的 `account.<名称>.apis` 在邮件或 OneDrive 一直被拒绝、从没成功过时提示“先用这个账号登录一次 https://www.office.com，并打开 Outlook 和 OneDrive，最长可能要 24 小时”；桌面版账号向导的测试页和常见问题里也有说明。
-- 新增 `schedule.auto_pause`（默认 `true`）：设为 `false` 后，连续失败的账号不再被自动暂停（也就没有探测），`failure_spike`、`all_failing` 告警照常发送。桌面版“设置 → 高级设置 → 调用节奏”里有开关。
-- API 目录新增只读接口：Planner 计划（`/me/planner/plans`，`Tasks.Read` / `Group.Read.All`；应用身份 `Tasks.Read.All`）和已关注的站点（`/me/followedSites`，`Sites.Read.All`，只有委托身份）。
+- 新增 `schedule.auto_pause`（默认 `true`）：设为 `false` 后，连续失败的账号不再被自动暂停（也就没有探测），`failure_spike`、`all_failing` 告警照常发送。桌面版“设置 → 高级设置 → 调用节奏”里有开关。关闭后，已经被自动暂停的账号会在配置重新加载（或服务重启）后自动恢复并停止探测，手动暂停的不受影响。`account resume` 现在在账号正常运行时也会清除 24 小时的接口暂停。
+- API 目录新增只读接口：Planner 计划（`/me/planner/plans`，`Tasks.Read` / `Group.Read.All`，只有委托身份）和已关注的站点（`/me/followedSites`，`Sites.Read.All`，只有委托身份）。
 
 ### 变更
 

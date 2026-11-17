@@ -59,7 +59,7 @@
 | notes | onenote.sections | `/me/onenote/sections?$top=10`⁵ | Notes.Create, Notes.Read, Notes.Read.All | — | — |
 | tasks | todo.lists | `/me/todo/lists` | Tasks.Read, Tasks.ReadWrite | `/users/{user}/todo/lists` | Tasks.Read.All, Tasks.ReadWrite.All |
 | tasks | planner.tasks | `/me/planner/tasks` | Tasks.Read, Group.Read.All | `/users/{user}/planner/tasks` | Tasks.Read.All |
-| tasks | planner.plans | `/me/planner/plans` | Tasks.Read, Group.Read.All | `/users/{user}/planner/plans` | Tasks.Read.All |
+| tasks | planner.plans | `/me/planner/plans` | Tasks.Read, Group.Read.All | — | — |
 | teams | teams.joined | `/me/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All | `/users/{user}/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All |
 | insights | insights.trending | `/me/insights/trending?$top=10`⁸ | Sites.Read.All | — | — |
 | people | people.list | `/me/people?$top=10`⁹ | People.Read, People.Read.All | — | — |
