@@ -3,7 +3,7 @@
 // doctor details) is Chinese here, as the Go side will produce.
 import type { Api } from "./interface";
 import type {
-  AccountInput, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
+  AccountInput, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
   Settings, Snapshot, ValidationError,
 } from "./types";
 
@@ -225,6 +225,13 @@ let settings: Settings = {
   ui: { language: "auto", theme: "system", startAtLogin: false },
 };
 let service: { installed: boolean } = { installed: false };
+/** What the last mock export "wrote"; the mock import reads it back. */
+const emptyExport = { path: "", accounts: [], vaultEntries: 0, includesLogs: false, logFiles: 0, notes: [], noteCodes: [] };
+const emptyImport = {
+  mode: "default" as const, accounts: [], vaultEntries: 0, sourceOS: "", sourceVersion: "", created: "", newMasterKey: false,
+  skipped: [], notes: [], skippedCodes: [], noteCodes: [], hint: "",
+};
+let lastBackup: { passphrase: string; accounts: string[] } | null = null;
 
 function serviceInfo(): ServiceInfo {
   return {
@@ -423,6 +430,45 @@ export const mockApi: Api = {
     async testWebhook() {
       await wait(700);
       if (!settings.notify.webhookConfigured) throw new Error("还没有设置 Webhook");
+    },
+  },
+  backup: {
+    async targetHasData() {
+      await lag();
+      return accounts.length > 0;
+    },
+    async export(passphrase, withLogs, _title) {
+      await wait(600);
+      if ([...passphrase].length < 8) return { cancelled: false, summary: emptyExport, problem: { code: "short_passphrase", names: [], detail: "" } };
+      lastBackup = { passphrase, accounts: accounts.map((a) => a.input.name) };
+      return {
+        cancelled: false, problem: null,
+        summary: {
+          path: "~/e5renew-backup-20261116.e5backup", accounts: lastBackup.accounts, vaultEntries: accounts.length * 2 + 1,
+          includesLogs: withLogs, logFiles: withLogs ? 3 : 0, notes: [], noteCodes: [],
+        },
+      };
+    },
+    async import(passphrase, mode, _title) {
+      await wait(800);
+      const fail = (code: string, names: string[] = []): BackupImportResult => ({ cancelled: false, summary: emptyImport, problem: { code, names, detail: "" } });
+      if (!lastBackup) return fail("not_backup");
+      if (passphrase !== lastBackup.passphrase) return fail("wrong_passphrase");
+      const names = lastBackup.accounts;
+      if (mode === "default" && accounts.length > 0) return fail("target_has_data");
+      if (mode === "merge") {
+        const clash = names.filter((n) => accounts.some((a) => a.input.name === n));
+        if (clash.length) return fail("merge_conflict", clash);
+      }
+      return {
+        cancelled: false, problem: null,
+        summary: {
+          mode, accounts: names, vaultEntries: names.length * 2, sourceOS: "linux", sourceVersion: "0.2.0",
+          created: new Date().toISOString(), newMasterKey: false,
+          skipped: [], notes: [], hint: "",
+          skippedCodes: mode === "merge" ? [{ code: "merge_settings", args: [] }] : [], noteCodes: [],
+        },
+      };
     },
   },
   health: {

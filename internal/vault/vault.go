@@ -14,6 +14,8 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
+	"strings"
 	"sync"
 
 	"github.com/KKazuhaK/e5-renew/internal/paths"
@@ -117,6 +119,38 @@ func (v *Vault) Has(name string) (bool, error) {
 	return err == nil, err
 }
 
+// List returns the key names of every stored value, sorted. It only looks at
+// the file names, so it does not need the master key. Lock files, temporary
+// files and anything else that is not a vault entry are ignored.
+func (v *Vault) List() ([]string, error) {
+	var keys []string
+	err := filepath.WalkDir(v.dir, func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) && p == v.dir {
+				return fs.SkipAll
+			}
+			return err
+		}
+		if d.IsDir() || filepath.Ext(p) != ".bin" {
+			return nil
+		}
+		rel, err := filepath.Rel(v.dir, p)
+		if err != nil {
+			return err
+		}
+		name := strings.TrimSuffix(filepath.ToSlash(rel), ".bin")
+		if keyNameRe.MatchString(name) {
+			keys = append(keys, name)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("vault: list %s: %w", v.dir, err)
+	}
+	sort.Strings(keys)
+	return keys, nil
+}
+
 // Get returns the decrypted value stored under name.
 func (v *Vault) Get(name string) ([]byte, error) {
 	p, err := v.path(name)
@@ -147,6 +181,40 @@ func (v *Vault) Get(name string) ([]byte, error) {
 		return nil, fmt.Errorf("%w (%s)", ErrWrongKey, name)
 	}
 	return plain, nil
+}
+
+// Snapshot returns the stored, still encrypted, bytes of name and whether the
+// entry exists. It does not need the master key, so it works for entries that
+// cannot be decrypted too. Pass the result to Restore to undo a change.
+func (v *Vault) Snapshot(name string) (raw []byte, exists bool, err error) {
+	p, err := v.path(name)
+	if err != nil {
+		return nil, false, err
+	}
+	raw, err = os.ReadFile(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("vault: read %s: %w", name, err)
+	}
+	return raw, true, nil
+}
+
+// Restore puts back what Snapshot returned: the bytes as they were, or no
+// entry when there was none.
+func (v *Vault) Restore(name string, raw []byte, existed bool) error {
+	if !existed {
+		if err := v.Delete(name); err != nil && !errors.Is(err, ErrNotFound) {
+			return err
+		}
+		return nil
+	}
+	p, err := v.path(name)
+	if err != nil {
+		return err
+	}
+	return paths.WriteFileAtomic(p, raw)
 }
 
 // Put encrypts and stores value under name, replacing any previous value.

@@ -1,5 +1,5 @@
 import type {
-  AccountInput, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
+  AccountInput, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
   TestResult, ValidationError,
 } from "./types";
 
@@ -40,6 +40,14 @@ export interface Api {
     setWebhook(url: string): Promise<void>;
     clearWebhook(): Promise<void>;
     testWebhook(): Promise<void>;
+  };
+  backup: {
+    /** True when this machine already has accounts or vault data, so an import must merge or replace. */
+    targetHasData(): Promise<boolean>;
+    /** Asks for a file (system dialog, titled dialogTitle) and writes the backup there. */
+    export(passphrase: string, withLogs: boolean, dialogTitle: string): Promise<BackupExportResult>;
+    /** Asks for a backup file (system dialog) and restores it. */
+    import(passphrase: string, mode: ImportMode, dialogTitle: string): Promise<BackupImportResult>;
   };
   health: {
     doctor(offline: boolean): Promise<DoctorCheck[]>;

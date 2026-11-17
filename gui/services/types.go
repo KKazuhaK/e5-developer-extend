@@ -106,3 +106,37 @@ type TestResult struct {
 	TotalAPIs  int      `json:"totalApis"`
 	ExpiresOn  string   `json:"expiresOn"`
 }
+
+// BackupSummary and ImportSummary say what an export or import did; they hold
+// account names and counts, never a secret or the webhook address.
+type (
+	BackupSummary = ops.BackupSummary
+	ImportSummary = ops.ImportSummary
+)
+
+// BackupProblem is a refusal or failure of an export or import that the
+// interface translates. Code is one of the ops.Code* values or a code for an
+// error of the file itself (not_backup, wrong_passphrase, ...). Names are
+// account names or other items the message is about; Detail is English text
+// from the backend for the cases that carry one.
+type BackupProblem struct {
+	Code   string   `json:"code"`
+	Names  []string `json:"names"`
+	Detail string   `json:"detail"`
+}
+
+// BackupExportResult is the outcome of Export. Cancelled is true when the
+// user closed the file dialog; nothing was written then. Problem is set when
+// the export was refused; nothing was written then either.
+type BackupExportResult struct {
+	Cancelled bool           `json:"cancelled"`
+	Summary   BackupSummary  `json:"summary"`
+	Problem   *BackupProblem `json:"problem"`
+}
+
+// BackupImportResult is the outcome of Import.
+type BackupImportResult struct {
+	Cancelled bool           `json:"cancelled"`
+	Summary   ImportSummary  `json:"summary"`
+	Problem   *BackupProblem `json:"problem"`
+}

@@ -260,3 +260,79 @@ func TestFromResultDisplay(t *testing.T) {
 		t.Fatalf("%+v", tok)
 	}
 }
+
+// A writer that is not this cache (a backup import, another process) wins:
+// Export does not overwrite a value that changed since Replace read it.
+func TestVaultCacheExportYieldsToAnotherWriter(t *testing.T) {
+	ctx := context.Background()
+	hdr := cache.ExportHints{}
+	read := func(c *vaultCache) string {
+		t.Helper()
+		g := &fakeCache{}
+		if err := c.Replace(ctx, g, cache.ReplaceHints{}); err != nil {
+			t.Fatal(err)
+		}
+		return string(g.data)
+	}
+
+	t.Run("value replaced meanwhile", func(t *testing.T) {
+		store := newMem()
+		store.m["tokencache/main"] = []byte("old")
+		c := newVaultCache(store, "main")
+		if read(c) != "old" {
+			t.Fatal("did not read the stored value")
+		}
+		store.m["tokencache/main"] = []byte("imported") // another writer
+		if err := c.Export(ctx, &fakeCache{data: []byte("mine")}, hdr); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(store.m["tokencache/main"]); got != "imported" {
+			t.Fatalf("the import was overwritten: %q", got)
+		}
+		if read(c) != "imported" { // the next Replace sees it, and a later Export may write again
+			t.Fatal("did not reload")
+		}
+		if err := c.Export(ctx, &fakeCache{data: []byte("mine2")}, hdr); err != nil {
+			t.Fatal(err)
+		}
+		if got := string(store.m["tokencache/main"]); got != "mine2" {
+			t.Fatalf("export after reloading did not write: %q", got)
+		}
+	})
+
+	t.Run("value appeared where there was none", func(t *testing.T) {
+		store := newMem()
+		c := newVaultCache(store, "main")
+		read(c) // nothing stored
+		store.m["tokencache/main"] = []byte("imported")
+		_ = c.Export(ctx, &fakeCache{data: []byte("mine")}, hdr)
+		if got := string(store.m["tokencache/main"]); got != "imported" {
+			t.Fatalf("got %q", got)
+		}
+	})
+
+	t.Run("value removed meanwhile", func(t *testing.T) {
+		store := newMem()
+		store.m["tokencache/main"] = []byte("old")
+		c := newVaultCache(store, "main")
+		read(c)
+		delete(store.m, "tokencache/main") // e.g. a replace import dropped the account
+		_ = c.Export(ctx, &fakeCache{data: []byte("mine")}, hdr)
+		if _, ok := store.m["tokencache/main"]; ok {
+			t.Fatal("a removed cache came back")
+		}
+	})
+
+	t.Run("unchanged value is written", func(t *testing.T) {
+		store := newMem()
+		store.m["tokencache/main"] = []byte("old")
+		c := newVaultCache(store, "main")
+		read(c)
+		if err := c.Export(ctx, &fakeCache{data: []byte("new")}, hdr); err != nil {
+			t.Fatal(err)
+		}
+		if string(store.m["tokencache/main"]) != "new" {
+			t.Fatal("not written")
+		}
+	})
+}

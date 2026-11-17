@@ -117,3 +117,56 @@ export interface ServiceResult {
 export interface RunDone {
   error: string; // empty when the round went through
 }
+
+/** A remark about an export or import: a code the interface translates, and its arguments. */
+export interface BackupNote {
+  code: string;
+  args: string[];
+}
+/** Summary of a backup export. Names and counts only; never a secret or the webhook address. */
+export interface BackupSummary {
+  path: string;
+  accounts: string[];
+  vaultEntries: number;
+  includesLogs: boolean;
+  logFiles: number;
+  /** English text, for the command line; the interface shows noteCodes. */
+  notes: string[];
+  noteCodes: BackupNote[];
+}
+export type ImportMode = "default" | "merge" | "replace";
+/** Summary of a backup import. */
+export interface ImportSummary {
+  mode: ImportMode;
+  accounts: string[];
+  vaultEntries: number;
+  sourceOS: string;
+  sourceVersion: string;
+  created: string;
+  newMasterKey: boolean;
+  /** English text, for the command line; the interface shows skippedCodes and noteCodes. */
+  skipped: string[];
+  notes: string[];
+  skippedCodes: BackupNote[];
+  noteCodes: BackupNote[];
+  /** English next step for the command line; the interface has its own text. */
+  hint: string;
+}
+/** A refusal or failure of an export or import, as a code the interface translates. */
+export interface BackupProblem {
+  code: string;
+  names: string[];
+  /** English detail from the backend; shown only for some codes. */
+  detail: string;
+}
+/** BackupService results; cancelled is true when the user closed the file dialog. */
+export interface BackupExportResult {
+  cancelled: boolean;
+  summary: BackupSummary;
+  problem: BackupProblem | null;
+}
+export interface BackupImportResult {
+  cancelled: boolean;
+  summary: ImportSummary;
+  problem: BackupProblem | null;
+}

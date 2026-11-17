@@ -16,10 +16,21 @@ var SyncWrites = true
 // WriteFileAtomic writes data to path through a temporary file in the same
 // directory, syncs it and renames it into place. The result has mode 0600.
 func WriteFileAtomic(path string, data []byte) error {
-	dir := filepath.Dir(path)
-	if err := EnsureDir(dir); err != nil {
+	if err := EnsureDir(filepath.Dir(path)); err != nil {
 		return err
 	}
+	return writeFileAtomic(path, data)
+}
+
+// WriteFileAtomicInPlace is WriteFileAtomic for a file the user chose the
+// location of: the directory must already exist and is left as it is, where
+// WriteFileAtomic would create it and tighten it to 0700.
+func WriteFileAtomicInPlace(path string, data []byte) error {
+	return writeFileAtomic(path, data)
+}
+
+func writeFileAtomic(path string, data []byte) error {
+	dir := filepath.Dir(path)
 	tmp, err := os.CreateTemp(dir, filepath.Base(path)+".tmp-*")
 	if err != nil {
 		return fmt.Errorf("create temp file: %w", err)

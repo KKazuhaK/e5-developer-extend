@@ -42,6 +42,7 @@ e5renew init                    # 交互式向导：配置、账号、登录、�
 | [docs/user/app-registration.md](docs/user/app-registration.md) | Entra 应用注册（委托身份和应用身份） |
 | [docs/user/background.md](docs/user/background.md) | 各平台后台运行：Linux、macOS、Windows、Docker |
 | [docs/user/docker.md](docs/user/docker.md) | Docker 和 compose |
+| [docs/user/backup.md](docs/user/backup.md) | 备份与迁移：用一个文件搬到另一台机器 |
 | [docs/user/faq.md](docs/user/faq.md) | 常见问题 |
 | [docs/user/troubleshooting.md](docs/user/troubleshooting.md) | 按 `doctor` 检查项排错 |
 | [docs/research.md](docs/research.md) | 技术选型与决定 |

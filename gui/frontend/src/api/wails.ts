@@ -1,6 +1,6 @@
 import { Browser, Events } from "@wailsio/runtime";
 import {
-  AccountService, CatalogService, HealthService, LogService, SettingsService, StatusService,
+  AccountService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService,
 } from "../../bindings/github.com/KKazuhaK/e5-renew/gui/services";
 import type { Api } from "./interface";
 import type { LoginEvent, RunDone, Snapshot } from "./types";
@@ -10,6 +10,7 @@ import type { LoginEvent, RunDone, Snapshot } from "./types";
 // slices arrive as null: normalise them so the UI can map over them.
 const arr = <T>(a: T[] | null | undefined): T[] => a ?? [];
 const cast = <T>(x: unknown) => x as T;
+const note = (n: { code: string; args: string[] | null }) => ({ ...n, args: arr(n.args) });
 
 // Wails delivers events as { name, data }; data is the first emitted argument,
 // or an array of arguments when the backend emitted several.
@@ -60,6 +61,28 @@ export const wailsApi: Api = {
     setWebhook: (u) => SettingsService.SetWebhook(u),
     clearWebhook: () => SettingsService.ClearWebhook(),
     testWebhook: () => SettingsService.TestWebhook(),
+  },
+  backup: {
+    targetHasData: () => BackupService.TargetHasData(),
+    export: async (p, l, t) => {
+      const r = cast<import("./types").BackupExportResult>(await BackupService.Export(p, l, t));
+      const s = r.summary;
+      return {
+        ...r, problem: r.problem ? { ...r.problem, names: arr(r.problem.names) } : null,
+        summary: { ...s, accounts: arr(s.accounts), notes: arr(s.notes), noteCodes: arr(s.noteCodes).map(note) },
+      };
+    },
+    import: async (p, m, t) => {
+      const r = cast<import("./types").BackupImportResult>(await BackupService.Import(p, m, t));
+      const s = r.summary;
+      return {
+        ...r, problem: r.problem ? { ...r.problem, names: arr(r.problem.names) } : null,
+        summary: {
+          ...s, accounts: arr(s.accounts), skipped: arr(s.skipped), notes: arr(s.notes),
+          skippedCodes: arr(s.skippedCodes).map(note), noteCodes: arr(s.noteCodes).map(note),
+        },
+      };
+    },
   },
   health: {
     doctor: async (o) => arr(cast<import("./types").DoctorCheck[]>(await HealthService.Doctor(o))),
