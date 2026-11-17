@@ -111,6 +111,18 @@ export interface LogEntry {
   event?: string;
   detail?: string;
 }
+/** Calls of one API: of one account, or added up over all accounts. */
+export interface APIStat {
+  id: string;
+  category: string;
+  name: string;
+  ok: number;
+  failed: number;
+  total: number;
+  lastClass: string;
+  lastStatus: number;
+  lastAt: string | null;
+}
 export interface Settings {
   schedule: {
     intervalMin: string;
