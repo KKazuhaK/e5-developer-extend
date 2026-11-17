@@ -18,6 +18,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
@@ -36,6 +37,8 @@ type env struct {
 	exe         string
 	home        string
 	interactive bool
+	// update replaces the outside world of the update commands.
+	update ops.UpdateHooks
 }
 
 func newEnv(t *testing.T) *env {
@@ -72,6 +75,7 @@ func (e *env) runCtx(ctx context.Context, stdin string, args ...string) (string,
 	a.bootstrap = e.bootstrap
 	a.setupBackoff = []time.Duration{time.Millisecond, time.Millisecond, time.Millisecond}
 	a.setupHost = "dev-box"
+	a.update = e.update
 	if e.newAuth != nil {
 		a.newAuth = e.newAuth
 	}

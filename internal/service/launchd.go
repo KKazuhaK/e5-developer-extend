@@ -211,3 +211,18 @@ func (m *launchd) Start() (Result, error) {
 	}
 	return res, nil
 }
+
+// Restart restarts the LaunchAgent so it runs the program file as it is now:
+// kickstart -k kills a running job and starts it again.
+func (m *launchd) Restart() (Result, error) {
+	var res Result
+	if !fileExists(m.plistPath()) {
+		return res, ErrNotInstalled
+	}
+	if _, err := m.env.Runner.Run(context.Background(), "launchctl", "kickstart", "-k", m.target()); err == nil {
+		res.Actions = append(res.Actions, "ran launchctl kickstart -k "+m.target())
+		return res, nil
+	}
+	// Not loaded yet: starting it is a restart enough.
+	return m.Start()
+}

@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AccountCard } from "@/components/AccountCard";
+import { UpdateBanner } from "@/components/UpdateBanner";
 import { SubscriptionCard } from "@/pages/SubscriptionCard";
 import { RenewalHelp } from "@/pages/RenewalHelp";
 import { EmptyBlock, ErrorBlock, LoadingBlock, PageHeader, Spinner, ToneIcon } from "@/components/common";
@@ -59,6 +60,8 @@ export function Overview() {
       />
 
       {snapshot.error && <ErrorBlock className="mb-4" message={snapshot.error} onRetry={() => void snapshot.refresh()} />}
+
+      <UpdateBanner />
 
       {attention.length > 0 && (
         <div role="alert" className="mb-4 flex items-start gap-3 rounded-lg border border-danger/50 bg-danger-bg p-4">

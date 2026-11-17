@@ -49,6 +49,8 @@ func main() {
 		_ = os.Setenv(f.env, abs)
 	}
 
+	newOps().CleanupUpdateLeftovers()
+
 	var err error
 	if window {
 		err = runWindow(page)

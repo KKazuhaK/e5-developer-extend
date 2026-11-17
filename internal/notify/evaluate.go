@@ -42,6 +42,10 @@ type Input struct {
 	APIs  []catalog.API
 	// Subscription says which subscriptions are watched.
 	Subscription config.Subscription
+	// Update is what the update check found: nil when it has not run (or is
+	// off), in which case what was announced stays as it is; a value with an
+	// empty Version means nothing newer exists.
+	Update *UpdateOffer
 }
 
 // evaluator is one run of Evaluate.
@@ -415,6 +419,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	// Every account that is not paused fails at once: probably not the
 	// accounts' own fault. One account alone is already covered by its own alerts.
 	g := scope{ev: ev, notified: &in.State.Notified, sent: &in.State.LastSent}
+	g.evalUpdate(in.Update)
 	if running >= 2 && failing == running {
 		if _, ok := g.get(AllFailing); !ok {
 			_, _ = g.announce(AllFailing, "", fmt.Sprintf("all %d accounts that are running are failing; check the network, the proxy and the Microsoft 365 service status first", running))

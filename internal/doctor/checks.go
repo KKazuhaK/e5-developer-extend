@@ -937,3 +937,12 @@ func missingCode(category string) string {
 	}
 	return "apis.failing"
 }
+
+// checkUpdate is an information line: a newer release exists. It is never a
+// warning, because being a version behind is not a fault of the setup.
+func checkUpdate(n UpdateNote) Check {
+	c := Check{ID: "update", Title: "Update", Level: OK}
+	c.setDetail(M("update.available", "current", n.Current, "latest", n.Latest, "url", n.URL))
+	c.setFix(M("fix.update"))
+	return c
+}

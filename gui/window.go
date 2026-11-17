@@ -12,6 +12,7 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/events"
 
 	"github.com/KKazuhaK/e5-developer-extend/gui/services"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
@@ -58,6 +59,16 @@ func runWindow(page string) error {
 		PickOpenFile:    func(title string) (string, error) { return pickOpenFile(app, win, title) },
 		RequestHandover: requestHandover,
 		CancelHandover:  cancelHandover,
+		Exit:            func() { app.Quit() },
+		RestartApp: func() error {
+			// A tray is in use when it runs, hosts the engine or starts at login.
+			tray := runningTrayPID()
+			on, _ := wailsAutostart{app}.Enabled()
+			if dir, err := paths.DataDir(); err == nil && ops.EngineHost(dir) == ops.HostGUI {
+				on = true
+			}
+			return restartApp(slog.Default(), on || tray > 0, tray)
+		},
 	})
 	defer backend.Close()
 	app.RegisterService(application.NewService(services.NewStatusService(backend)))
@@ -69,6 +80,7 @@ func runWindow(page string) error {
 	app.RegisterService(application.NewService(services.NewCatalogService(backend)))
 	app.RegisterService(application.NewService(services.NewBackupService(backend)))
 	app.RegisterService(application.NewService(services.NewSubscriptionService(backend)))
+	app.RegisterService(application.NewService(services.NewUpdateService(backend)))
 
 	win = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",

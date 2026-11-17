@@ -27,6 +27,8 @@ const (
 	SubscriptionRenewed  = "subscription_renewed"
 	// DailySummary is the opt-in message of the day: calls and state per account.
 	DailySummary = "daily_summary"
+	// UpdateAvailable says a newer release exists; sent once per version.
+	UpdateAvailable = "update_available"
 	// Test is only sent by `e5extend notify test`.
 	Test = "test"
 	// Digest is the summary of alerts that were held during the quiet hours.

@@ -578,3 +578,25 @@ func (m *schtasks) Start() (Result, error) {
 	res.Actions = append(res.Actions, "ran schtasks /Run /TN "+TaskName)
 	return res, nil
 }
+
+// Restart ends the task if it runs and runs it again, so it starts the program
+// file as it is now.
+func (m *schtasks) Restart() (Result, error) {
+	var res Result
+	ctx := context.Background()
+	if out, err := m.env.Runner.Run(ctx, "schtasks", "/Query", "/TN", TaskName); err != nil {
+		if missing(out, err) {
+			return res, ErrNotInstalled
+		}
+		return res, fmt.Errorf("ask Task Scheduler: %w", err)
+	}
+	// Ending a task that is not running fails; that is fine.
+	if _, err := m.env.Runner.Run(ctx, "schtasks", "/End", "/TN", TaskName); err == nil {
+		res.Actions = append(res.Actions, "ran schtasks /End /TN "+TaskName)
+	}
+	if _, err := m.env.Runner.Run(ctx, "schtasks", "/Run", "/TN", TaskName); err != nil {
+		return res, fmt.Errorf("run %s: %w", TaskName, err)
+	}
+	res.Actions = append(res.Actions, "ran schtasks /Run /TN "+TaskName)
+	return res, nil
+}

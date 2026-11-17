@@ -52,6 +52,7 @@ func newRootCmdWith(a *app) *cobra.Command {
 	root.PersistentFlags().StringVar(&dpapiKeyFile, "dpapi-key-file", "", "Windows: DPAPI-protected master key file (same as "+vault.EnvMasterKeyDPAPIFile+"); written by service install --headless")
 	_ = root.PersistentFlags().MarkHidden("dpapi-key-file")
 	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		a.ops().CleanupUpdateLeftovers()
 		// The flags exist for job runners that cannot set environment
 		// variables (Windows scheduled tasks); they simply set them.
 		for _, f := range []struct{ flag, env, val string }{
@@ -74,7 +75,7 @@ func newRootCmdWith(a *app) *cobra.Command {
 	}
 	root.AddCommand(newVersionCmd(), a.newConfigCmd(), a.newAccountCmd(), a.newVaultCmd(),
 		a.newRunCmd(), a.newRunNowCmd(), a.newStatusCmd(), a.newLogsCmd(), a.newStatsCmd(), a.newCatalogCmd(),
-		a.newServiceCmd(), a.newDoctorCmd(), a.newNotifyCmd(), a.newInitCmd(), a.newBackupCmd(), a.newAppCmd(), a.newSubscriptionCmd())
+		a.newServiceCmd(), a.newDoctorCmd(), a.newNotifyCmd(), a.newInitCmd(), a.newBackupCmd(), a.newAppCmd(), a.newSubscriptionCmd(), a.newUpdateCmd())
 	return root
 }
 

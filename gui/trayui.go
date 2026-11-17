@@ -25,7 +25,7 @@ type trayUI struct {
 
 	mu                                              sync.Mutex
 	open, runNow, pauseAll, resumeAll, status, host *application.MenuItem
-	autostart, quit, diagnose                       *application.MenuItem
+	autostart, quit, diagnose, upgrade              *application.MenuItem
 	lastIcon                                        trayhost.Icon
 	haveIcon                                        bool
 	lastState                                       trayhost.State
@@ -51,6 +51,10 @@ func (t *trayUI) build(ctx context.Context, tx trayhost.Texts, auto wailsAutosta
 	t.open.OnClick(func(*application.Context) { openMainWindow(t.log, "") })
 	t.diagnose = t.menu.Add(tx.Diagnose).SetHidden(true)
 	t.diagnose.OnClick(func(*application.Context) { openMainWindow(t.log, "health") })
+	// The upgrade item opens the window on the Overview page, where the banner
+	// does the upgrade: the window process is the one that may replace this app.
+	t.upgrade = t.menu.Add("").SetHidden(true)
+	t.upgrade.OnClick(func(*application.Context) { openMainWindow(t.log, "overview") })
 	t.menu.AddSeparator()
 	t.runNow = t.menu.Add(tx.RunNow)
 	t.runNow.OnClick(func(*application.Context) {
@@ -124,6 +128,11 @@ func (t *trayUI) apply(lang trayhost.Lang, st trayhost.State, auto wailsAutostar
 	t.tray.SetTooltip(trayhost.Tooltip(lang, AppName, st))
 	t.open.SetLabel(tx.OpenWindow)
 	t.diagnose.SetLabel(tx.Diagnose).SetHidden(!st.ServiceDown)
+	if st.UpdateVersion != "" {
+		t.upgrade.SetLabel(tx.UpgradeLabel(st.UpdateVersion)).SetHidden(false)
+	} else {
+		t.upgrade.SetHidden(true)
+	}
 	t.runNow.SetLabel(tx.RunNow)
 	t.pauseAll.SetLabel(tx.PauseAll)
 	t.resumeAll.SetLabel(tx.ResumeAll)

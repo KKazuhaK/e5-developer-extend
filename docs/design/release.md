@@ -21,6 +21,7 @@
 | `E5-Developer-Extend_<v>_macos_universal.dmg` | `E5 Developer Extend.app`（内含 `e5extend-gui` 和 `e5extend`） | macOS 12+ |
 | `E5-Developer-Extend_<v>_windows_{amd64,arm64}_setup.exe` | NSIS 安装包，装 `e5extend-gui.exe`、`e5extend.exe`、`e5extend-bg.exe` | Windows 10/11 |
 | `SHA256SUMS` | 以上所有文件的校验和 | |
+| `SHA256SUMS.minisig` | `SHA256SUMS` 的 minisign 签名（Ed25519），程序内升级靠它建立信任；没有配置签名密钥时没有这个文件 | 见 [update.md](update.md) |
 
 Docker 镜像 `ghcr.io/kkazuhak/e5-developer-extend:<v>`、`:<主>.<次>` 和 `:latest`（linux/amd64、linux/arm64）。
 镜像在草稿 Release **被发布之后**才推送（`.github/workflows/docker.yml`），预发布版本不更新 `:latest` 和 `:<主>.<次>`；
@@ -135,7 +136,7 @@ Windows 文件版本只能是数字，用去掉预发布部分的 `NUM_VERSION`�
 | `macos` | macos-latest | dmg |
 | `windows` | windows-latest | 两个安装包 |
 | `docker` | ubuntu-latest | 只构建镜像（标签时两个架构），不推送 |
-| `publish` | ubuntu-latest | 汇总、`SHA256SUMS`、**草稿** Release（只在标签时） |
+| `publish` | ubuntu-latest | 汇总、`SHA256SUMS`、用 `RELEASE_SIGNING_KEY` 签名成 `SHA256SUMS.minisig`（没有密钥时跳过并警告）、**草稿** Release（只在标签时） |
 
 每个打包任务在上传前做**冒烟测试**：
 
@@ -148,16 +149,26 @@ Windows 文件版本只能是数字，用去掉预发布部分的 `NUM_VERSION`�
 
 ## 6. 发布步骤（给仓库所有者）
 
+**第一次发布前（只做一次）：生成发布签名密钥**，程序内的“一键升级”才会生效。详见 [update.md](update.md) 第 2 节：
+
+```bash
+go run scripts/release/gen-signing-key.go     # 打印公钥，把私钥写进 e5extend-release-signing.key
+# 把打印的公钥填进 internal/update/pubkey.go 的 PublicKeyText 并提交
+gh secret set RELEASE_SIGNING_KEY < e5extend-release-signing.key
+shred -u e5extend-release-signing.key         # 另存一份到密码管理器
+```
+
+没有这一步也能发版：`publish` 任务只打印警告，Release 里没有 `.minisig`，程序只会提示有新版本并打开发布页。
+
 1. 确认 main 上 CI 全绿，更新 `CHANGELOG.md`。
 2. `git tag v0.1.0 && git push origin v0.1.0`。
-3. 等 Release 工作流完成，在 GitHub 上检查草稿 Release 里的文件和说明，点 Publish。
+3. 等 Release 工作流完成，在 GitHub 上检查草稿 Release 里的文件和说明（有 `SHA256SUMS.minisig`；可用 `minisign -Vm SHA256SUMS -P <公钥>` 验证），点 Publish。
 4. 发布会触发 `docker.yml` 推送镜像。（必须由人在网页上或用自己的令牌发布：用工作流自带的 `GITHUB_TOKEN` 发布不会触发其他工作流。）
 
 ## 7. 以后再做
 
 - 代码签名：macOS（Developer ID + 公证）、Windows（SignPath Foundation 或 Azure Artifact Signing）。方案比较和建议见 [signing.md](signing.md)。
 - Homebrew tap、Scoop bucket、winget 清单。
-- 应用内更新（Wails 自带，基于 GitHub Releases），前提是先有签名。
 
 ## 8. 验证记录（2026-11-16）
 

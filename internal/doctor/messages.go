@@ -216,6 +216,9 @@ var english = map[string]string{
 	"apis.paused":              "{count} APIs paused for 24 h (the account was refused: 403 or 404)",
 	"apis.ok":                  "no category found nothing in its last {count} rounds",
 
+	// update
+	"update.available": "version {latest} is available (this is {current}): {url}",
+
 	// the run itself
 	"check.crashed": "the check crashed unexpectedly",
 	"check.timeout": "did not finish within {dur}",
@@ -255,6 +258,7 @@ var english = map[string]string{
 	"fix.setWebhookRestore": "restore the master key, or set the address again: e5extend notify set-webhook <url>",
 	"fix.setWebhookMove":    "e5extend notify set-webhook <url>   (moves it into the vault and clears the config entry)",
 	"fix.channelAdd":        "e5extend notify channel add <id> --type telegram|email|wecom|feishu|dingtalk|discord|slack|bark|ntfy|serverchan|webhook",
+	"fix.update":            "e5extend update install   (the desktop app: Upgrade now on the Overview page)",
 	"fix.recommend":         "e5extend account test {account} --recommend",
 }
 

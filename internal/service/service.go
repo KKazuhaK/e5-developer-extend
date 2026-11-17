@@ -341,6 +341,10 @@ type Manager interface {
 	// Start starts an installed job that is not running. It does not rewrite
 	// any file; a job that is not installed is an error.
 	Start() (Result, error)
+	// Restart stops the job if it runs and starts it again, so it runs the
+	// program file as it is now (after an upgrade replaced it). A job that is
+	// not installed is an error.
+	Restart() (Result, error)
 	// Status asks the platform about the job.
 	Status() (Status, error)
 }

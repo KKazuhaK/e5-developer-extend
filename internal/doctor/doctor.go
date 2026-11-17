@@ -100,9 +100,17 @@ type Deps struct {
 	Service func() (service.Status, error)
 	// Hint suggests a next step for a sign-in or vault error, or "".
 	Hint func(err error, account string) string
+	// Update tells what the last update check found, without a request: nil
+	// when nothing newer is known, the check is off or this is a development build.
+	Update func(cfg *config.Config) *UpdateNote
 	// HintCode names the suggestion Hint gives for err (one of HintCodes), or
 	// "" when there is none; nil when the caller cannot name them.
 	HintCode func(err error) string
+}
+
+// UpdateNote is a newer release found by the update check.
+type UpdateNote struct {
+	Current, Latest, URL string
 }
 
 // Options choose which checks run.
@@ -171,6 +179,11 @@ func Run(ctx context.Context, d Deps, o Options) []Check {
 	}
 	if cfg != nil && cfgErr == nil {
 		groups = append(groups, group{"notify", "Alerts", func(context.Context) []Check { return []Check{checkNotify(d, cfg)} }})
+	}
+	if cfg != nil && cfgErr == nil && d.Update != nil {
+		if n := d.Update(cfg); n != nil {
+			groups = append(groups, group{"update", "Update", func(context.Context) []Check { return []Check{checkUpdate(*n)} }})
+		}
 	}
 
 	results := make([][]Check, len(groups))

@@ -14,7 +14,7 @@ Click a link to download. Not sure? Desktop for Windows and Mac, CLI for servers
 | Linux（任意发行版 / any） | — | [x64 tar.gz](https://github.com/KKazuhaK/e5-developer-extend/releases/download/v@VERSION@/e5extend_@VERSION@_linux_amd64.tar.gz) · [ARM64](https://github.com/KKazuhaK/e5-developer-extend/releases/download/v@VERSION@/e5extend_@VERSION@_linux_arm64.tar.gz) |
 | Docker | — | `docker pull ghcr.io/kkazuhak/e5-developer-extend:@VERSION@` |
 
-校验和 / Checksums: [SHA256SUMS](https://github.com/KKazuhaK/e5-developer-extend/releases/download/v@VERSION@/SHA256SUMS)
+校验和 / Checksums: [SHA256SUMS](https://github.com/KKazuhaK/e5-developer-extend/releases/download/v@VERSION@/SHA256SUMS) · 签名 / signature: [SHA256SUMS.minisig](https://github.com/KKazuhaK/e5-developer-extend/releases/download/v@VERSION@/SHA256SUMS.minisig)
 
 安装说明（含未签名包的打开方法）：[docs/user/install.md](https://github.com/KKazuhaK/e5-developer-extend/blob/v@VERSION@/docs/user/install.md)
 Install guide (including how to open the unsigned packages): same link.
@@ -23,6 +23,10 @@ Install guide (including how to open the unsigned packages): same link.
 > The packages are **not code-signed** yet.
 
 校验 / Verify: `sha256sum --ignore-missing -c SHA256SUMS`（下载到同一个文件夹后运行 / run in the download folder）
+
+验证签名 / Verify the signature（[minisign](https://jedisct1.github.io/minisign/)，公钥见 / public key in [internal/update/pubkey.go](https://github.com/KKazuhaK/e5-developer-extend/blob/v@VERSION@/internal/update/pubkey.go)）: `minisign -Vm SHA256SUMS -P <公钥 / public key>`
+
+程序内的“检查更新”只会安装签名验证通过的版本。 / The in-app upgrade installs only releases whose signature verifies.
 
 ## 变更 / Changes
 

@@ -74,6 +74,7 @@ func (o *Ops) NewEngine(log *slog.Logger, hooks engine.Hooks) (*engine.Engine, *
 	eo.Logger = log
 	eo.Hooks = hooks
 	eo.Notifier = o.Notifier(cfg, path, log)
+	eo.Updater = o.EngineUpdater(cfg)
 	e, err := engine.New(eo)
 	if err != nil {
 		eo.Notifier.Close()
