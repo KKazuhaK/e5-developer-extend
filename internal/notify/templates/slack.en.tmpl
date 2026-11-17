@@ -1,0 +1,9 @@
+{{define "title"}}{{if .Digest}}{{.App}} · {{.EventLabel}} ({{len .Digest}}){{else}}{{.App}} · {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}{{end}}{{end}}
+{{define "body"}}{{if .Digest}}*{{.EventLabel | slack}} · {{len .Digest}} alerts*{{range .Digest}}
+[{{.LevelLabel}}] *{{.EventLabel | slack}}*{{if .Account}} · {{.Account | slack}}{{end}} — {{.Message | slack}}{{end}}
+{{.Time | slack}} · {{.Host | slack}}{{else}}*[{{.LevelLabel}}] {{.EventLabel | slack}}*{{if .Account}} · {{.Account | slack}}{{end}}
+{{.Message | slack}}{{if .Rounds}}
+Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds{{end}}{{if .Origin}}
+Resolved: {{.OriginLabel | slack}}{{end}}{{if .Hint}}
+Next step: {{.Hint | slack}}{{end}}
+{{.Time | slack}} · {{.Host | slack}}{{end}}{{end}}

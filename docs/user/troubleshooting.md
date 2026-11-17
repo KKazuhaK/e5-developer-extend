@@ -87,22 +87,25 @@ Client Secret 还剩 30 天以内（警告）、7 天以内或已过期（失败
 
 ## notify
 
-没有设置告警（警告）、Webhook 地址还以明文放在 `config.toml` 里（警告），或者 vault 里存的地址解不开（警告，通常是主密钥变了；重新 `notify set-webhook`）。
-`e5extend notify set-webhook <地址>` 会把它存进加密的 vault，并清掉配置里的明文；`e5extend notify test` 发一条测试消息。
+没有设置任何通知渠道（警告），某个渠道缺少必填的密钥或密钥解不开（警告，通常是主密钥变了；用 `notify channel edit <名称> --secret <字段>` 重新设置），渠道用 `http://` 服务器或不加密的邮件连接（警告），自定义模板渲染不了（警告），
+或者旧版的 Webhook 地址还以明文放在 `config.toml` 里（警告；`e5extend notify set-webhook <地址>` 会把它存进加密的 vault 并清掉配置里的明文）。
+`e5extend notify test [名称]` 发一条测试消息；各渠道的设置方法、降噪和自定义模板见 [notifications.md](notifications.md)。
 
 ### 告警的类型
 
-| 事件 | 什么时候发 |
-|---|---|
-| `needs_attention` | 账号进入需要处理的状态，带原因和建议 |
-| `recovered` | 之后恢复正常 |
-| `auto_paused` | 连续失败被自动暂停 |
-| `stale` | 超过 `notify.stale_after`（默认 72 小时）没有成功调用，之后每 24 小时最多再提醒一次 |
-| `secret_expiring` | Client Secret 到期前 30、7、1 天和到期当天各一次 |
-| `period_ended` | 运行期限结束 |
+| 事件 | 级别 | 什么时候发 |
+|---|---|---|
+| `needs_attention` | 严重 | 账号进入需要处理的状态，带原因和建议 |
+| `auto_paused` | 严重 | 连续失败被自动暂停 |
+| `all_failing` | 严重 | 所有没暂停的账号同时异常（至少 2 个账号） |
+| `failure_spike` | 警告 | 最近几轮调用失败率过高（404 和“没有这项服务”不算） |
+| `stale` | 警告 | 超过 `notify.stale_after`（默认 72 小时）没有成功调用，之后每 24 小时最多再提醒一次 |
+| `secret_expiring` | 警告 | Client Secret 到期前 30、7、1 天和到期当天各一次 |
+| `recovered` | 提示 | 之后恢复正常 |
+| `period_ended` | 提示 | 运行期限结束 |
 
-只在状态变化时发送，同一个状态不会重复发。`notify.events` 可以限定只发其中几种（空表示全部）。
-告警发送失败（地址不可读、网络不通）时不会算作已发送：每个未送达的告警最多每小时重试一次，送达后才不再重复。
-`notify` 是否已设置每 5 分钟检查一次，所以刚设置完 Webhook 后，运行中的引擎最多 5 分钟才开始发送。
-消息是 JSON：`{"event","account","message","time","text","content"}`，`text` 兼容 Slack、企业微信、飞书类机器人，
+只在状态变化时发送，同一个状态不会重复发；同一账号的同一告警还有冷却时间（`notify.cooldown`，默认 6 小时）。`notify.events` 可以限定只发其中几种（空表示全部），每个渠道还有自己的最低级别和事件列表。
+告警发送失败（地址不可读、网络不通）时不会算作已发送：每个未送达的告警最多每小时重试一次，送达后才不再重复；只要有一个渠道送达就算已发送。
+对已有渠道的改动立即被运行中的引擎看到；加上第一个渠道后，引擎最多 5 分钟才开始发送。
+通用 Webhook 渠道的消息是 JSON：`{"event","account","message","time","text","content","level"}`，`text` 兼容 Slack、企业微信、飞书类机器人，
 `content` 兼容 Discord。发送超时 10 秒，失败按指数退避重试 3 次，仍失败只记日志，不影响引擎。

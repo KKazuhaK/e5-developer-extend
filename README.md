@@ -16,7 +16,7 @@ calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI.*
 - **调度**：随机抽取、随机顺序、随机参数；工作日和工作时段；断网、睡眠唤醒后自动恢复
 - **多账号**：每个账号单独的状态、日志和统计；连续失败自动暂停（auto-pause）
 - **长期运行**：开机自启、后台服务（systemd / launchd / Windows 服务 / Docker）、健康检查（`e5extend doctor`）、
-  令牌和 Secret 到期提醒、桌面通知和 Webhook 告警
+  令牌和 Secret 到期提醒、桌面通知和多渠道告警（Telegram、邮件、企业微信、飞书、钉钉、Discord、Slack、Bark、ntfy、Server 酱、Webhook）
 - **体积小**：CLI 约 10 MB，单个可执行文件，无运行时依赖
 
 ## 快速开始
@@ -43,6 +43,7 @@ e5extend init                    # 交互式向导：配置、账号、登录、
 | [docs/user/background.md](docs/user/background.md) | 各平台后台运行：Linux、macOS、Windows、Docker |
 | [docs/user/docker.md](docs/user/docker.md) | Docker 和 compose |
 | [docs/user/backup.md](docs/user/backup.md) | 备份与迁移：用一个文件搬到另一台机器 |
+| [docs/user/notifications.md](docs/user/notifications.md) | 通知渠道：Telegram、邮件、企业微信、飞书、钉钉等的设置方法，降噪与自定义模板 |
 | [docs/user/faq.md](docs/user/faq.md) | 常见问题 |
 | [docs/user/troubleshooting.md](docs/user/troubleshooting.md) | 按 `doctor` 检查项排错 |
 | [docs/research.md](docs/research.md) | 技术选型与决定 |

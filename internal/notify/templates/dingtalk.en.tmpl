@@ -1,0 +1,16 @@
+{{define "title"}}{{if .Digest}}{{.App}} · {{.EventLabel}} ({{len .Digest}}){{else}}{{.App}} · {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}{{end}}{{end}}
+{{define "body"}}{{if .Digest}}**{{.EventLabel | mdsafe}} · {{len .Digest}} alerts**{{range .Digest}}
+
+[{{.LevelLabel}}] **{{.EventLabel | mdsafe}}**{{if .Account}} · {{.Account | mdsafe}}{{end}} — {{.Message | mdsafe}}{{end}}
+
+{{.Time | mdsafe}} · {{.Host | mdsafe}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | mdsafe}}**{{if .Account}} · {{.Account | mdsafe}}{{end}}
+
+{{.Message | mdsafe}}{{if .Rounds}}
+
+Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds{{end}}{{if .Origin}}
+
+Resolved: {{.OriginLabel | mdsafe}}{{end}}{{if .Hint}}
+
+Next step: {{.Hint | mdsafe}}{{end}}
+
+{{.Time | mdsafe}} · {{.Host | mdsafe}}{{end}}{{end}}

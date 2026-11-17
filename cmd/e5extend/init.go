@@ -457,15 +457,11 @@ func (w *wizard) stepRound() error {
 
 func (w *wizard) stepNotify() error {
 	w.step(7, "Alerts")
-	cfg, path, err := w.a.loadConfig()
-	if err != nil {
-		return err
-	}
-	if _, err := w.a.webhook(cfg, path, nil, false).URL(); err == nil {
-		w.say("  a webhook is already set; skipped")
+	if chs, err := w.a.ops().ListChannels(); err == nil && len(chs) > 0 {
+		w.say("  a notification channel is already set; skipped")
 		return nil
 	}
-	ok, err := w.confirm("Send alerts to a webhook (Slack, Discord, WeCom, Feishu, Bark, ...) when something needs you?", false)
+	ok, err := w.confirm("Send alerts to a webhook (Slack, Discord, WeCom, Feishu, Bark, ...) when something needs you?\n  (Telegram and email need more settings: add them later with: e5extend notify channel add)", false)
 	if err != nil || !ok {
 		return err
 	}

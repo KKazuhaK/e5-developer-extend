@@ -76,9 +76,17 @@ export const wailsApi: Api = {
     },
     save: async (s) => arr(await SettingsService.Save(cast(s))),
     setStartAtLogin: (on) => SettingsService.SetStartAtLogin(on),
-    setWebhook: (u) => SettingsService.SetWebhook(u),
-    clearWebhook: () => SettingsService.ClearWebhook(),
-    testWebhook: () => SettingsService.TestWebhook(),
+    listChannels: async () =>
+      arr(cast<import("./types").ChannelView[]>(await SettingsService.ListChannels())).map((c) => ({
+        ...c, events: arr(c.events), to: arr(c.to), clearSecrets: arr(c.clearSecrets), secrets: c.secrets ?? {},
+        secretFields: arr(c.secretFields), warnings: arr(c.warnings), lastResult: c.lastResult ?? null,
+      })),
+    saveChannel: async (c, create) => arr(await SettingsService.SaveChannel(cast(c), create)),
+    removeChannel: (id) => SettingsService.RemoveChannel(id),
+    testChannel: async (id) => arr(cast<import("./types").ChannelTest[]>(await SettingsService.TestChannel(id))),
+    previewMessage: async (type, language, template, format, event) =>
+      cast<import("./types").MessagePreview>(await SettingsService.PreviewMessage(type, language, template, format, event)),
+    emailPresets: async () => arr(cast<import("./types").EmailPreset[]>(await SettingsService.EmailPresets())),
   },
   backup: {
     targetHasData: () => BackupService.TargetHasData(),

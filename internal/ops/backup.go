@@ -456,7 +456,7 @@ func checkBackup(p *backup.Payload, machineVault config.Vault) (*importPlan, err
 
 // knownVaultKey accepts only the entries e5extend itself writes.
 func knownVaultKey(cfg *config.Config, key string) bool {
-	if key == notify.VaultKey {
+	if key == notify.VaultKey || notify.IsChannelSecretKey(cfg, key) {
 		return true
 	}
 	for _, a := range cfg.Accounts {

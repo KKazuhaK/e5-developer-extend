@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
@@ -159,7 +160,47 @@ func redactProxy(raw string) string {
 	return u.Redacted()
 }
 
-// SetWebhook stores the alert address in the vault. It is not shown again.
+// ListChannels returns the notification channels. Secrets are shown only as set or not set.
+func (s *SettingsService) ListChannels() ([]ChannelView, error) { return s.b.Ops.ListChannels() }
+
+// SaveChannel creates (create true) or updates a channel. The secrets in
+// in.Secrets are stored in the vault and never returned; a missing or empty
+// one keeps what is stored. When a value is not valid nothing is saved and
+// the problems are returned, one per field.
+func (s *SettingsService) SaveChannel(in ChannelInput, create bool) ([]ValidationError, error) {
+	bad, err := s.b.Ops.SaveChannel(context.Background(), in, create)
+	if err != nil || len(bad) > 0 {
+		return bad, err
+	}
+	s.b.Ops.ReloadEngine()
+	return nil, nil
+}
+
+// RemoveChannel deletes a channel together with its stored secrets.
+func (s *SettingsService) RemoveChannel(id string) error {
+	if _, err := s.b.Ops.RemoveChannel(context.Background(), id); err != nil {
+		return err
+	}
+	s.b.Ops.ReloadEngine()
+	return nil
+}
+
+// TestChannel sends a test message through one channel, or through all of
+// them when id is empty, and reports each result.
+func (s *SettingsService) TestChannel(id string) ([]ChannelTest, error) {
+	return s.b.Ops.TestChannels(context.Background(), id)
+}
+
+// PreviewMessage renders an example event for a channel type, with an
+// optional custom template, without sending anything.
+func (s *SettingsService) PreviewMessage(typ, language, template, format, event string) (MessagePreview, error) {
+	return s.b.Ops.PreviewMessage(typ, language, template, format, event)
+}
+
+// EmailPresets lists the mail providers whose server settings can be filled in.
+func (s *SettingsService) EmailPresets() []EmailPreset { return notify.EmailPresets() }
+
+// SetWebhook stores the alert address as the channel "webhook". It is not shown again.
 func (s *SettingsService) SetWebhook(url string) error {
 	_, err := s.b.Ops.SetWebhook(context.Background(), url)
 	return err

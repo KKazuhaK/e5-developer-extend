@@ -12,11 +12,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
@@ -50,6 +52,11 @@ const (
 	Timeout = 30 * time.Second
 
 	fewAPIs = 5
+
+	// DeliveryFailures is how many failed deliveries in a row make the doctor
+	// warn about a channel; DeliveryStale is how long without a success does too.
+	DeliveryFailures = 3
+	DeliveryStale    = 7 * 24 * time.Hour
 
 	// FailingRounds is how many rounds in a row a category must have failed
 	// with "not found" before the doctor warns about it.
@@ -670,32 +677,128 @@ func (c Check) skipped() Check {
 
 func checkNotify(d Deps, cfg *config.Config) Check {
 	c := Check{ID: "notify", Title: "Alerts"}
-	inVault, unreadable := false, false
-	if v, err := d.OpenVault(cfg); err == nil {
-		inVault, _ = v.Has(notify.VaultKey)
-		if inVault {
-			// Only whether it can be decrypted is of interest; the address is never shown.
-			if _, gerr := v.Get(notify.VaultKey); gerr != nil {
-				unreadable = true
+	v, verr := d.OpenVault(cfg)
+	has := func(key string) bool {
+		if verr != nil {
+			return false
+		}
+		ok, _ := v.Has(key)
+		return ok
+	}
+	// A secret is only tried for decryption: its value is never shown.
+	unreadable := func(key string) bool {
+		if verr != nil || !has(key) {
+			return false
+		}
+		_, err := v.Get(key)
+		return err != nil
+	}
+
+	var problems, fixes []string
+	add := func(problem, fix string) {
+		problems = append(problems, problem)
+		if fix != "" && !slices.Contains(fixes, fix) {
+			fixes = append(fixes, fix)
+		}
+	}
+	channels := len(cfg.Notify.Channels)
+	for _, ch := range cfg.Notify.Channels {
+		name := ch.Type + " channel " + ch.ID
+		legacyURL := ch.ID == notify.LegacyChannelID && ch.Type == config.ChannelWebhook && has(notify.VaultKey)
+		for _, f := range config.ChannelSecrets(ch.Type) {
+			key := notify.ChannelSecretKey(ch.ID, f.Name)
+			switch {
+			case unreadable(key):
+				add(name+": the stored "+f.Name+" cannot be decrypted, so nothing can be sent there",
+					"restore the master key, or set it again: e5extend notify channel edit "+ch.ID)
+			case f.Required && !has(key) && !(f.Name == "url" && legacyURL):
+				add(name+": "+f.Name+" is not set", "e5extend notify channel edit "+ch.ID)
+			}
+		}
+		if ch.Server != "" && notify.IsPlainHTTP(ch.Server) || ch.APIBase != "" && notify.IsPlainHTTP(ch.APIBase) {
+			add(name+": talks to its server over http, so the token travels unencrypted", "use an https:// server address")
+		}
+		if ch.Type == config.ChannelEmail && ch.SecurityOrDefault() == config.SecurityNone {
+			add(name+": the mail connection is not encrypted", "set security to starttls or tls")
+		}
+		if ch.AllowHTTP {
+			add(name+": allow_http is set, so its address may be http and travel unencrypted", "set an https address (that clears allow_http), or run: e5extend notify channel edit "+ch.ID+" --allow-http=false")
+		}
+		if ch.AllowPlainAuth {
+			add(name+": allow_plain_auth is set, so the password is sent without encryption", "set security to starttls or tls")
+		}
+		if ch.Template != "" {
+			if err := notify.CheckTemplate(ch.Type, ch.Template, ch.Type == config.ChannelWebhook && ch.Format == config.FormatTemplate); err != nil {
+				add(name+": the custom template does not work: "+err.Error(), "e5extend notify preview test --type "+ch.Type)
 			}
 		}
 	}
-	plain := cfg.Notify.WebhookURL != ""
+	// How the deliveries went (recorded by whoever sent them; no secrets in it).
+	status := notify.ReadStatus(d.DataDir)
+	ids := []string{}
+	for _, ch := range cfg.Notify.Channels {
+		ids = append(ids, ch.ID)
+	}
+	if _, ok := cfg.Notify.FindChannel(notify.LegacyChannelID); !ok {
+		ids = append(ids, notify.LegacyChannelID)
+	}
+	for _, id := range ids {
+		st, ok := status[id]
+		if !ok || st.OK {
+			continue
+		}
+		stale := st.LastOK.IsZero() || d.now().Sub(st.LastOK) > DeliveryStale
+		switch {
+		case st.Failures >= DeliveryFailures:
+			add(fmt.Sprintf("channel %s: the last %d deliveries failed (%s)", id, st.Failures, st.Error), "e5extend notify test "+id)
+		case stale:
+			add(fmt.Sprintf("channel %s: nothing delivered in the last %d days (%s)", id, int(DeliveryStale.Hours()/24), st.Error), "e5extend notify test "+id)
+		}
+	}
+	// The webhook of older versions, when it has not been saved as a channel yet.
+	if _, ok := cfg.Notify.FindChannel(notify.LegacyChannelID); !ok {
+		// Older versions accepted http addresses; they still work, but the token travels unencrypted.
+		insecure := func(raw string) bool {
+			u, err := url.Parse(strings.TrimSpace(raw))
+			return err == nil && u.Scheme == "http" && !notify.IsLoopback(u.Hostname())
+		}
+		if has(notify.VaultKey) && !unreadable(notify.VaultKey) {
+			if b, err := v.Get(notify.VaultKey); err == nil && insecure(string(b)) {
+				add("the stored webhook address is http, so it travels unencrypted", "set an https address: e5extend notify set-webhook <url>")
+			}
+		}
+		if insecure(cfg.Notify.WebhookURL) {
+			add("the webhook address is http, so it travels unencrypted", "set an https address: e5extend notify set-webhook <url>")
+		}
+		switch {
+		case unreadable(notify.VaultKey):
+			channels++
+			add("the stored webhook address cannot be decrypted, so no alert can be sent",
+				"restore the master key, or set the address again: e5extend notify set-webhook <url>")
+		case cfg.Notify.WebhookURL != "":
+			channels++
+			add("the webhook address is stored in plain text in config.toml",
+				"e5extend notify set-webhook <url>   (moves it into the vault and clears the config entry)")
+		case has(notify.VaultKey):
+			channels++
+		}
+	}
 	switch {
-	case unreadable:
-		c.Level = Warn
-		c.Detail = "the stored webhook address cannot be decrypted, so no alert can be sent"
-		c.Fix = "restore the master key, or set the address again: e5extend notify set-webhook <url>"
-	case plain:
-		c.Level = Warn
-		c.Detail = "the webhook address is stored in plain text in config.toml"
-		c.Fix = "e5extend notify set-webhook <url>   (moves it into the vault and clears the config entry)"
-	case !inVault:
+	case channels == 0:
 		c.Level = Warn
 		c.Detail = "no alert destination is set; you will not hear about problems"
-		c.Fix = "e5extend notify set-webhook <url>"
+		c.Fix = "e5extend notify channel add <id> --type telegram|email|wecom|feishu|dingtalk|discord|slack|bark|ntfy|serverchan|webhook"
+	case len(problems) > 0:
+		c.Level = Warn
+		c.Detail = strings.Join(problems, "; ")
+		c.Fix = strings.Join(fixes, "; ")
 	default:
-		c.Level, c.Detail = OK, "webhook set (stored in the vault)"
+		c.Level = OK
+		if channels == 1 {
+			c.Detail = "1 notification channel set (secrets stored in the vault)"
+		} else {
+			c.Detail = fmt.Sprintf("%d notification channels set (secrets stored in the vault)", channels)
+		}
 	}
 	return c
 }
@@ -710,10 +813,7 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 		c.Level, c.Detail = Warn, "the API catalog could not be read"
 		return c
 	}
-	category := make(map[string]string, len(apis))
-	for _, a := range apis {
-		category[a.ID] = a.Category
-	}
+	category := callstat.CategoryIndex(apis)
 	entries, err := store.New(d.DataDir).Read(store.Filter{Account: acct.Name, Since: d.now().Add(-failingWindow)})
 	if err != nil {
 		c.Level, c.Detail = OK, "the call log could not be read"
@@ -729,10 +829,10 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 	var order []string
 	for _, e := range entries {
 		cat, known := category[e.API]
-		if e.Event != "" || e.Round == "" || !known {
+		if !callstat.IsCall(e) || !known {
 			continue
 		}
-		missing := e.Class == string(graph.NotFound) || (e.Class == string(graph.ClientError) && e.Status == 400)
+		missing := callstat.IsMissing(e.Class, e.Status)
 		rs := rounds[cat]
 		if len(rs) == 0 {
 			order = append(order, cat)
@@ -746,10 +846,7 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 	}
 	// Only categories the account currently runs count: one switched off
 	// (for example by --apply) has old failures in the log but no problem.
-	enabled := map[string]bool{}
-	for _, c := range catalog.EffectiveCategories(apis, acct.Categories) {
-		enabled[strings.ToLower(c)] = true
-	}
+	enabled := callstat.EnabledCategories(apis, acct.Categories)
 	var parts []string
 	for _, cat := range order {
 		if !enabled[strings.ToLower(cat)] {

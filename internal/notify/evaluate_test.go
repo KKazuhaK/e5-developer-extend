@@ -13,7 +13,7 @@ import (
 var t0 = time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 
 func TestEventNamesMatchConfig(t *testing.T) {
-	kinds := []string{NeedsAttention, Recovered, AutoPaused, Stale, SecretExpiring, PeriodEnded}
+	kinds := []string{NeedsAttention, Recovered, AutoPaused, Stale, SecretExpiring, PeriodEnded, FailureSpike, AllFailing}
 	if !slices.Equal(kinds, config.NotifyEvents) {
 		t.Errorf("config.NotifyEvents = %v, notify kinds = %v", config.NotifyEvents, kinds)
 	}
@@ -29,7 +29,9 @@ type rig struct {
 }
 
 func newRig() *rig {
-	r := &rig{now: t0, start: t0.Add(-100 * time.Hour), cfg: config.Default().Notify,
+	cfg := config.Default().Notify
+	cfg.Cooldown = "0" // the cooldown has its own tests
+	r := &rig{now: t0, start: t0.Add(-100 * time.Hour), cfg: cfg,
 		acct: config.Account{Name: "main", Auth: config.AuthClientSecret}, st: store.NewState()}
 	r.as = &store.AccountState{Status: store.StatusOK, LastSuccess: t0.Add(-time.Hour)}
 	r.st.Accounts["main"] = r.as
@@ -46,7 +48,7 @@ func (r *rig) evalNoAck() []Event {
 func (r *rig) eval() []Event {
 	evs := r.evalNoAck()
 	for _, e := range evs {
-		MarkDelivered(r.st, e.Account, e.Event, e.Time)
+		MarkEvent(r.st, e)
 	}
 	return evs
 }
@@ -359,7 +361,7 @@ func TestSeveralPendingAlertsEachRetriedOnce(t *testing.T) {
 	}
 }
 
-func TestUndeliveredRecoveredIsRetriedAndDropsOnNewProblem(t *testing.T) {
+func TestUndeliveredRecoveredIsRetriedAndSurvivesANewProblem(t *testing.T) {
 	r := newRig()
 	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "x"
 	r.eval()
@@ -371,18 +373,28 @@ func TestUndeliveredRecoveredIsRetriedAndDropsOnNewProblem(t *testing.T) {
 	if k := kinds(r.evalNoAck()); k != "recovered" {
 		t.Fatalf("retry: %q", k)
 	}
-	// A new problem makes the old "recovered" obsolete.
+	// A new problem does not cancel the earlier episode's recovery: that one was announced.
 	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "again"
-	if k := kinds(r.evalNoAck()); k != "needs_attention" {
-		t.Fatalf("new problem: %q", k)
-	}
-	if _, ok := r.as.Notified[Recovered]; ok {
-		t.Error("obsolete recovered still pending")
+	r.evalNoAck()
+	if !r.as.Notified[Recovered].Pending {
+		t.Fatal("the earlier recovery was dropped")
 	}
 	r.as.Status = store.StatusOK
-	r.evalNoAck()
-	if !MarkDelivered(r.st, "main", Recovered, r.now) {
-		t.Fatal("recovered not pending")
+	r.now = r.now.Add(2 * time.Hour)
+	evs := r.evalNoAck()
+	n := 0
+	for _, e := range evs {
+		if e.Event == Recovered {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("recovered sent %d times: %v", n, kinds(evs))
+	}
+	for _, e := range evs {
+		if e.Event == Recovered {
+			MarkEvent(r.st, e)
+		}
 	}
 	if _, ok := r.as.Notified[Recovered]; ok {
 		t.Error("delivered recovered not forgotten")

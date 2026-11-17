@@ -1,0 +1,16 @@
+{{define "title"}}{{if .Digest}}{{.App}} · {{.EventLabel}}（{{len .Digest}}）{{else}}{{.App}} · {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}{{end}}{{end}}
+{{define "body"}}{{if .Digest}}**{{.EventLabel | mdsafe}} · 共 {{len .Digest}} 条**{{range .Digest}}
+
+[{{.LevelLabel}}] **{{.EventLabel | mdsafe}}**{{if .Account}} · {{.Account | mdsafe}}{{end}} — {{.Message | mdsafe}}{{end}}
+
+{{.Time | mdsafe}} · {{.Host | mdsafe}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | mdsafe}}**{{if .Account}} · {{.Account | mdsafe}}{{end}}
+
+{{.Message | mdsafe}}{{if .Rounds}}
+
+失败率 {{.FailRate}}，近 {{.Rounds}} 轮共失败 {{.Failures}} 次{{end}}{{if .Origin}}
+
+已恢复：{{.OriginLabel | mdsafe}}{{end}}{{if .Hint}}
+
+建议：{{.Hint | mdsafe}}{{end}}
+
+{{.Time | mdsafe}} · {{.Host | mdsafe}}{{end}}{{end}}

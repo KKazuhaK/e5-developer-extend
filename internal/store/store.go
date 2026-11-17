@@ -50,6 +50,12 @@ type Notice struct {
 	Pending bool      `json:"pending,omitempty"`
 	Tried   time.Time `json:"tried,omitzero"`
 	Msg     string    `json:"msg,omitempty"`
+	// Held means the alert is waiting for the quiet hours to end; it is sent
+	// then, together with the others that were held.
+	Held bool `json:"held,omitempty"`
+	// Cooled means the cooldown kept the alert back while its condition still
+	// holds; it is sent (Msg) once the cooldown ends. Nothing was announced yet.
+	Cooled bool `json:"cooled,omitempty"`
 }
 
 // PasswordBlock records why automatic password sign-in stopped.
@@ -81,12 +87,20 @@ type AccountState struct {
 	LastPasswordCode string `json:"last_password_code,omitempty"`
 	// Notified maps an alert kind to its last notice; only the engine writes it.
 	Notified map[string]Notice `json:"notified,omitempty"`
+	// LastSent is when an alert of each kind was last handed out, which is
+	// what the cooldown is measured from; unlike Notified it outlives the
+	// condition.
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
 }
 
 // State is the content of state.json.
 type State struct {
 	Version  int                      `json:"version"`
 	Accounts map[string]*AccountState `json:"accounts"`
+	// Notified and LastSent are the notices of alerts that belong to no
+	// single account (all_failing).
+	Notified map[string]Notice    `json:"notified,omitempty"`
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
 }
 
 // NewState returns an empty state.

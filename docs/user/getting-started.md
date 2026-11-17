@@ -80,8 +80,10 @@ e5extend doctor        # 全面检查，退出码 0 正常、1 有警告、2 有
 建议再设置告警，出问题时会推送到你的手机或聊天工具：
 
 ```bash
-e5extend notify set-webhook <webhook 地址>
+e5extend notify channel add tg --type telegram --chat-id <你的 chat id>   # Telegram、邮件、企业微信、飞书等都可以
 e5extend notify test
 ```
+
+各渠道怎么设置、怎么降噪见 [notifications.md](notifications.md)。
 
 遇到问题先看 [troubleshooting.md](troubleshooting.md) 和 [faq.md](faq.md)。

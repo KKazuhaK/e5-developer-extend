@@ -125,8 +125,89 @@ export interface Settings {
     periodEnd: string;
   };
   network: { proxy: string };
-  notify: { staleAfter: string; events: string[]; webhookConfigured: boolean };
+  notify: {
+    staleAfter: string;
+    events: string[];
+    /** The channel "webhook" exists (read only). */
+    webhookConfigured: boolean;
+    /** How many notification channels exist (read only). */
+    channels: number;
+    /** Duration such as "6h"; "0" turns it off. */
+    cooldown: string;
+    /** "23:00-08:00", or "" for none. */
+    quietHours: string;
+    spikeRounds: number;
+    /** 0..1 */
+    spikeRate: number;
+    spikeMinFailures: number;
+  };
   ui: { language: "auto" | "zh" | "en"; theme: "system" | "light" | "dark"; startAtLogin: boolean };
+}
+export type ChannelType =
+  | "telegram" | "email" | "wecom" | "feishu" | "dingtalk" | "discord" | "slack" | "bark" | "ntfy" | "serverchan" | "webhook";
+export type AlertLevel = "info" | "warning" | "critical";
+/** A notification channel as it is edited. Secrets go in `secrets` and are never returned. */
+export interface ChannelInput {
+  id: string;
+  type: ChannelType;
+  minLevel: "" | AlertLevel;
+  events: string[];
+  language: "" | "zh" | "en";
+  template: string;
+  chatId: string;
+  apiBase: string;
+  smtpHost: string;
+  smtpPort: number;
+  security: "" | "starttls" | "tls" | "none";
+  username: string;
+  from: string;
+  to: string[];
+  server: string;
+  topic: string;
+  format: "" | "json" | "template";
+  /** Exceptions kept from earlier setups: a webhook that may use http (the app can switch it off, never on) and a mail password sent without encryption (config.toml only). */
+  allowHttp: boolean;
+  allowPlainAuth: boolean;
+  /** New secret values by field; a missing or empty one keeps what is stored. */
+  secrets: Record<string, string>;
+  /** Optional secret fields to remove. */
+  clearSecrets: string[];
+}
+export interface SecretStatus {
+  name: string;
+  required: boolean;
+  set: boolean;
+}
+export interface ChannelResult {
+  at: string;
+  ok: boolean;
+  error?: string;
+}
+export type ChannelWarning = "server_http" | "email_plain" | "legacy" | "allow_http";
+/** A channel for display: settings, which secrets are stored, how the last delivery went. */
+export interface ChannelView extends ChannelInput {
+  secretFields: SecretStatus[];
+  legacy: boolean;
+  lastResult: ChannelResult | null;
+  warnings: ChannelWarning[];
+}
+export interface ChannelTest {
+  id: string;
+  ok: boolean;
+  error: string;
+}
+export interface MessagePreview {
+  title: string;
+  body: string;
+  html: string;
+  format: "html" | "markdown" | "text" | "json";
+}
+export interface EmailPreset {
+  name: string;
+  host: string;
+  port: number;
+  security: "starttls" | "tls";
+  note: string;
 }
 export interface ValidationError {
   field: string;

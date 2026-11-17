@@ -1,20 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, CheckCircle2, ChevronDown, Globe, Palette, Save, Send, SlidersHorizontal, Timer, Trash2 } from "lucide-react";
+import { BellRing, ChevronDown, Globe, Palette, Save, SlidersHorizontal, Timer } from "lucide-react";
 import { api } from "@/api";
 import type { Settings, ValidationError } from "@/api";
 import { useApp } from "@/state/app";
 import { useI18n, type DictKey } from "@/i18n";
 import { useToast } from "@/components/toast";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, fieldAria } from "@/components/common";
-import { NOTIFY_EVENTS, WEEKDAYS, errorsByField, isValidWebhook, validateSettings, type LocalCode } from "@/lib/settings";
+import { WEEKDAYS, errorsByField, validateSettings, type LocalCode } from "@/lib/settings";
 import { cn, errMsg } from "@/lib/utils";
+import { AlertsCard } from "./AlertsCard";
 import { BackupCard } from "./BackupCard";
 import { PaceCard } from "./PaceCard";
 import { RunningCard } from "./RunningCard";
@@ -24,7 +23,9 @@ const ADVANCED_FIELDS: [string, string][] = [
   ["schedule.intervalMin", "s-imin"], ["schedule.intervalMax", "s-imax"], ["schedule.apisPerRoundMin", "s-amin"],
   ["schedule.apisPerRoundMax", "s-amax"], ["schedule.workDays", "s-days-l"], ["schedule.workStart", "s-ws"],
   ["schedule.workEnd", "s-we"], ["schedule.periodStart", "s-ps"], ["schedule.periodEnd", "s-pe"],
-  ["network.proxy", "n-proxy"], ["notify.staleAfter", "n-stale"], ["notify.events", "n-ev-l"],
+  ["network.proxy", "n-proxy"], ["notify.staleAfter", "n-stale"], ["notify.cooldown", "n-cooldown"], ["notify.quietHours", "n-quiet"],
+  ["notify.spikeRounds", "n-spike-rounds"], ["notify.spikeRate", "n-spike-rate"], ["notify.spikeMinFailures", "n-spike-min"],
+  ["notify.events", "n-ev-l"],
 ];
 const ADVANCED_KEY = "e5extend.settings.advancedOpen";
 
@@ -47,6 +48,8 @@ const LOCAL_MSG: Record<LocalCode, DictKey> = {
   duration: "settings.err.duration", minInterval: "settings.err.minInterval", intervalOrder: "settings.err.intervalOrder",
   posInt: "settings.err.posInt", apisOrder: "settings.err.apisOrder", time: "settings.err.time", timeOrder: "settings.err.timeOrder",
   date: "settings.err.date", periodOrder: "settings.err.periodOrder", proxy: "settings.err.proxy", days: "settings.err.days",
+  cooldown: "settings.err.cooldown", quiet: "settings.err.quiet", spikeRounds: "settings.err.spikeRounds", spikeRate: "settings.err.spikeRate",
+  spikeMin: "settings.err.spikeMin",
 };
 
 export function SettingsPage() {
@@ -94,6 +97,17 @@ export function SettingsPage() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Channels are saved on their own; only their count (read only) is mirrored into the settings.
+  const onChannelsChanged = useCallback((count: number, webhook: boolean) => {
+    const set = (x: Settings | null) => x && x.notify.channels === count && x.notify.webhookConfigured === webhook ? x : x && { ...x, notify: { ...x.notify, channels: count, webhookConfigured: webhook } };
+    setSaved(set);
+    setDraft(set);
+  }, []);
+  const goToAlerts = () => {
+    toggleAdvanced(true);
+    window.setTimeout(() => document.getElementById("alerts-card")?.scrollIntoView({ block: "start", behavior: "smooth" }), 60);
+  };
 
   const local = useMemo(() => (draft ? validateSettings(draft) : {}), [draft]);
   const dirty = useMemo(() => !!draft && !!saved && JSON.stringify(draft) !== JSON.stringify(saved), [draft, saved]);
@@ -177,6 +191,13 @@ export function SettingsPage() {
       />
 
       <div className="grid gap-4">
+        {saved.notify.channels === 0 && (
+          <div role="status" className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-bg px-4 py-3 text-[13px]">
+            <BellRing className="size-4 shrink-0 text-warning" aria-hidden />
+            <p className="min-w-0 flex-1">{t("settings.alertsNudge")}</p>
+            <Button size="sm" variant="outline" onClick={goToAlerts}>{t("settings.alertsNudgeGo")}</Button>
+          </div>
+        )}
         <RunningCard
           startAtLogin={draft.ui.startAtLogin}
           // Applied by the backend already: record it as saved too, so it never makes the page dirty.
@@ -308,123 +329,11 @@ export function SettingsPage() {
             </CardContent>
           </Card>
 
-          <NotifyCard draft={draft} upd={upd} fieldErr={fieldErr} clearRemote={clearRemote} onWebhookChanged={(v) => { setSaved((s) => s && { ...s, notify: { ...s.notify, webhookConfigured: v } }); setDraft((d) => d && { ...d, notify: { ...d.notify, webhookConfigured: v } }); }} />
+          <AlertsCard draft={draft} upd={upd} fieldErr={fieldErr} clearRemote={clearRemote} onChannelsChanged={onChannelsChanged} />
           </div>
         </section>
 
       </div>
     </>
-  );
-}
-
-function NotifyCard({
-  draft, upd, fieldErr, clearRemote, onWebhookChanged,
-}: {
-  draft: Settings; upd: (fn: (d: Settings) => void) => void; fieldErr: (f: string) => string | undefined;
-  clearRemote: (f: string) => void; onWebhookChanged: (configured: boolean) => void;
-}) {
-  const { t } = useI18n();
-  const toast = useToast();
-  const [url, setUrl] = useState("");
-  const [busy, setBusy] = useState<"set" | "test" | "clear" | null>(null);
-  const [urlError, setUrlError] = useState<string | null>(null);
-  const configured = draft.notify.webhookConfigured;
-
-  const setWebhook = async () => {
-    if (!isValidWebhook(url)) {
-      setUrlError(t("settings.err.webhook"));
-      return;
-    }
-    setUrlError(null);
-    setBusy("set");
-    try {
-      await api.settings.setWebhook(url.trim());
-      toast.success(t("settings.webhookSaved"));
-      onWebhookChanged(true);
-    } catch (e) {
-      setUrlError(errMsg(e));
-    } finally {
-      setUrl(""); // never keep the address in the UI after submitting
-      setBusy(null);
-    }
-  };
-  const run = async (kind: "test" | "clear") => {
-    setBusy(kind);
-    try {
-      if (kind === "test") {
-        await api.settings.testWebhook();
-        toast.success(t("settings.webhookTestOk"));
-      } else {
-        await api.settings.clearWebhook();
-        toast.success(t("settings.webhookCleared"));
-        onWebhookChanged(false);
-      }
-    } catch (e) {
-      toast.error(errMsg(e));
-    } finally {
-      setBusy(null);
-    }
-  };
-
-  return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2"><BellRing className="size-4" aria-hidden /> {t("settings.notify")}</CardTitle>
-        <CardDescription>{t("settings.notifyDesc")}</CardDescription>
-      </CardHeader>
-      <CardContent className="grid gap-4">
-        <div className="grid gap-2">
-          <div className="flex items-center gap-2">
-            <label htmlFor="n-hook" className="text-[13px] font-medium">Webhook</label>
-            {configured ? (
-              <Badge tone="success"><CheckCircle2 aria-hidden /> {t("settings.webhookSet")}</Badge>
-            ) : (
-              <Badge tone="muted">{t("settings.webhookUnset")}</Badge>
-            )}
-          </div>
-          <form className="flex gap-2" autoComplete="off" onSubmit={(e) => { e.preventDefault(); void setWebhook(); }}>
-            <Input
-              {...fieldAria("n-hook", urlError ?? undefined, "x")}
-              type="password"
-              autoComplete="off"
-              value={url}
-              placeholder={configured ? t("settings.webhookReplace") : "https://"}
-              onChange={(e) => { setUrl(e.target.value); setUrlError(null); }}
-              spellCheck={false}
-            />
-            <Button type="submit" disabled={!url || busy !== null}>{busy === "set" && <Spinner />} {t("settings.webhookSave")}</Button>
-          </form>
-          {urlError ? <p id="n-hook-err" role="alert" className="text-xs text-danger">{urlError}</p> : <p id="n-hook-hint" className="text-xs text-muted-foreground">{t("settings.webhookHint")}</p>}
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" onClick={() => void run("test")} disabled={!configured || busy !== null}>
-              {busy === "test" ? <Spinner /> : <Send />} {t("settings.webhookTest")}
-            </Button>
-            <Button size="sm" variant="outline" onClick={() => void run("clear")} disabled={!configured || busy !== null}>
-              {busy === "clear" ? <Spinner /> : <Trash2 />} {t("settings.webhookClear")}
-            </Button>
-          </div>
-        </div>
-
-        <Field id="n-stale" label={t("settings.staleAfter")} hint={t("settings.staleHint")} error={fieldErr("notify.staleAfter")} className="sm:max-w-60">
-          <Input {...fieldAria("n-stale", fieldErr("notify.staleAfter"), "x")} value={draft.notify.staleAfter} onChange={(e) => { clearRemote("notify.staleAfter"); upd((d) => void (d.notify.staleAfter = e.target.value)); }} />
-        </Field>
-
-        <div>
-          <p className="mb-1.5 text-[13px] font-medium" id="n-ev-l">{t("settings.events")}</p>
-          <div role="group" aria-labelledby="n-ev-l" className="grid gap-1.5 sm:grid-cols-2">
-            {NOTIFY_EVENTS.map((ev) => (
-              <label key={ev} className="flex cursor-pointer items-center gap-2 text-[13px]">
-                <Checkbox
-                  checked={draft.notify.events.includes(ev)}
-                  onCheckedChange={(v) => { clearRemote("notify.events"); upd((d) => void (d.notify.events = v ? NOTIFY_EVENTS.filter((x) => x === ev || d.notify.events.includes(x)) : d.notify.events.filter((x) => x !== ev))); }}
-                />
-                {t(`event.${ev}` as DictKey)}
-              </label>
-            ))}
-          </div>
-          <p className="mt-1.5 text-xs text-muted-foreground">{fieldErr("notify.events") ?? t("settings.eventsHint")}</p>
-        </div>
-      </CardContent>
-    </Card>
   );
 }

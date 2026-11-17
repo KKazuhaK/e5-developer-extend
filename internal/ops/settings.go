@@ -12,6 +12,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
@@ -35,10 +36,16 @@ work_end = "22:00"
 proxy = ""                  # empty uses HTTPS_PROXY and friends
 
 [notify]
-# Set the alert address with: e5extend notify set-webhook <url>   (it is kept in the vault, not here)
+# Add destinations with: e5extend notify channel add <id> --type telegram|email|wecom|feishu|dingtalk|discord|slack|bark|ntfy|serverchan|webhook
+# Their tokens and addresses are kept in the vault, not here.
 webhook_url = ""            # legacy plaintext address; set-webhook moves it into the vault
 stale_after = "72h"         # alert when an account has had no successful call for this long
-events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended
+events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended, failure_spike, all_failing
+cooldown = "6h"             # the same alert for the same account is not repeated within this time (critical: half); empty means the default, only "0" turns it off
+quiet_hours = ""            # for example "23:00-08:00": only critical alerts, the rest is sent as one summary afterwards
+spike_rounds = 3            # failure_spike: look at this many recent rounds ...
+spike_rate = 0.5            # ... alert when this share of the calls failed ...
+spike_min_failures = 5      # ... and at least this many calls failed (calls that found nothing do not count)
 
 [vault]
 backend = "auto"            # auto | keyring | file
@@ -145,9 +152,19 @@ type NetworkSettings struct {
 // NotifySettings are the alert options. The address itself is never part of
 // the settings; only whether one is stored.
 type NotifySettings struct {
-	StaleAfter        string   `json:"staleAfter"`
-	Events            []string `json:"events"`
-	WebhookConfigured bool     `json:"webhookConfigured"`
+	StaleAfter string   `json:"staleAfter"`
+	Events     []string `json:"events"`
+	// WebhookConfigured says the channel "webhook" exists; Channels counts all of them.
+	// Both are read-only: channels are edited with their own methods.
+	WebhookConfigured bool `json:"webhookConfigured"`
+	Channels          int  `json:"channels"`
+	// Cooldown is a duration ("6h"; "0" turns it off), QuietHours a window such as
+	// "23:00-08:00" (empty turns it off); the spike values define failure_spike.
+	Cooldown         string  `json:"cooldown"`
+	QuietHours       string  `json:"quietHours"`
+	SpikeRounds      int     `json:"spikeRounds"`
+	SpikeRate        float64 `json:"spikeRate"`
+	SpikeMinFailures int     `json:"spikeMinFailures"`
 }
 
 // Settings is the part of the configuration that is not about accounts.
@@ -191,11 +208,33 @@ func (o *Ops) LoadSettings() (Settings, error) {
 			PeriodStart: dateString(cfg.Schedule.PeriodStart), PeriodEnd: dateString(cfg.Schedule.PeriodEnd),
 		},
 		Network: NetworkSettings{Proxy: cfg.Network.Proxy},
-		Notify: NotifySettings{
-			StaleAfter: cfg.Notify.StaleAfter, Events: nonNil(cfg.Notify.Events),
-			WebhookConfigured: o.webhookSource(cfg, path).Configured(),
-		},
+		Notify:  o.notifySettings(cfg, path),
 	}, nil
+}
+
+func (o *Ops) notifySettings(cfg *config.Config, path string) NotifySettings {
+	rounds, rate, minFailures := cfg.Notify.SpikeSettings()
+	n := NotifySettings{
+		StaleAfter: cfg.Notify.StaleAfter, Events: nonNil(cfg.Notify.Events),
+		Cooldown: orDefault(cfg.Notify.Cooldown, config.DefaultCooldown), QuietHours: cfg.Notify.QuietHours,
+		SpikeRounds: rounds, SpikeRate: rate, SpikeMinFailures: minFailures,
+	}
+	src := o.channelSource(cfg, path)
+	src.mu.Lock()
+	entries := src.entriesLocked()
+	src.mu.Unlock()
+	n.Channels = len(entries)
+	for _, e := range entries {
+		n.WebhookConfigured = n.WebhookConfigured || e.ID == notify.LegacyChannelID
+	}
+	return n
+}
+
+func orDefault(s, def string) string {
+	if strings.TrimSpace(s) == "" {
+		return def
+	}
+	return s
 }
 
 func nonNil(s []string) []string {
@@ -249,6 +288,18 @@ func (o *Ops) SaveSettings(ctx context.Context, s Settings) ([]ValidationError, 
 	cfg.Network.Proxy = strings.TrimSpace(s.Network.Proxy)
 	cfg.Notify.StaleAfter = strings.TrimSpace(s.Notify.StaleAfter)
 	cfg.Notify.Events = nonNil(s.Notify.Events)
+	cfg.Notify.Cooldown = strings.TrimSpace(orDefault(s.Notify.Cooldown, config.DefaultCooldown))
+	cfg.Notify.QuietHours = strings.TrimSpace(s.Notify.QuietHours)
+	cfg.Notify.SpikeRounds, cfg.Notify.SpikeRate, cfg.Notify.SpikeMinFailures = s.Notify.SpikeRounds, s.Notify.SpikeRate, s.Notify.SpikeMinFailures
+	if cfg.Notify.SpikeRounds == 0 {
+		cfg.Notify.SpikeRounds = config.DefaultSpikeRounds
+	}
+	if cfg.Notify.SpikeRate == 0 {
+		cfg.Notify.SpikeRate = config.DefaultSpikeRate
+	}
+	if cfg.Notify.SpikeMinFailures == 0 {
+		cfg.Notify.SpikeMinFailures = config.DefaultSpikeMinFailures
+	}
 	if verr := cfg.Validate(); verr != nil {
 		for _, e := range splitErrors(verr) {
 			bad = append(bad, toValidationError(e))
