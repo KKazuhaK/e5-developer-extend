@@ -86,18 +86,29 @@ type payload struct {
 	Time    string `json:"time"`
 	Text    string `json:"text"`
 	Content string `json:"content"`
+	// Level, Origin and Items are only present when they apply.
+	Level  string    `json:"level,omitempty"`
+	Origin string    `json:"origin,omitempty"`
+	Items  []payload `json:"items,omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler.
-func (e Event) MarshalJSON() ([]byte, error) {
+func (e Event) MarshalJSON() ([]byte, error) { return json.Marshal(e.payload()) }
+
+func (e Event) payload() payload {
 	t := e.Time
 	if t.IsZero() {
 		t = time.Now()
 	}
-	return json.Marshal(payload{
+	p := payload{
 		Event: e.Event, Account: e.Account, Message: e.Message,
 		Time: t.Format(time.RFC3339), Text: e.Text(), Content: e.Text(),
-	})
+		Level: e.Level(), Origin: e.Origin,
+	}
+	for _, it := range e.Items {
+		p.Items = append(p.Items, it.payload())
+	}
+	return p
 }
 
 // VaultKey is where older versions stored the webhook address. It is still

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	htmltemplate "html/template"
 	"os"
@@ -263,6 +264,9 @@ func Render(typ, lang, custom string, d Data) (Rendered, error) {
 		}
 	}
 	set := builtin
+	if set == nil && strings.TrimSpace(custom) == "" {
+		return r, errors.New("template: this channel type has no built-in template; give one")
+	}
 	wholeIsBody := false
 	if strings.TrimSpace(custom) != "" {
 		cs, err := parseSet("custom", custom)

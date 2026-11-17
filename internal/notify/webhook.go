@@ -64,18 +64,24 @@ func (w *Webhook) Send(ctx context.Context, ev Event) error {
 	if backoff == nil {
 		backoff = DefaultBackoff
 	}
+	return withRetry(ctx, backoff, w.Log, "webhook", ev.Event, func() error { return w.deliver(ctx, raw, ev) })
+}
+
+// withRetry runs try until it succeeds, fails for good, or the retries are
+// used up; temporary failures wait for the next backoff step first.
+func withRetry(ctx context.Context, backoff []time.Duration, log *slog.Logger, label, event string, try func() error) error {
 	var last error
 	for attempt := 0; ; attempt++ {
 		var de *DeliveryError
-		last = w.deliver(ctx, raw, ev)
+		last = try()
 		if last == nil {
 			return nil
 		}
 		if !errors.As(last, &de) || !de.Temporary || attempt >= maxRetries || attempt >= len(backoff) {
 			return last
 		}
-		if w.Log != nil {
-			w.Log.Warn("webhook delivery failed; will retry", "event", ev.Event, "attempt", attempt+1, "err", last.Error())
+		if log != nil {
+			log.Warn(label+" delivery failed; will retry", "event", event, "attempt", attempt+1, "err", last.Error())
 		}
 		select {
 		case <-ctx.Done():
@@ -99,41 +105,79 @@ func (w *Webhook) deliver(ctx context.Context, raw string, ev Event) error {
 	if err != nil {
 		return &DeliveryError{msg: "encode event: " + err.Error()}
 	}
-	timeout := w.Timeout
+	return doRequest(ctx, w.HTTP, w.Timeout, request{
+		method: http.MethodPost, url: raw, body: body, label: "webhook",
+		header: map[string]string{"Content-Type": "application/json"},
+		secret: []string{raw},
+	})
+}
+
+// request is one HTTP call to a destination.
+type request struct {
+	method, url string
+	header      map[string]string
+	body        []byte
+	label       string   // names the destination in errors: "webhook", "telegram", ...
+	secret      []string // values that must never appear in an error: the address, tokens
+	// check inspects the body of a 2xx answer; some services report failure
+	// there with status 200. It is optional.
+	check func(body []byte) error
+}
+
+// doRequest sends r once. It never follows redirects, and no error text
+// contains the address or any value listed in r.secret.
+func doRequest(ctx context.Context, hc *http.Client, timeout time.Duration, r request) error {
 	if timeout <= 0 {
 		timeout = DefaultTimeout
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, raw, bytes.NewReader(body))
-	if err != nil {
-		return &DeliveryError{msg: "invalid webhook address: " + redact(err.Error(), raw)}
+	clean := func(s string) string {
+		for _, raw := range r.secret {
+			s = redact(s, raw)
+		}
+		return s
 	}
-	req.Header.Set("Content-Type", "application/json")
+	req, err := http.NewRequestWithContext(ctx, r.method, r.url, bytes.NewReader(r.body))
+	if err != nil {
+		return &DeliveryError{msg: "invalid " + r.label + " address: " + clean(err.Error())}
+	}
+	for k, v := range r.header {
+		req.Header.Set(k, v)
+	}
 	req.Header.Set("User-Agent", "e5extend/"+version.Version)
 
-	hc := http.DefaultClient
-	if w.HTTP != nil {
-		hc = w.HTTP
+	if hc == nil {
+		hc = http.DefaultClient
 	}
 	cp := *hc
 	cp.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := cp.Do(req)
 	if err != nil {
-		return &DeliveryError{Temporary: true, msg: "send failed: " + redact(transportReason(err), raw)}
+		return &DeliveryError{Temporary: true, msg: "send failed: " + clean(transportReason(err))}
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 64<<10))
+	answer, _ := io.ReadAll(io.LimitReader(resp.Body, 64<<10))
 
 	switch s := resp.StatusCode; {
 	case s >= 200 && s < 300:
+		if r.check != nil {
+			if err := r.check(answer); err != nil {
+				var de *DeliveryError
+				if errors.As(err, &de) {
+					de.msg = clean(de.msg)
+					de.Status = s
+				}
+				return err
+			}
+		}
 		return nil
 	case s == http.StatusRequestTimeout, s == http.StatusTooManyRequests, s >= 500:
-		return &DeliveryError{Status: s, Temporary: true, msg: fmt.Sprintf("webhook answered HTTP %d", s)}
+		return &DeliveryError{Status: s, Temporary: true, msg: fmt.Sprintf("%s answered HTTP %d", r.label, s)}
 	case s >= 300 && s < 400:
-		return &DeliveryError{Status: s, msg: fmt.Sprintf("webhook answered HTTP %d (redirects are not followed; use the final address)", s)}
+		return &DeliveryError{Status: s, msg: fmt.Sprintf("%s answered HTTP %d (redirects are not followed; use the final address)", r.label, s)}
 	default:
-		return &DeliveryError{Status: s, msg: fmt.Sprintf("webhook answered HTTP %d", s)}
+		return &DeliveryError{Status: s, msg: fmt.Sprintf("%s answered HTTP %d", r.label, s)}
 	}
 }
 

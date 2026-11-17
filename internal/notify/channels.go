@@ -1,0 +1,421 @@
+package notify
+
+import (
+	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"crypto/tls"
+	"encoding/base64"
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"mime"
+	"net/http"
+	"net/url"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+)
+
+// Target is a channel ready to send: its settings and its secrets. Secrets
+// are keyed by field name (bot_token, url, secret, ...). Nothing here is ever
+// logged or put into an error.
+type Target struct {
+	Channel config.Channel
+	Secrets map[string]string
+}
+
+// Default servers of the services that have one.
+const (
+	DefaultTelegramBase = "https://api.telegram.org"
+	DefaultBarkServer   = "https://api.day.app"
+	DefaultNtfyServer   = "https://ntfy.sh"
+	serverChanBase      = "https://sctapi.ftqq.com"
+)
+
+// Message size limits of the services, in the unit each one counts.
+const (
+	telegramLimit = 4000 // characters (the API allows 4096)
+	wecomLimit    = 4000 // bytes (the API allows 4096)
+	discordLimit  = 1900 // characters (the API allows 2000)
+	dingtalkLimit = 18000
+	barkLimit     = 2000
+)
+
+// Deliverer renders an event for a channel and sends it.
+type Deliverer struct {
+	HTTP    *http.Client
+	Timeout time.Duration   // per attempt; DefaultTimeout when zero
+	Backoff []time.Duration // waits before each retry; DefaultBackoff when nil
+	Log     *slog.Logger
+	// Now supplies the clock for signatures; time.Now when nil.
+	Now func() time.Time
+	// Host is the machine name shown in messages; os.Hostname when empty.
+	Host string
+	// Location is the time zone of the message time; local when nil.
+	Location *time.Location
+	// DefaultLanguage is used by channels without a language of their own.
+	DefaultLanguage string
+	// ServerChanBase replaces the Server Chan address; for tests.
+	ServerChanBase string
+	// TLSConfig is the base TLS configuration of email connections (for
+	// example to trust a private CA); nil uses the system's.
+	TLSConfig *tls.Config
+}
+
+func (d *Deliverer) now() time.Time {
+	if d.Now != nil {
+		return d.Now()
+	}
+	return time.Now()
+}
+
+func (d *Deliverer) host() string {
+	if d.Host != "" {
+		return d.Host
+	}
+	h, _ := os.Hostname()
+	return h
+}
+
+// Deliver sends ev through the channel, retrying temporary failures with
+// backoff. It does not apply the channel's level and event filters.
+func (d *Deliverer) Deliver(ctx context.Context, t Target, ev Event) error {
+	c := t.Channel
+	lang := Language(c.Language, d.DefaultLanguage)
+	var rendered Rendered
+	if c.Type != config.ChannelWebhook || c.Format == config.FormatTemplate {
+		var err error
+		if rendered, err = Render(c.Type, lang, c.Template, NewData(ev, lang, d.host(), d.Location)); err != nil {
+			return fmt.Errorf("render for channel %s: %w", c.ID, err)
+		}
+	}
+	backoff := d.Backoff
+	if backoff == nil {
+		backoff = DefaultBackoff
+	}
+	label := c.Type + " channel " + c.ID
+	return withRetry(ctx, backoff, d.Log, label, ev.Event, func() error {
+		return d.send(ctx, t, ev, lang, rendered)
+	})
+}
+
+// send makes one attempt.
+func (d *Deliverer) send(ctx context.Context, t Target, ev Event, lang string, r Rendered) error {
+	c := t.Channel
+	need := func(field string) (string, error) {
+		v := strings.TrimSpace(t.Secrets[field])
+		if v == "" {
+			return "", &DeliveryError{msg: fmt.Sprintf("channel %s: %s is not set", c.ID, field)}
+		}
+		return v, nil
+	}
+	if c.Type == config.ChannelEmail {
+		return d.sendEmail(ctx, t, r)
+	}
+	req, err := d.build(t, ev, lang, r, need)
+	if err != nil {
+		return err
+	}
+	req.label = c.Type
+	return doRequest(ctx, d.HTTP, d.Timeout, req)
+}
+
+func jsonBody(v any) []byte { b, _ := json.Marshal(v); return b }
+
+var jsonHeader = map[string]string{"Content-Type": "application/json"}
+
+// build makes the HTTP request of a channel type.
+func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func(string) (string, error)) (request, error) {
+	c := t.Channel
+	switch c.Type {
+	case config.ChannelTelegram:
+		token, err := need("bot_token")
+		if err != nil {
+			return request{}, err
+		}
+		base := strings.TrimRight(orDefault(c.APIBase, DefaultTelegramBase), "/")
+		if err := requireScheme(base, false); err != nil {
+			return request{}, err
+		}
+		return request{method: http.MethodPost, url: base + "/bot" + token + "/sendMessage", header: jsonHeader,
+			body: jsonBody(map[string]any{"chat_id": c.ChatID, "text": truncRunes(r.Body, telegramLimit),
+				"parse_mode": "HTML", "disable_web_page_preview": true}),
+			secret: []string{token, base + "/bot" + token}, check: checkTelegram}, nil
+
+	case config.ChannelWeCom:
+		u, err := need("url")
+		if err != nil {
+			return request{}, err
+		}
+		if err := requireScheme(u, false); err != nil {
+			return request{}, err
+		}
+		return request{method: http.MethodPost, url: u, header: jsonHeader,
+			body:   jsonBody(map[string]any{"msgtype": "markdown", "markdown": map[string]string{"content": truncBytes(r.Body, wecomLimit)}}),
+			secret: []string{u}, check: checkErrCode("errcode", "errmsg", 45009)}, nil
+
+	case config.ChannelFeishu:
+		u, err := need("url")
+		if err != nil {
+			return request{}, err
+		}
+		if err := requireScheme(u, false); err != nil {
+			return request{}, err
+		}
+		var lines [][]map[string]string
+		for _, line := range strings.Split(r.Body, "\n") {
+			lines = append(lines, []map[string]string{{"tag": "text", "text": line}})
+		}
+		key := "zh_cn"
+		if lang == "en" {
+			key = "en_us"
+		}
+		body := map[string]any{"msg_type": "post", "content": map[string]any{"post": map[string]any{
+			key: map[string]any{"title": r.Title, "content": lines}}}}
+		secret := strings.TrimSpace(t.Secrets["secret"])
+		secrets := []string{u}
+		if secret != "" {
+			ts := strconv.FormatInt(d.now().Unix(), 10)
+			body["timestamp"], body["sign"] = ts, FeishuSign(ts, secret)
+			secrets = append(secrets, secret)
+		}
+		return request{method: http.MethodPost, url: u, header: jsonHeader, body: jsonBody(body),
+			secret: secrets, check: checkErrCode("code", "msg", 11232)}, nil
+
+	case config.ChannelDingTalk:
+		u, err := need("url")
+		if err != nil {
+			return request{}, err
+		}
+		if err := requireScheme(u, false); err != nil {
+			return request{}, err
+		}
+		secrets := []string{u}
+		if secret := strings.TrimSpace(t.Secrets["secret"]); secret != "" {
+			pu, err := url.Parse(u)
+			if err != nil {
+				return request{}, &DeliveryError{msg: fmt.Sprintf("channel %s: the address is not a valid URL", c.ID)}
+			}
+			ms := strconv.FormatInt(d.now().UnixMilli(), 10)
+			q := pu.Query()
+			q.Set("timestamp", ms)
+			q.Set("sign", DingTalkSign(ms, secret))
+			pu.RawQuery = q.Encode()
+			secrets = append(secrets, u, pu.String(), secret)
+			u = pu.String()
+		}
+		return request{method: http.MethodPost, url: u, header: jsonHeader,
+			body: jsonBody(map[string]any{"msgtype": "markdown",
+				"markdown": map[string]string{"title": r.Title, "text": truncRunes(r.Body, dingtalkLimit)}}),
+			secret: secrets, check: checkErrCode("errcode", "errmsg", 130101, 660026)}, nil
+
+	case config.ChannelDiscord:
+		u, err := need("url")
+		if err != nil {
+			return request{}, err
+		}
+		if err := requireScheme(u, false); err != nil {
+			return request{}, err
+		}
+		// allowed_mentions: an alert text must never ping @everyone.
+		return request{method: http.MethodPost, url: u, header: jsonHeader,
+			body: jsonBody(map[string]any{"content": truncRunes(r.Body, discordLimit),
+				"allowed_mentions": map[string]any{"parse": []string{}}}), secret: []string{u}}, nil
+
+	case config.ChannelSlack:
+		u, err := need("url")
+		if err != nil {
+			return request{}, err
+		}
+		if err := requireScheme(u, false); err != nil {
+			return request{}, err
+		}
+		return request{method: http.MethodPost, url: u, header: jsonHeader,
+			body: jsonBody(map[string]any{"text": r.Body, "mrkdwn": true}), secret: []string{u}}, nil
+
+	case config.ChannelBark:
+		key, err := need("device_key")
+		if err != nil {
+			return request{}, err
+		}
+		server := strings.TrimRight(orDefault(c.Server, DefaultBarkServer), "/")
+		if err := requireScheme(server, true); err != nil {
+			return request{}, err
+		}
+		level := "active"
+		if ev.Level() == config.LevelCritical {
+			level = "critical"
+		}
+		return request{method: http.MethodPost, url: server + "/push", header: jsonHeader,
+			body: jsonBody(map[string]string{"device_key": key, "title": r.Title,
+				"body": truncRunes(r.Body, barkLimit), "level": level, "group": "e5extend"}),
+			secret: []string{key}, check: checkErrCode("code", "message", -1)}, nil
+
+	case config.ChannelNtfy:
+		server := strings.TrimRight(orDefault(c.Server, DefaultNtfyServer), "/")
+		if err := requireScheme(server, true); err != nil {
+			return request{}, err
+		}
+		h := map[string]string{"Content-Type": "text/plain; charset=utf-8", "Title": headerText(r.Title)}
+		switch ev.Level() {
+		case config.LevelCritical:
+			h["Priority"], h["Tags"] = "5", "rotating_light"
+		case config.LevelWarning:
+			h["Priority"], h["Tags"] = "4", "warning"
+		default:
+			h["Priority"], h["Tags"] = "3", "information_source"
+		}
+		if ev.Event == Recovered {
+			h["Tags"] = "white_check_mark"
+		}
+		secrets := []string{}
+		if tok := strings.TrimSpace(t.Secrets["token"]); tok != "" {
+			h["Authorization"] = "Bearer " + tok
+			secrets = append(secrets, tok)
+		}
+		return request{method: http.MethodPost, url: server + "/" + url.PathEscape(c.Topic), header: h,
+			body: []byte(r.Body), secret: secrets}, nil
+
+	case config.ChannelServerChan:
+		key, err := need("sendkey")
+		if err != nil {
+			return request{}, err
+		}
+		form := url.Values{"title": {r.Title}, "desp": {r.Body}}
+		return request{method: http.MethodPost, url: strings.TrimRight(orDefault(d.ServerChanBase, serverChanBase), "/") + "/" + url.PathEscape(key) + ".send",
+			header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, body: []byte(form.Encode()),
+			secret: []string{key}, check: checkErrCode("code", "message", -1)}, nil
+
+	case config.ChannelWebhook:
+		u, err := need("url")
+		if err != nil {
+			return request{}, err
+		}
+		if err := requireScheme(u, false); err != nil {
+			return request{}, err
+		}
+		body := []byte(nil)
+		if c.Format == config.FormatTemplate {
+			body = []byte(r.Body)
+		} else {
+			body = jsonBody(ev.payload())
+		}
+		return request{method: http.MethodPost, url: u, header: jsonHeader, body: body, secret: []string{u}}, nil
+	}
+	return request{}, &DeliveryError{msg: "unknown channel type " + c.Type}
+}
+
+// FeishuSign is the signature of a Feishu custom bot: HMAC-SHA256 keyed with
+// "timestamp\nsecret" over an empty message, base64 encoded. timestamp is in seconds.
+func FeishuSign(timestamp, secret string) string {
+	h := hmac.New(sha256.New, []byte(timestamp+"\n"+secret))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// DingTalkSign is the signature of a DingTalk custom bot: HMAC-SHA256 keyed
+// with the secret over "timestamp\nsecret", base64 encoded. timestamp is in
+// milliseconds. The caller URL-encodes the result when it goes into a query.
+func DingTalkSign(timestamp, secret string) string {
+	h := hmac.New(sha256.New, []byte(secret))
+	h.Write([]byte(timestamp + "\n" + secret))
+	return base64.StdEncoding.EncodeToString(h.Sum(nil))
+}
+
+// requireScheme accepts https, and http too when allowHTTP is set. The value
+// is not echoed: it may carry a token.
+func requireScheme(raw string, allowHTTP bool) error {
+	u, err := url.Parse(raw)
+	switch {
+	case err != nil || u.Host == "":
+		return &DeliveryError{msg: "the address is not a valid URL"}
+	case u.Scheme == "https", allowHTTP && u.Scheme == "http":
+		return nil
+	case allowHTTP:
+		return &DeliveryError{msg: "the address must be an http(s) URL"}
+	}
+	return &DeliveryError{msg: "the address must be an https URL"}
+}
+
+// IsPlainHTTP reports whether raw is an http (not https) URL.
+func IsPlainHTTP(raw string) bool {
+	u, err := url.Parse(raw)
+	return err == nil && u.Scheme == "http"
+}
+
+func checkTelegram(body []byte) error {
+	var a struct {
+		OK          bool   `json:"ok"`
+		Description string `json:"description"`
+	}
+	if json.Unmarshal(body, &a) != nil || a.OK {
+		return nil
+	}
+	return &DeliveryError{msg: "telegram refused the message: " + shorten(a.Description)}
+}
+
+// checkErrCode builds a check for services that answer {"<codeKey>":0,...}
+// on success. Codes in temporary are worth retrying (rate limits).
+func checkErrCode(codeKey, msgKey string, temporary ...int) func([]byte) error {
+	return func(body []byte) error {
+		var m map[string]json.RawMessage
+		if json.Unmarshal(body, &m) != nil {
+			return nil // an answer that is not JSON: the status said success
+		}
+		raw, ok := m[codeKey]
+		if !ok {
+			return nil
+		}
+		var code int
+		if json.Unmarshal(raw, &code) != nil {
+			return nil
+		}
+		// Bark answers 200 on success; the others answer 0.
+		if code == 0 || (codeKey == "code" && code == 200) {
+			return nil
+		}
+		var msg string
+		_ = json.Unmarshal(m[msgKey], &msg)
+		de := &DeliveryError{msg: fmt.Sprintf("the service refused the message (code %d): %s", code, shorten(msg))}
+		for _, c := range temporary {
+			de.Temporary = de.Temporary || c == code
+		}
+		return de
+	}
+}
+
+func shorten(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	return truncRunes(s, 120)
+}
+
+func truncRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n-1]) + "…"
+}
+
+func truncBytes(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	cut := n - len("…")
+	for cut > 0 && !isRuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut] + "…"
+}
+
+func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
+
+// headerText makes s fit an HTTP header value: no line breaks, and non-ASCII
+// text as an RFC 2047 encoded word (ntfy decodes it).
+func headerText(s string) string {
+	s = strings.Join(strings.Fields(s), " ")
+	return mime.BEncoding.Encode("UTF-8", s)
+}
