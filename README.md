@@ -17,6 +17,9 @@ developer tenant keeps seeing development activity. It runs on **Windows, macOS 
 >
 > - Microsoft does not publish how it decides to renew a developer subscription. This tool **cannot guarantee** a
 >   renewal; it only gives the tenant regular, natural-looking activity and tells you what happened.
+> - Microsoft retires Legacy sandbox developer subscriptions on 2026-11-04: they get one final 60-day renewal and then
+>   can neither renew nor convert. Check your developer dashboard; no tool can change that (see the
+>   [FAQ](docs/user/faq.md), in Chinese).
 > - It only **reads**: it never writes, sends or deletes anything, and response bodies are not stored.
 > - It is not affiliated with Microsoft. Microsoft 365, Microsoft Graph and Entra are trademarks of Microsoft.
 > - Nothing is called while the computer is off or asleep. For long-term use, run it on an always-on machine or server.
