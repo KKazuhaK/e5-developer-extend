@@ -1,6 +1,6 @@
 import type {
   AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
-  TestResult, ValidationError,
+  RecommendResult, TestResult, ValidationError,
 } from "./types";
 
 /**
@@ -27,6 +27,8 @@ export interface Api {
     loginAfterSetup(name: string): Promise<void>;
     cancelLogin(name: string): Promise<void>;
     test(name: string): Promise<TestResult>;
+    /** Probes (read-only) which API categories a signed-in account can really use; needsLogin when it is not signed in. */
+    recommend(name: string): Promise<RecommendResult>;
     pause(name: string): Promise<void>;
     resume(name: string): Promise<void>;
     get(name: string): Promise<AccountInput>;

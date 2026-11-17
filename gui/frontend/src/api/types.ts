@@ -163,6 +163,20 @@ export interface TestResult {
   totalApis: number;
   expiresOn: string; // token expiry, RFC3339 or empty
 }
+/** AccountService.Recommend: the verdict on one API category. */
+export type AdviceStatus = "recommended" | "unavailable" | "maybe";
+export interface CategoryAdvice {
+  category: string;
+  status: AdviceStatus;
+  /** "", or a code: no_mailbox, no_onedrive, no_teams_license, no_sharepoint, needs_admin_role, not_supported, probe_failed, missing_permission:<scopes> */
+  reason: string;
+}
+/** AccountService.Recommend result. With needsLogin there is no advice. */
+export interface RecommendResult {
+  needsLogin: boolean;
+  categories: CategoryAdvice[];
+  recommended: string[];
+}
 /** HealthService.InstallService / UninstallService result. */
 export interface ServiceResult {
   actions: string[]; // what was done

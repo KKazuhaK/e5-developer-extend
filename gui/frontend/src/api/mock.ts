@@ -3,7 +3,7 @@
 // doctor details) is Chinese here, as the Go side will produce.
 import type { Api } from "./interface";
 import type {
-  AccountInput, AppSetupAction, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
+  AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
   Settings, Snapshot, ValidationError,
 } from "./types";
 
@@ -17,6 +17,8 @@ let controls: Controls = {
   empty: q.get("empty") === "1",
   slow: q.get("slow") === "1",
 };
+// ?recommend=full|nomailbox|noonedrive|error picks what the API recommendation says.
+const recommendVariant = (["full", "nomailbox", "noonedrive", "error"].includes(q.get("recommend") ?? "") ? q.get("recommend") : "full") as "full" | "nomailbox" | "noonedrive" | "error";
 const controlListeners = new Set<() => void>();
 export const mockControls = {
   get: () => controls,
@@ -503,6 +505,24 @@ export const mockApi: Api = {
         totalApis: entries.length,
         expiresOn: iso(Date.now() + 52 * MIN),
       };
+    },
+    async recommend(name) {
+      await wait(900);
+      const a = find(name);
+      if (a.status === "not_signed_in") return { needsLogin: true, categories: [], recommended: [] };
+      const variant = recommendVariant;
+      if (variant === "error") throw new Error("检查失败：网络连接超时。稍后再试，或先按默认选择。");
+      const unavailable: Record<string, string> = {};
+      if (variant === "nomailbox") for (const c of ["mail", "calendar", "contacts", "tasks"]) unavailable[c] = "no_mailbox";
+      if (variant === "noonedrive") for (const c of ["files", "notes"]) unavailable[c] = "no_onedrive";
+      const list: CategoryAdvice[] = categories().map((category) => {
+        if (unavailable[category]) return { category, status: "unavailable", reason: unavailable[category] };
+        if (category === "reports") return { category, status: "maybe", reason: "needs_admin_role" };
+        if (category === "apps") return { category, status: "unavailable", reason: "missing_permission:Application.Read.All" };
+        if (variant === "noonedrive" && category === "sites") return { category, status: "maybe", reason: "probe_failed" };
+        return { category, status: "recommended", reason: "" };
+      });
+      return { needsLogin: false, categories: list, recommended: list.filter((c) => c.status === "recommended").map((c) => c.category) };
     },
     async pause(name) {
       await lag();

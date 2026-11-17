@@ -40,6 +40,10 @@ export const wailsApi: Api = {
       const r = await AccountService.Test(n);
       return { ...r, scopes: arr(r.scopes) };
     },
+    recommend: async (n) => {
+      const r = cast<import("./types").RecommendResult>(await AccountService.Recommend(n));
+      return { ...r, categories: arr(r.categories), recommended: arr(r.recommended) };
+    },
     pause: (n) => AccountService.Pause(n),
     resume: (n) => AccountService.Resume(n),
     get: async (n) => {
