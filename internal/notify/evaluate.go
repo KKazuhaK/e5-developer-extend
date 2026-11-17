@@ -330,7 +330,11 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		// rounds to tell, what was announced stays as it is.
 		spiking := false
 		if in.Calls != nil && as.Status == store.StatusOK && !acct.Paused {
-			sp := callstat.SpikeOf(in.Calls[acct.Name], in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
+			calls := in.Calls[acct.Name]
+			if !as.ResumedAt.IsZero() { // what failed before the pause ended is not judged again
+				calls = slices.DeleteFunc(slices.Clone(calls), func(c store.Entry) bool { return !c.TS.After(as.ResumedAt) })
+			}
+			sp := callstat.SpikeOf(calls, in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
 			_, had := get(FailureSpike)
 			switch {
 			case sp.Active:

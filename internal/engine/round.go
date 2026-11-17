@@ -19,7 +19,8 @@ import (
 
 type outcome struct {
 	calls, ok, failed int
-	throttled         bool
+	throttled         bool   // some call ended throttled (it is no failure)
+	unavailable       int    // calls refused with 403/404; the API is paused for the account
 	netStop           bool   // a network error cut the round short
 	skipped           string // whole round skipped: network, needs_attention
 	attention         string // set when the account needs the user
@@ -125,9 +126,10 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 			as.ConsecutiveFailedRound++
 			if as.ConsecutiveFailedRound >= AutoPauseRounds {
 				as.Status = store.StatusPaused
-				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); fix the cause, then run: e5extend account resume %s",
+				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); it is tried again automatically, or fix the cause and run: e5extend account resume %s",
 					as.ConsecutiveFailedRound, out.lastFail, acct.Name)
 				as.NextRun = time.Time{}
+				as.NextProbe, as.Probes = now.Add(probeDelay(0)), 0
 				follow = append(follow, "auto_pause")
 				msg = as.Reason
 			}
@@ -139,44 +141,16 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 	if out.panicked {
 		skipped, msg = "panic", "round panicked; see the engine log"
 	} else if out.throttled && msg == "" {
-		msg = "throttled; round stopped early"
+		msg = "throttled by Microsoft Graph; some calls were skipped"
 	}
 	return skipped, msg, follow
 }
 
 // execute does the work of a round without touching the account's schedule.
 func (e *Engine) execute(ctx context.Context, acct config.Account, roundID string) (out outcome) {
-	au, err := e.authFor(acct)
+	tok, err := e.signIn(ctx, acct)
 	if err == nil {
-		var tok auth.Token
-		// After Graph rejected a token, do not trust the cached one again.
-		force := false
-		e.withLock(func() {
-			if rt := e.rt[acct.Name]; rt != nil {
-				force, rt.forceTok = rt.forceTok, false
-			}
-		})
-		// Only here may a password account sign in with its password again.
-		ctx := e.gateContext(ctx, acct.Name)
-		tctx := ctx
-		if force {
-			tctx = auth.ForceRefresh(ctx)
-		}
-		tok, err = au.Token(tctx)
-		if err != nil && force && ctx.Err() == nil && !errors.Is(err, auth.ErrTransient) && auth.CredentialFailure(err) == "" {
-			// A forced refresh is a recovery attempt; if the identity service
-			// rejects it, fall back to a normal silent request before raising
-			// attention. A credential failure of the password sign-in is not
-			// tried again: that would repeat a wrong password.
-			e.log.Warn("forced token refresh failed; retrying without force", "account", acct.Name)
-			tok, err = au.Token(ctx)
-		}
-		if err == nil {
-			e.saveHomeAccount(ctx, acct, tok)
-		}
-		if err == nil {
-			return e.callAPIs(ctx, acct, roundID, tok)
-		}
+		return e.callAPIs(ctx, acct, roundID, tok)
 	}
 	switch {
 	case ctx.Err() != nil:
@@ -187,6 +161,40 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 		out.attention = e.attentionReason(err, acct.Name)
 	}
 	return out
+}
+
+// signIn gets the access token for acct, as a round and a probe need it.
+func (e *Engine) signIn(ctx context.Context, acct config.Account) (auth.Token, error) {
+	au, err := e.authFor(acct)
+	if err != nil {
+		return auth.Token{}, err
+	}
+	// After Graph rejected a token, do not trust the cached one again.
+	force := false
+	e.withLock(func() {
+		if rt := e.rt[acct.Name]; rt != nil {
+			force, rt.forceTok = rt.forceTok, false
+		}
+	})
+	// Only here may a password account sign in with its password again.
+	ctx = e.gateContext(ctx, acct.Name)
+	tctx := ctx
+	if force {
+		tctx = auth.ForceRefresh(ctx)
+	}
+	tok, err := au.Token(tctx)
+	if err != nil && force && ctx.Err() == nil && !errors.Is(err, auth.ErrTransient) && auth.CredentialFailure(err) == "" {
+		// A forced refresh is a recovery attempt; if the identity service
+		// rejects it, fall back to a normal silent request before raising
+		// attention. A credential failure of the password sign-in is not
+		// tried again: that would repeat a wrong password.
+		e.log.Warn("forced token refresh failed; retrying without force", "account", acct.Name)
+		tok, err = au.Token(ctx)
+	}
+	if err == nil {
+		e.saveHomeAccount(ctx, acct, tok)
+	}
+	return tok, err
 }
 
 // attentionReason describes a sign-in failure for state.json and the call log.
@@ -278,21 +286,23 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	}
 
 	// handle books the result of one call; it reports whether the round must stop.
+	throttledRun := 0
 	handle := func(id string, res graph.Result) (stop bool) {
+		if res.Class != graph.Throttled {
+			throttledRun = 0
+		}
 		switch res.Class {
 		case graph.OK:
 			out.calls++
 			out.ok++
-			e.updateAccount(acct.Name, func(as *store.AccountState) { delete(as.APIForbiddenCount, id) })
 		case graph.Throttled:
+			// The call was retried while Retry-After allowed (see callOne). It
+			// is skipped now, and no failure. Two in a row mean the account
+			// is being throttled as a whole: the round ends.
 			out.calls++
 			out.throttled = true
-			wait := res.RetryAfter
-			if wait <= 0 {
-				wait = defaultRetryAfter
-			}
-			e.sleep(ctx, min(wait, maxRetryAfterWait))
-			return true
+			throttledRun++
+			return throttledRun >= 2
 		case graph.Network:
 			out.netStop = true
 			return true
@@ -309,22 +319,16 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 				}
 			})
 			return true
-		case graph.Forbidden:
+		case graph.Forbidden, graph.NotFound:
+			// The account cannot use this API: stop calling it for a day. It
+			// is no failure of the round.
 			out.calls++
-			out.failed++
-			out.lastFail = res.Class
+			out.unavailable++
 			e.updateAccount(acct.Name, func(as *store.AccountState) {
-				if as.APIForbiddenCount == nil {
-					as.APIForbiddenCount = map[string]int{}
+				if as.APISkipUntil == nil {
+					as.APISkipUntil = map[string]time.Time{}
 				}
-				as.APIForbiddenCount[id]++
-				if as.APIForbiddenCount[id] >= forbiddenLimit {
-					if as.APISkipUntil == nil {
-						as.APISkipUntil = map[string]time.Time{}
-					}
-					as.APISkipUntil[id] = e.clock.Now().Add(forbiddenSkip)
-					delete(as.APIForbiddenCount, id)
-				}
+				as.APISkipUntil[id] = e.clock.Now().Add(unavailableFor)
 			})
 		default:
 			out.calls++
@@ -354,13 +358,36 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			}
 			path = strings.ReplaceAll(path, "{user}", url.PathEscape(user))
 		}
-		res := e.o.Graph.Call(ctx, tok.AccessToken, path, e.pickQuery(api))
-		e.logCall(acct.Name, roundID, api.ID, res)
+		res := e.callOne(ctx, acct.Name, roundID, api.ID, tok.AccessToken, path, e.pickQuery(api))
 		if handle(api.ID, res) {
 			break
 		}
 	}
 	return finishCalls(ctx, out)
+}
+
+// callOne makes one call. When Graph throttles it (429, or 503 with
+// Retry-After) the same call is repeated after the time Retry-After names, at
+// most throttleRetries more times; a wait longer than maxRetryAfterWait ends
+// the attempts at once. Every answer is logged; the result is the last one.
+func (e *Engine) callOne(ctx context.Context, account, roundID, apiID, token, path string, q url.Values) graph.Result {
+	for attempt := 0; ; attempt++ {
+		res := e.o.Graph.Call(ctx, token, path, q)
+		e.logCall(account, roundID, apiID, res)
+		if res.Class != graph.Throttled {
+			return res
+		}
+		wait := res.RetryAfter
+		if wait <= 0 {
+			wait = defaultRetryAfter
+		}
+		if attempt >= throttleRetries || wait > maxRetryAfterWait {
+			return res
+		}
+		if !e.sleep(ctx, wait) {
+			return graph.Result{Class: graph.Canceled, Err: ctx.Err()}
+		}
+	}
 }
 
 func finishCalls(ctx context.Context, out outcome) outcome {

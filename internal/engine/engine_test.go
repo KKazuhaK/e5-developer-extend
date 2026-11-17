@@ -4,14 +4,17 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
@@ -177,84 +180,177 @@ func TestNoUsableAPIsNeedsAttention(t *testing.T) {
 	}
 }
 
-func TestThrottledHonorsRetryAfterAndEndsRound(t *testing.T) {
-	for _, tc := range []struct {
-		retry string
-		want  time.Duration
-	}{{"120", 2 * time.Minute}, {"3600", maxRetryAfterWait}} {
+// throttledFixture serves 429 with the given Retry-After for the contacts call.
+func throttledFixture(t *testing.T, n int, retry string) *fixture {
+	t.Helper()
+	f := newFixture(t, delegatedAcct("main"))
+	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 3, 3
+	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks
+	left := n
+	var mu sync.Mutex
+	f.h.setStatus(func(p string) (int, map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		if strings.Contains(p, "contacts") && left != 0 {
+			left--
+			return 429, map[string]string{"Retry-After": retry}
+		}
+		return 200, nil
+	})
+	f.start()
+	return f
+}
+
+func callsOf(es []store.Entry) []store.Entry {
+	var calls []store.Entry
+	for _, e := range es {
+		if e.API != "" {
+			calls = append(calls, e)
+		}
+	}
+	return calls
+}
+
+func TestThrottledCallIsRetriedAfterRetryAfter(t *testing.T) {
+	f := throttledFixture(t, 2, "20") // two 429s, then it works
+	f.round("main")
+	if got := f.clock.Sleeps(); len(got) != 2 || got[0] != 20*time.Second || got[1] != 20*time.Second {
+		t.Fatalf("slept %v, want two waits of 20s", got)
+	}
+	if n := f.h.count("contacts"); n != 3 {
+		t.Errorf("contacts called %d times, want 3", n)
+	}
+	var classes []string
+	for _, e := range callsOf(f.entries("main")) {
+		if strings.Contains(e.API, "contacts") {
+			classes = append(classes, e.Class)
+		}
+	}
+	if strings.Join(classes, ",") != "throttled,throttled,ok" {
+		t.Errorf("logged %v", classes)
+	}
+	as := f.acct("main")
+	if as.ConsecutiveFailedRound != 0 || as.Totals.Failed != 0 || as.LastSuccess.IsZero() {
+		t.Errorf("throttling counted as failure: %+v", as)
+	}
+}
+
+func TestThrottledGivesUpAfterTwoRetries(t *testing.T) {
+	f := throttledFixture(t, -1, "5") // always 429
+	f.round("main")
+	if n := f.h.count("contacts"); n != 3 {
+		t.Errorf("contacts called %d times, want 1 + 2 retries", n)
+	}
+	as := f.acct("main")
+	if as.ConsecutiveFailedRound != 0 || as.Totals.Failed != 0 || as.Status != store.StatusOK {
+		t.Errorf("throttled call failed the round: %+v", as)
+	}
+	if end := f.lastRoundEnd("main"); end.Failed != 0 || end.OK == 0 {
+		t.Errorf("round end %+v", end)
+	}
+}
+
+func TestThrottledWaitHttpDateAndCap(t *testing.T) {
+	// A Retry-After above the cap skips the call at once, without a wait.
+	f := throttledFixture(t, -1, "3600")
+	f.round("main")
+	if got := f.clock.Sleeps(); len(got) != 0 {
+		t.Errorf("slept %v for an over-long Retry-After", got)
+	}
+	if n := f.h.count("contacts"); n != 1 {
+		t.Errorf("contacts called %d times, want 1", n)
+	}
+	if f.acct("main").Totals.Failed != 0 {
+		t.Error("skipped call counted as failure")
+	}
+	// An HTTP date counts as the time left until then.
+	f = throttledFixture(t, 1, time.Now().Add(31*time.Second).UTC().Format(http.TimeFormat))
+	f.round("main")
+	got := f.clock.Sleeps()
+	if len(got) != 1 || got[0] < 25*time.Second || got[0] > 31*time.Second {
+		t.Errorf("slept %v for an HTTP date 31s ahead", got)
+	}
+}
+
+func TestThrottledDoesNotCountTowardsFailureSpike(t *testing.T) {
+	f := throttledFixture(t, -1, "1")
+	n := &fakeNotifier{}
+	f.opts.Notifier = n
+	f.start()
+	for i := 0; i < 6; i++ {
+		f.round("main")
+	}
+	for _, k := range n.kinds("main") {
+		if k == notify.FailureSpike || k == notify.AutoPaused {
+			t.Errorf("throttling raised %s", k)
+		}
+	}
+	if f.acct("main").Status != store.StatusOK {
+		t.Errorf("status %s", f.acct("main").Status)
+	}
+}
+
+func TestUnavailableAPIIsPausedFor24Hours(t *testing.T) {
+	for _, code := range []int{403, 404} {
 		f := newFixture(t, delegatedAcct("main"))
 		f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 3, 3
-		f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks
+		f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"}
 		f.h.setStatus(func(p string) (int, map[string]string) {
 			if strings.Contains(p, "contacts") {
-				return 429, map[string]string{"Retry-After": tc.retry}
+				return code, nil
 			}
 			return 200, nil
 		})
 		f.start()
 		f.round("main")
-
-		got := f.clock.Sleeps()
-		if len(got) != 1 || got[0] != tc.want {
-			t.Errorf("Retry-After %s: slept %v, want [%s]", tc.retry, got, tc.want)
-		}
-		// The throttled call is the last one of its round.
-		es := f.entries("main")
-		var calls []store.Entry
-		for _, e := range es {
-			if e.API != "" {
-				calls = append(calls, e)
-			}
-		}
-		if len(calls) == 0 || calls[len(calls)-1].Class != "throttled" {
-			t.Fatalf("calls after a 429: %+v", calls)
-		}
 		as := f.acct("main")
-		if as.ConsecutiveFailedRound != 0 || as.Totals.Failed != 0 {
-			t.Errorf("429 counted as failure: %+v", as)
+		until := as.APISkipUntil["contacts.list"]
+		if want := f.clock.now.Add(unavailableFor); until.Sub(want) > time.Minute || want.Sub(until) > time.Minute {
+			t.Fatalf("%d: skip until %s, want about %s", code, until, want)
+		}
+		// The round did not fail by itself.
+		if as.Totals.Failed != 0 || as.ConsecutiveFailedRound != 0 || as.Status != store.StatusOK || as.LastSuccess.IsZero() {
+			t.Errorf("%d: %+v", code, as)
+		}
+		for i := 0; i < 3; i++ {
+			f.round("main")
+		}
+		if f.h.count("contacts") != 1 {
+			t.Errorf("%d: contacts called while paused: %d", code, f.h.count("contacts"))
+		}
+
+		// After a day the API is tried again.
+		f.jump(unavailableFor)
+		f.h.setStatus(nil)
+		f.round("main")
+		if f.h.count("contacts") != 2 {
+			t.Errorf("%d: contacts not retried after 24h: %d", code, f.h.count("contacts"))
+		}
+		if as := f.acct("main"); len(as.APISkipUntil) != 0 {
+			t.Errorf("%d: skip map not cleaned: %+v", code, as.APISkipUntil)
 		}
 	}
 }
 
-func TestForbiddenSkipsAPIForSevenDays(t *testing.T) {
+func TestRoundWithOnlyUnavailableCallsDoesNotFail(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
-	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 3, 3
-	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"}
-	f.h.setStatus(func(p string) (int, map[string]string) {
-		if strings.Contains(p, "contacts") {
-			return 403, nil
-		}
-		return 200, nil
-	})
+	f.h.setStatus(func(string) (int, map[string]string) { return 404, nil })
 	f.start()
-	for i := 0; i < 2; i++ {
+	for i := 0; i < AutoPauseRounds+1; i++ {
 		f.round("main")
 	}
-	if f.h.count("contacts") != 2 || f.acct("main").APISkipUntil != nil {
-		t.Fatalf("skipped too early: %d calls, %+v", f.h.count("contacts"), f.acct("main").APISkipUntil)
+	if as := f.acct("main"); as.Status == store.StatusPaused || as.Totals.Failed != 0 {
+		t.Fatalf("404s failed the account: %+v", as)
 	}
-	f.round("main") // third consecutive 403
-	until := f.acct("main").APISkipUntil["contacts.list"]
-	if want := f.clock.now.Add(forbiddenSkip); until.Sub(want) > time.Minute || want.Sub(until) > time.Minute {
-		t.Fatalf("skip until %s, want about %s", until, want)
-	}
-	for i := 0; i < 3; i++ {
-		f.round("main")
-	}
-	if f.h.count("contacts") != 3 {
-		t.Errorf("contacts called while skipped: %d", f.h.count("contacts"))
-	}
+}
 
-	// After seven days the API is tried again, and a success clears its count.
-	f.jump(forbiddenSkip)
-	f.h.setStatus(nil)
+func TestUnauthorizedStillFails(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	f.h.setStatus(func(string) (int, map[string]string) { return 401, nil })
+	f.start()
 	f.round("main")
-	if f.h.count("contacts") != 4 {
-		t.Errorf("contacts not retried after the skip: %d", f.h.count("contacts"))
-	}
-	as := f.acct("main")
-	if len(as.APISkipUntil) != 0 || len(as.APIForbiddenCount) != 0 {
-		t.Errorf("maps not cleaned: %+v %+v", as.APISkipUntil, as.APIForbiddenCount)
+	if as := f.acct("main"); as.Totals.Failed == 0 || len(as.APISkipUntil) != 0 {
+		t.Fatalf("401 handled as unavailable: %+v", as)
 	}
 }
 
@@ -273,7 +369,7 @@ func TestThreeFailedRoundsPauseAndResumeTrigger(t *testing.T) {
 		t.Error("no auto_pause event")
 	}
 	calls := f.h.total()
-	f.jump(24 * time.Hour)
+	f.jump(probeFirst - time.Hour)
 	if f.h.total() != calls {
 		t.Error("paused account kept running")
 	}

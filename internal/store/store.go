@@ -66,16 +66,24 @@ type PasswordBlock struct {
 
 // AccountState is the persisted state of one account.
 type AccountState struct {
-	NextRun                time.Time            `json:"next_run,omitzero"`
-	LastRun                time.Time            `json:"last_run,omitzero"`
-	LastSuccess            time.Time            `json:"last_success,omitzero"`
-	Status                 string               `json:"status"`
-	Reason                 string               `json:"reason,omitempty"`
-	ConsecutiveFailedRound int                  `json:"consecutive_failed_rounds"`
-	GrantedScopes          []string             `json:"granted_scopes,omitempty"`
-	APISkipUntil           map[string]time.Time `json:"api_skip_until,omitempty"`
-	APIForbiddenCount      map[string]int       `json:"api_forbidden_count,omitempty"`
-	Totals                 Totals               `json:"totals"`
+	NextRun                time.Time `json:"next_run,omitzero"`
+	LastRun                time.Time `json:"last_run,omitzero"`
+	LastSuccess            time.Time `json:"last_success,omitzero"`
+	Status                 string    `json:"status"`
+	Reason                 string    `json:"reason,omitempty"`
+	ConsecutiveFailedRound int       `json:"consecutive_failed_rounds"`
+	GrantedScopes          []string  `json:"granted_scopes,omitempty"`
+	// APISkipUntil maps an API that answered 403 or 404 to the time until
+	// which the account does not call it again.
+	APISkipUntil map[string]time.Time `json:"api_skip_until,omitempty"`
+	// NextProbe is when an automatically paused account is next tried with a
+	// single call (zero: not waiting for one); Probes counts the tries so far.
+	NextProbe time.Time `json:"next_probe,omitzero"`
+	Probes    int       `json:"probes,omitempty"`
+	// ResumedAt is when a pause ended (by a probe or by the person); calls
+	// before it are not looked at when judging a failure spike.
+	ResumedAt time.Time `json:"resumed_at,omitzero"`
+	Totals    Totals    `json:"totals"`
 	// PasswordBlocked is set after a password sign-in failed in a way that
 	// retrying cannot fix; the engine then stops signing the account in with
 	// its password until the person acts (set-secret, login, editing the account).
