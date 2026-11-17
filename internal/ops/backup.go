@@ -785,8 +785,7 @@ func acquireEngineLock(dataDir string) (func(), error) {
 	deadline := time.Now().Add(engineProbeWait)
 	for {
 		release, err := engine.AcquireLock(dataDir)
-		// A fresh heartbeat says the engine is running: no need to wait for a probe to let go.
-		if !errors.Is(err, engine.ErrRunning) || !time.Now().Before(deadline) || engine.HeartbeatFresh(dataDir, 90*time.Second) {
+		if !errors.Is(err, engine.ErrRunning) || !time.Now().Before(deadline) {
 			return release, err
 		}
 		time.Sleep(25 * time.Millisecond)

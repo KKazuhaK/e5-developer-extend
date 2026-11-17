@@ -165,7 +165,7 @@ func Usable(st *store.State, a config.Account, forced bool) bool {
 	}
 	var as *store.AccountState
 	if st != nil {
-		as = st.Accounts[a.Name]
+		as = st.Accounts[a.Key()]
 	}
 	if as == nil {
 		return true // never run yet: the engine creates its state when it starts
@@ -228,7 +228,7 @@ func labelOf(accts []config.Account, key string) string {
 		switch k := a.TenantKey(); {
 		case strings.HasPrefix(k, "account:"):
 			if best == "" {
-				best = strings.TrimPrefix(k, "account:")
+				best = a.Name
 			}
 		case guidRe.MatchString(t):
 			if best == "" || !strings.Contains(best, ".") {

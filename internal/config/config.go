@@ -4,6 +4,8 @@ package config
 
 import (
 	"bytes"
+	"crypto/rand"
+	"encoding/base32"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -109,7 +111,12 @@ type Vault struct {
 
 // Account is one Microsoft 365 identity.
 type Account struct {
-	Name          string   `toml:"name"`
+	Name string `toml:"name"`
+	// ID is the stable key of the account, set when it is first renamed (or
+	// added by a version that has account IDs). State, vault entries, trigger
+	// files and call-log lines hang on Key(), so the name can change. An account
+	// without an ID is keyed by its name.
+	ID            string   `toml:"id,omitempty"`
 	Auth          string   `toml:"auth"`
 	Tenant        string   `toml:"tenant"`
 	ClientID      string   `toml:"client_id"`
@@ -159,6 +166,52 @@ func (s Subscription) Watches(sku string) bool {
 	return false
 }
 
+// Key is what everything stored per account is keyed by: the ID, or the name
+// of an account that has none yet.
+func (a Account) Key() string {
+	if a.ID != "" {
+		return a.ID
+	}
+	return a.Name
+}
+
+// accountIDEnc is base32 without padding, lower case: [a-z2-7].
+var accountIDEnc = base32.StdEncoding.WithPadding(base32.NoPadding)
+
+// NewAccountID returns a fresh 16-character ID ([a-z2-7]) that no account of c
+// has as key or name.
+func NewAccountID(c *Config) string {
+	for {
+		b := make([]byte, 10)
+		if _, err := rand.Read(b); err != nil {
+			panic("account id: " + err.Error())
+		}
+		id := strings.ToLower(accountIDEnc.EncodeToString(b))
+		if c == nil || !c.keyOrNameTaken(id) {
+			return id
+		}
+	}
+}
+
+func (c *Config) keyOrNameTaken(s string) bool {
+	for i := range c.Accounts {
+		if c.Accounts[i].Name == s || c.Accounts[i].Key() == s {
+			return true
+		}
+	}
+	return false
+}
+
+// FindKey returns the account with the given key.
+func (c *Config) FindKey(key string) (*Account, bool) {
+	for i := range c.Accounts {
+		if c.Accounts[i].Key() == key {
+			return &c.Accounts[i], true
+		}
+	}
+	return nil, false
+}
+
 // TenantKey names the tenant of an account for grouping: the configured
 // tenant, lower-cased. The multi-tenant endpoints (organizations, common,
 // consumers) do not name one tenant, so such an account stands alone.
@@ -166,7 +219,7 @@ func (a Account) TenantKey() string {
 	t := strings.ToLower(strings.TrimSpace(a.Tenant))
 	switch t {
 	case "", "common", "organizations", "consumers":
-		return "account:" + a.Name
+		return "account:" + a.Key()
 	}
 	return t
 }

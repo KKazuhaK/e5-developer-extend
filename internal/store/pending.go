@@ -155,34 +155,3 @@ func HasPendingImport(dir string) bool {
 	_, err := os.Stat(PendingImportPath(dir))
 	return err == nil
 }
-
-// PendingImportBytes returns the pending import file as it is, nil when there is none.
-func PendingImportBytes(dir string) []byte {
-	b, err := os.ReadFile(PendingImportPath(dir))
-	if err != nil {
-		return nil
-	}
-	return b
-}
-
-// RenamePendingImport renames the account from to to in the import that waits
-// to be adopted, if there is one. A rename that arrives while an engine is
-// claiming the file does not reach it; the engine then drops that entry
-// for an account that is not configured.
-func RenamePendingImport(dir, from, to string) error {
-	p, err := ReadPendingImport(dir)
-	if err != nil || p == nil {
-		return err
-	}
-	as, ok := p.Accounts[from]
-	if !ok {
-		return nil
-	}
-	delete(p.Accounts, from)
-	p.Accounts[to] = as
-	b, err := json.MarshalIndent(p, "", "  ")
-	if err != nil {
-		return err
-	}
-	return paths.WriteFileAtomic(PendingImportPath(dir), append(b, '\n'))
-}

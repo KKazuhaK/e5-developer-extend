@@ -121,14 +121,6 @@ type State struct {
 	// domain, or "account:<name>") to the tenant GUID a token revealed, so
 	// accounts that name one tenant in different ways share one state.
 	TenantAliases map[string]string `json:"tenant_aliases,omitempty"`
-	// RenamedFrom lists, per account, the names it had before (newest last).
-	// The call log keeps the name an entry was written under, so reading the
-	// log of an account also reads the entries of these names.
-	RenamedFrom map[string][]string `json:"renamed_from,omitempty"`
-	// RenameIDs are the IDs of the latest renames applied to this state, so
-	// applying one a second time (a claimed file that could not be deleted, a
-	// crash between the write and the cleanup) changes nothing.
-	RenameIDs []string `json:"rename_ids,omitempty"`
 }
 
 // NewState returns an empty state.
@@ -138,25 +130,42 @@ func NewState() *State {
 
 // Entry is one line of the call log: a call (API set) or an event (Event set).
 type Entry struct {
-	TS        time.Time `json:"ts"`
-	Account   string    `json:"account,omitempty"`
-	Round     string    `json:"round,omitempty"`
-	API       string    `json:"api,omitempty"`
-	Status    int       `json:"status,omitempty"`
-	Class     string    `json:"class,omitempty"`
-	LatencyMS int64     `json:"latency_ms,omitempty"`
-	Event     string    `json:"event,omitempty"`
-	OK        int       `json:"ok,omitempty"`
-	Failed    int       `json:"failed,omitempty"`
-	Skipped   string    `json:"skipped_reason,omitempty"`
-	Message   string    `json:"msg,omitempty"`
+	TS time.Time `json:"ts"`
+	// Account is the account's name when the line was written. AccountID is its
+	// ID, written for accounts that have one: the name can change, the ID does not.
+	Account   string `json:"account,omitempty"`
+	AccountID string `json:"aid,omitempty"`
+	Round     string `json:"round,omitempty"`
+	API       string `json:"api,omitempty"`
+	Status    int    `json:"status,omitempty"`
+	Class     string `json:"class,omitempty"`
+	LatencyMS int64  `json:"latency_ms,omitempty"`
+	Event     string `json:"event,omitempty"`
+	OK        int    `json:"ok,omitempty"`
+	Failed    int    `json:"failed,omitempty"`
+	Skipped   string `json:"skipped_reason,omitempty"`
+	Message   string `json:"msg,omitempty"`
+}
+
+// Key is the key of the account the line belongs to (config.Account.Key): its ID,
+// or the name of an account that had no ID when the line was written.
+func (e Entry) Key() string {
+	if e.AccountID != "" {
+		return e.AccountID
+	}
+	return e.Account
 }
 
 // Filter selects entries for Read. Zero fields match everything.
 type Filter struct {
+	// Account is an account key: lines written under its ID, and lines written
+	// before it had one under that name.
 	Account string
-	Since   time.Time
-	Limit   int // newest Limit entries; 0 means all
+	// Name selects the lines written under this name, whatever account they
+	// belong to; for a name no configured account has. Ignored with Account.
+	Name  string
+	Since time.Time
+	Limit int // newest Limit entries; 0 means all
 }
 
 // Store reads and writes under one data directory.
@@ -273,24 +282,8 @@ type logFile struct {
 	day  time.Time
 }
 
-// namesOf returns the names whose log entries belong to account: the name
-// itself and the ones the account had before (State.RenamedFrom).
-func (s *Store) namesOf(account string) map[string]bool {
-	if account == "" {
-		return nil
-	}
-	names := map[string]bool{account: true}
-	if st, err := s.LoadState(); err == nil {
-		for _, n := range st.RenamedFrom[account] {
-			names[n] = true
-		}
-	}
-	return names
-}
-
 // Read returns the entries matching f, oldest first. Damaged lines are skipped.
 func (s *Store) Read(f Filter) ([]Entry, error) {
-	names := s.namesOf(f.Account)
 	loc := time.Local
 	if !f.Since.IsZero() {
 		loc = f.Since.Location()
@@ -316,7 +309,10 @@ func (s *Store) Read(f Filter) ([]Entry, error) {
 			if json.Unmarshal(sc.Bytes(), &e) != nil {
 				continue
 			}
-			if f.Account != "" && !names[e.Account] {
+			if f.Account != "" && e.Key() != f.Account {
+				continue
+			}
+			if f.Account == "" && f.Name != "" && e.Account != f.Name {
 				continue
 			}
 			if !f.Since.IsZero() && e.TS.Before(f.Since) {

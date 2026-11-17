@@ -152,7 +152,11 @@ func (o *Ops) RunNow(ctx context.Context, names []string, opts RunNowOptions) (R
 	if engine.Running(eo.DataDir) {
 		eo.Notifier.Close()
 		for _, n := range targets {
-			if err := engine.TriggerRun(eo.DataDir, n); err != nil {
+			key := n // trigger files are named by the account's key
+			if a, ok := cfg.Find(n); ok {
+				key = a.Key()
+			}
+			if err := engine.TriggerRun(eo.DataDir, key); err != nil {
 				return res, err
 			}
 		}

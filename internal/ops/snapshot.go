@@ -132,10 +132,10 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 		if en.API == "" || en.API == "users.pick" {
 			continue
 		}
-		c := byAcct[en.Account]
+		c := byAcct[en.Key()]
 		if c == nil {
 			c = &counts{}
-			byAcct[en.Account] = c
+			byAcct[en.Key()] = c
 		}
 		switch en.Class {
 		case "ok":
@@ -156,12 +156,12 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	}
 
 	for _, acct := range cfg.Accounts {
-		as := state.Accounts[acct.Name]
+		as := state.Accounts[acct.Key()]
 		sum := AccountSummary{
 			Name: acct.Name, Auth: acct.Auth, Tenant: acct.Tenant, Account: acct, State: as,
 			TotalAPIs: len(apis), Paused: acct.Paused,
 		}
-		if c := byAcct[acct.Name]; c != nil {
+		if c := byAcct[acct.Key()]; c != nil {
 			sum.TodayOK, sum.TodayFailed = c.ok, c.failed
 		}
 		if acct.SecretExpires != "" {

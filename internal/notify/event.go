@@ -67,8 +67,11 @@ const StatusEnabled = "Enabled"
 
 // Event is one alert.
 type Event struct {
-	Event   string    // kind, one of the constants above
-	Account string    // account name from the config; empty for global events
+	Event   string // kind, one of the constants above
+	Account string // account name from the config; empty for global events
+	// Key is the account's key (config.Account.Key), what its state is kept under;
+	// the name can change while an alert is on its way. Empty for global events.
+	Key     string
 	Message string    // what happened and what to do, without secrets
 	Time    time.Time // when the condition was detected
 

@@ -32,15 +32,10 @@ type outcome struct {
 // the account's running flag and added to e.wg.
 func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 	defer e.wg.Done()
-	// The round follows its account through a rename: the runtime record is
-	// moved to the new name, and the round finds it by this pointer.
-	var rt0 *accountRT
-	e.withLock(func() { rt0 = e.rt[acct.Name] })
-	ctx = context.WithValue(ctx, rtKey{}, rt0)
 	defer func() {
 		e.mu.Lock()
-		if rt0 != nil {
-			rt0.running = false
+		if rt := e.rt[acct.Key()]; rt != nil {
+			rt.running = false
 		}
 		e.mu.Unlock()
 	}()
@@ -49,8 +44,8 @@ func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 	if manual {
 		// An explicit run retries a failed user lookup.
 		e.withLock(func() {
-			if rt0 != nil {
-				rt0.userFail = ""
+			if rt := e.rt[acct.Key()]; rt != nil {
+				rt.userFail = ""
 			}
 		})
 	}
@@ -68,16 +63,16 @@ func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 		return
 	}
 	// A panic while booking the result must not take the process down either.
-	e.guard("finish "+acct.Name, func() { e.finish(ctx, acct, roundID, out) })
+	e.guard("finish "+acct.Name, func() { e.finish(acct, roundID, out) })
 }
 
-func (e *Engine) finish(ctx context.Context, acct config.Account, roundID string, out outcome) {
+func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
 	now := e.clock.Now()
 	var skipped, msg string
 	var follow []string // events to log after unlocking
 	found := true
 	e.withLock(func() {
-		as := e.state.Accounts[nameInLocked(ctx, acct.Name)]
+		as := e.state.Accounts[acct.Key()]
 		if as == nil { // removed from the config meanwhile
 			found = false
 			return
@@ -90,10 +85,12 @@ func (e *Engine) finish(ctx context.Context, acct config.Account, roundID string
 		return
 	}
 
-	e.emit(store.Entry{TS: now, Account: acct.Name, Round: roundID, Event: "round_end",
-		OK: out.ok, Failed: out.failed, Skipped: skipped, Message: msg})
+	ent := e.entry(acct.Key())
+	ent.TS, ent.Round, ent.Event = now, roundID, "round_end"
+	ent.OK, ent.Failed, ent.Skipped, ent.Message = out.ok, out.failed, skipped, msg
+	e.emit(ent)
 	for _, ev := range follow {
-		e.event(acct.Name, ev, msg)
+		e.event(acct.Key(), ev, msg)
 	}
 	e.evalNotify()
 	e.log.Info("round finished", "account", acct.Name, "ok", out.ok, "failed", out.failed, "skipped", skipped)
@@ -157,12 +154,12 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 		// After Graph rejected a token, do not trust the cached one again.
 		force := false
 		e.withLock(func() {
-			if rt := rtOf(ctx); rt != nil {
+			if rt := e.rt[acct.Key()]; rt != nil {
 				force, rt.forceTok = rt.forceTok, false
 			}
 		})
 		// Only here may a password account sign in with its password again.
-		ctx := e.gateContext(ctx, acct.Name)
+		ctx := e.gateContext(ctx, acct.Key())
 		tctx := ctx
 		if force {
 			tctx = auth.ForceRefresh(ctx)
@@ -236,7 +233,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	var minN, maxN int
 	var random, gone bool
 	e.withLock(func() {
-		as := e.state.Accounts[nameInLocked(ctx, acct.Name)]
+		as := e.state.Accounts[acct.Key()]
 		if as == nil {
 			gone = true
 			return
@@ -285,12 +282,12 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 
 	// handle books the result of one call; it reports whether the round must stop.
 	handle := func(id string, res graph.Result) (stop bool) {
-		e.countAPI(ctx, acct.Name, id, res)
+		e.countAPI(acct.Key(), id, res)
 		switch res.Class {
 		case graph.OK:
 			out.calls++
 			out.ok++
-			e.updateAccount(ctx, acct.Name, func(as *store.AccountState) { delete(as.APIForbiddenCount, id) })
+			e.updateAccount(acct.Key(), func(as *store.AccountState) { delete(as.APIForbiddenCount, id) })
 		case graph.Throttled:
 			out.calls++
 			out.throttled = true
@@ -311,7 +308,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			out.failed++
 			out.lastFail = res.Class
 			e.withLock(func() {
-				if rt := e.rt[acct.Name]; rt != nil {
+				if rt := e.rt[acct.Key()]; rt != nil {
 					rt.forceTok = true
 				}
 			})
@@ -320,7 +317,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			out.calls++
 			out.failed++
 			out.lastFail = res.Class
-			e.updateAccount(ctx, acct.Name, func(as *store.AccountState) {
+			e.updateAccount(acct.Key(), func(as *store.AccountState) {
 				if as.APIForbiddenCount == nil {
 					as.APIForbiddenCount = map[string]int{}
 				}
@@ -362,7 +359,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			path = strings.ReplaceAll(path, "{user}", url.PathEscape(user))
 		}
 		res := e.o.Graph.Call(ctx, tok.AccessToken, path, e.pickQuery(api))
-		e.logCall(acct.Name, roundID, api.ID, res)
+		e.logCall(acct, roundID, api.ID, res)
 		if handle(api.ID, res) {
 			break
 		}
@@ -385,8 +382,9 @@ func finishCalls(ctx context.Context, out outcome) outcome {
 }
 
 // logCall writes one call-log line: IDs and numbers only, never content.
-func (e *Engine) logCall(account, roundID, apiID string, res graph.Result) {
-	e.emit(store.Entry{TS: e.clock.Now(), Account: account, Round: roundID, API: apiID,
+func (e *Engine) logCall(acct config.Account, roundID, apiID string, res graph.Result) {
+	// The name is the one the round began with; the ID keeps the line with the account across a rename.
+	e.emit(store.Entry{TS: e.clock.Now(), Account: acct.Name, AccountID: acct.ID, Round: roundID, API: apiID,
 		Status: res.Status, Class: string(res.Class), LatencyMS: res.Latency.Milliseconds()})
 }
 
@@ -395,7 +393,7 @@ func (e *Engine) logCall(account, roundID, apiID string, res graph.Result) {
 // result). Calls that
 // never got an answer (network error, cancelled) and the user lookup are not
 // counted. The map holds at most one entry per catalog API.
-func (e *Engine) countAPI(ctx context.Context, account, id string, res graph.Result) {
+func (e *Engine) countAPI(account, id string, res graph.Result) {
 	if res.Class == graph.Network || res.Class == graph.Canceled || id == "users.pick" {
 		return
 	}
@@ -410,7 +408,7 @@ func (e *Engine) countAPI(ctx context.Context, account, id string, res graph.Res
 		return
 	}
 	now := e.clock.Now()
-	e.updateAccount(ctx, account, func(as *store.AccountState) {
+	e.updateAccount(account, func(as *store.AccountState) {
 		if as.APIStats == nil {
 			as.APIStats = map[string]*store.APIStat{}
 		}
@@ -450,10 +448,10 @@ func (e *Engine) pruneAPIStatsLocked(as *store.AccountState) {
 	}
 }
 
-func (e *Engine) updateAccount(ctx context.Context, name string, f func(*store.AccountState)) {
+func (e *Engine) updateAccount(name string, f func(*store.AccountState)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if as := e.state.Accounts[nameInLocked(ctx, name)]; as != nil {
+	if as := e.state.Accounts[name]; as != nil {
 		f(as)
 	}
 }
@@ -488,7 +486,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 	var cached string
 	var failedToday bool
 	e.withLock(func() {
-		if rt := e.rt[acct.Name]; rt != nil {
+		if rt := e.rt[acct.Key()]; rt != nil {
 			if rt.userID != "" && rt.userDay == day {
 				cached = rt.userID
 			}
@@ -504,7 +502,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 	}
 
 	ids, res := e.o.Graph.ListUserIDs(ctx, token)
-	e.logCall(acct.Name, roundID, "users.pick", res)
+	e.logCall(acct, roundID, "users.pick", res)
 	if res.Class != graph.OK || len(ids) == 0 {
 		if res.Class == graph.OK {
 			res.Class = graph.NotFound
@@ -514,7 +512,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 			// Temporary: try again next time.
 		default:
 			e.withLock(func() {
-				if rt := e.rt[acct.Name]; rt != nil {
+				if rt := e.rt[acct.Key()]; rt != nil {
 					rt.userFail = day
 				}
 			})
@@ -523,7 +521,7 @@ func (e *Engine) targetUser(ctx context.Context, acct config.Account, roundID, t
 	}
 	id := ids[e.intn(len(ids))]
 	e.withLock(func() {
-		if rt := e.rt[acct.Name]; rt != nil {
+		if rt := e.rt[acct.Key()]; rt != nil {
 			rt.userID, rt.userDay = id, day
 		}
 	})
@@ -554,7 +552,7 @@ func (e *Engine) saveHomeAccount(ctx context.Context, acct config.Account, tok a
 		return
 	}
 	e.withLock(func() {
-		if a, ok := e.cfg.Find(acct.Name); ok {
+		if a, ok := e.cfg.FindKey(acct.Key()); ok {
 			a.HomeAccountID = tok.HomeAccountID
 		}
 	})

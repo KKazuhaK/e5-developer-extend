@@ -107,7 +107,7 @@ func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Acc
 		if err != nil {
 			continue
 		}
-		tctx := e.gateContext(ctx, acct.Name)
+		tctx := e.gateContext(ctx, acct.Key())
 		if forced {
 			tctx = auth.ForceRefresh(tctx)
 		}
@@ -150,7 +150,7 @@ func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Acc
 		got, res := e.o.Graph.ListSubscriptions(ctx, tok.AccessToken)
 		switch res.Class {
 		case graph.OK:
-			subs, used, ok = got, acct.Name, true
+			subs, used, ok = got, acct.Key(), true
 		case graph.Forbidden, graph.AuthFailed:
 			refused = true
 			continue
@@ -291,7 +291,7 @@ func (e *Engine) handleSubscriptionTrigger(file string, force map[string]bool) {
 	name := strings.TrimSuffix(file, subscriptionSuffix)
 	var key string
 	e.withLock(func() {
-		if a, ok := e.cfg.Find(name); ok {
+		if a, ok := e.cfg.FindKey(name); ok {
 			key = subscription.KeyOf(e.state, *a)
 		}
 	})

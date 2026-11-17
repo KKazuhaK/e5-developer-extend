@@ -98,6 +98,7 @@ func (c *Config) Validate() error {
 	for i := range c.Accounts {
 		validateAccount(&c.Accounts[i], i, seen, add)
 	}
+	validateAccountKeys(c.Accounts, add)
 	for i, sku := range c.Subscription.Skus {
 		if strings.TrimSpace(sku) == "" || strings.ContainsAny(sku, " \t") {
 			add(fmt.Sprintf("subscription.skus[%d]", i), "must be a SKU part number such as DEVELOPERPACK_E5, got %q", sku)
@@ -172,6 +173,31 @@ func validateSchedule(s *Schedule, add func(path, format string, args ...any)) {
 		b := time.Date(s.PeriodEnd.Year, time.Month(s.PeriodEnd.Month), s.PeriodEnd.Day, 0, 0, 0, 0, time.UTC)
 		if b.Before(a) {
 			add("schedule.period_end", "must not be before period_start")
+		}
+	}
+}
+
+// validateAccountKeys checks the IDs: each is a valid name-like string, keys are
+// unique, and no account is named like another account's key (a trigger file or
+// vault entry of one would then be taken for the other's).
+func validateAccountKeys(accts []Account, add func(path, format string, args ...any)) {
+	byKey := map[string]int{}
+	for i := range accts {
+		a := &accts[i]
+		p := fmt.Sprintf("accounts[%d].id", i)
+		if a.ID != "" && (!nameRe.MatchString(a.ID) || reservedNames[a.ID]) {
+			add(p, "must be 1-64 lowercase letters, digits, - or _: %q", a.ID)
+			continue
+		}
+		if j, ok := byKey[a.Key()]; ok {
+			add(p, "key %q is already the key of account %q", a.Key(), accts[j].Name)
+			continue
+		}
+		byKey[a.Key()] = i
+	}
+	for i := range accts {
+		if j, ok := byKey[accts[i].Name]; ok && j != i {
+			add(fmt.Sprintf("accounts[%d].name", i), "%q is the key of account %q", accts[i].Name, accts[j].Name)
 		}
 	}
 }

@@ -80,7 +80,8 @@ func (ev *evaluator) cooldownFor(kind, key string) time.Duration {
 // scope is where the notices of one account, or of the global alerts, live.
 type scope struct {
 	ev      *evaluator
-	account string // empty for global alerts
+	account string // display name; empty for global alerts
+	key     string // state key of the account
 	tenant  string
 	// subscription is the subscription ID of a tenant-level alert.
 	subscription string
@@ -116,7 +117,7 @@ func (s scope) del(kind string) {
 // event rebuilds the event of a notice. key carries what the decision was
 // based on: the numbers of a failure_spike, the origin of a recovery.
 func (s scope) event(kind, key, msg string, at, attempt time.Time) Event {
-	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt, Subscription: s.subscription,
+	e := Event{Event: kind, Account: s.account, Key: s.key, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt, Subscription: s.subscription,
 		SKU: s.sku, SubStatus: s.status, EndDate: s.end}
 	if sev := LevelOfKey(kind, key); sev != LevelOf(kind) {
 		e.Severity = sev
@@ -239,7 +240,7 @@ func (s scope) retry() {
 			continue
 		}
 		if slices.ContainsFunc(ev.events, func(e Event) bool {
-			return e.Account == s.account && e.Event == kind && e.Tenant == s.tenant && e.Subscription == s.subscription
+			return e.Key == s.key && e.Account == s.account && e.Event == kind && e.Tenant == s.tenant && e.Subscription == s.subscription
 		}) {
 			continue
 		}
@@ -277,11 +278,11 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	}
 	var running, failing int // unpaused accounts, and those of them that are failing
 	for _, acct := range in.Accounts {
-		as := in.State.Accounts[acct.Name]
+		as := in.State.Accounts[acct.Key()]
 		if as == nil {
 			continue
 		}
-		s := scope{ev: ev, account: acct.Name, tenant: acct.Tenant, notified: &as.Notified, sent: &as.LastSent}
+		s := scope{ev: ev, account: acct.Name, key: acct.Key(), tenant: acct.Tenant, notified: &as.Notified, sent: &as.LastSent}
 		get, del := s.get, s.del
 		raise := func(kind, key, msg string) { // an announced problem starts or continues an episode
 			s.dropObsoleteRecovery()
@@ -330,7 +331,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		// rounds to tell, what was announced stays as it is.
 		spiking := false
 		if in.Calls != nil && as.Status == store.StatusOK && !acct.Paused {
-			sp := callstat.SpikeOf(in.Calls[acct.Name], in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
+			sp := callstat.SpikeOf(in.Calls[acct.Key()], in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
 			_, had := get(FailureSpike)
 			switch {
 			case sp.Active:
@@ -441,7 +442,7 @@ func sortedKinds(m map[string]store.Notice) []string {
 
 // MarkDelivered records that the alert of the given kind for the account has
 // reached the destination for the attempt made at tried (the event Time).
-// An empty account means a global alert. It reports whether the state changed.
+// account is the account key; empty means a global alert. It reports whether the state changed.
 func MarkDelivered(st *store.State, account, kind string, tried time.Time) bool {
 	notified := st.Notified
 	if account != "" {
@@ -501,7 +502,11 @@ func MarkEvent(st *store.State, ev Event) bool {
 		if e.Subscription != "" {
 			return markSubscription(st, e.Tenant, e.Subscription, e.Event, attempt(e))
 		}
-		return MarkDelivered(st, e.Account, e.Event, attempt(e))
+		key := e.Key
+		if key == "" {
+			key = e.Account
+		}
+		return MarkDelivered(st, key, e.Event, attempt(e))
 	}
 	if ev.Event != Digest {
 		return mark(ev)

@@ -1,7 +1,6 @@
 package engine
 
 import (
-	"context"
 	"net/http"
 	"strings"
 	"testing"
@@ -94,7 +93,7 @@ func TestAPIStatsAreCounted(t *testing.T) {
 
 	// An API that left the catalog is dropped on the next round, and the
 	// counters survive a restart.
-	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) { as.APIStats["gone.api"] = &store.APIStat{OK: 1} })
+	f.e.updateAccount("main", func(as *store.AccountState) { as.APIStats["gone.api"] = &store.APIStat{OK: 1} })
 	f.round("main")
 	if _, ok := f.acct("main").APIStats["gone.api"]; ok {
 		t.Error("statistics of an API outside the catalog were kept")
