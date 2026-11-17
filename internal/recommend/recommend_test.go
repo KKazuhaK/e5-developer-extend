@@ -219,16 +219,16 @@ func TestProbesAreSmall(t *testing.T) {
 	for _, p := range Probes() {
 		for _, id := range p.APIs {
 			q := probeQuery(byID[id])
-			if singletons[id] {
+			if noQuery[id] {
 				if q != nil {
-					t.Errorf("%s: singleton with a query", id)
+					t.Errorf("%s: sent without a query, got %v", id, q)
 				}
 				continue
 			}
 			if q.Get("$select") != "id" {
 				t.Errorf("%s: probe must select only id, got %v", id, q)
 			}
-			if id != "teams.joined" && q.Get("$top") != "1" {
+			if q.Get("$top") != "1" {
 				t.Errorf("%s: collection probe must use $top=1, got %v", id, q)
 			}
 		}
@@ -243,10 +243,10 @@ func TestProbesAreSmall(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	}))
 	defer srv.Close()
-	in := Input{Account: "a", Kind: catalog.Delegated, Granted: []string{"Mail.ReadBasic", "Files.Read"}, APIs: apis, Graph: &graph.Client{Base: srv.URL}, Token: "T"}
+	in := Input{Account: "a", Kind: catalog.Delegated, Granted: []string{"Mail.ReadBasic", "Files.Read", "Team.ReadBasic.All"}, APIs: apis, Graph: &graph.Client{Base: srv.URL}, Token: "T"}
 	Run(context.Background(), in)
 	slices.Sort(got)
-	if !slices.Equal(got, []string{"/me/drive?", "/me/mailFolders?$select=id&$top=1"}) {
+	if !slices.Equal(got, []string{"/me/drive?", "/me/joinedTeams?", "/me/mailFolders?$select=id&$top=1"}) {
 		t.Errorf("requests: %v", got)
 	}
 }
@@ -319,7 +319,7 @@ func TestAppOnlyIdentity(t *testing.T) {
 	t.Run("no user found", func(t *testing.T) {
 		f := newFake(t, map[string]int{"/users": 403})
 		r := Run(context.Background(), f.input(t, catalog.App, granted, ""))
-		expect(t, f, r, "mail", Maybe, ReasonProbeFailed)
+		expect(t, f, r, "mail", Maybe, ReasonCannotProbe+":user")
 	})
 	t.Run("full", func(t *testing.T) {
 		f := newFake(t, nil)
@@ -372,4 +372,38 @@ func TestDefaultFlagFollowsTheCatalog(t *testing.T) {
 			t.Errorf("%s default = %v", c.Category, c.Default)
 		}
 	}
+}
+
+func TestCannotProbeIsNotAFailedProbe(t *testing.T) {
+	t.Run("no allowed API", func(t *testing.T) {
+		f := newFake(t, nil)
+		in := f.input(t, catalog.Delegated, []string{"User.Read", "Mail.ReadBasic"}, "")
+		// Take every mailbox probe API away from the catalog view but keep a
+		// mail category alive through an extra API.
+		var apis []catalog.API
+		for _, a := range in.APIs {
+			if a.Category == "mail" && slices.Contains(probes[0].APIs, a.ID) {
+				continue
+			}
+			apis = append(apis, a)
+		}
+		apis = append(apis, catalog.API{ID: "mail.extra", Category: "mail", Name: "x", Delegated: "/me/extra", Scopes: catalog.Scopes{Delegated: []string{"Mail.ReadBasic"}}, Default: true})
+		in.APIs = apis
+		got := f.get(Run(context.Background(), in), "mail")
+		if got.Status != Maybe || !strings.HasPrefix(got.Reason, ReasonCannotProbe+":scopes:") {
+			t.Fatalf("mail = %+v", got)
+		}
+		rec := Recommendation{Categories: []CategoryAdvice{got}}
+		if rec.HasFailedProbes() {
+			t.Error("cannot_probe must not count as a failed probe")
+		}
+	})
+	t.Run("app-only cannot look up a user", func(t *testing.T) {
+		f := newFake(t, map[string]int{"/users": 403})
+		r := Run(context.Background(), f.input(t, catalog.App, catalog.RecommendedApplication, ""))
+		expect(t, f, r, "mail", Maybe, ReasonCannotProbe+":user")
+		if r.HasFailedProbes() {
+			t.Error("cannot_probe must not count as a failed probe")
+		}
+	})
 }

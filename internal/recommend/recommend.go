@@ -35,6 +35,10 @@ const (
 	ReasonNeedsAdminRole    = "needs_admin_role"
 	ReasonNotSupported      = "not_supported"
 	ReasonProbeFailed       = "probe_failed"
+	// ReasonCannotProbe: the probe could not run at all. It is followed by what
+	// is missing: "cannot_probe:scopes:<A,B>" (none of its APIs is allowed) or
+	// "cannot_probe:user" (an application identity could not look up a user).
+	ReasonCannotProbe = "cannot_probe"
 	// ReasonArbitraryUser: an application identity without a configured user
 	// was probed with an arbitrary user, so "absent" proves nothing.
 	ReasonArbitraryUser = "probe_arbitrary_user"
@@ -114,19 +118,16 @@ type probe struct {
 	Reason     string
 }
 
-// singletons are probe APIs that return one small object, so they take no
-// query. Every other probe API is a collection and is asked for one item with
-// only its id (probeQuery), so a probe never downloads bulk data.
-var singletons = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true}
+// noQuery are probe APIs that are sent without any query: single small
+// objects, and joinedTeams, which does not support OData query parameters (its
+// result is only the user's own teams). Every other probe API is a collection
+// and is asked for one item with only its id (probeQuery), so a probe never
+// downloads bulk data.
+var noQuery = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true, "teams.joined": true}
 
-// probeQuery is the query of a collection probe. joinedTeams does not support
-// $top, but its result is only the user's own teams.
 func probeQuery(api catalog.API) url.Values {
-	if singletons[api.ID] {
+	if noQuery[api.ID] {
 		return nil
-	}
-	if api.ID == "teams.joined" {
-		return url.Values{"$select": {"id"}}
 	}
 	return url.Values{"$top": {"1"}, "$select": {"id"}}
 }
@@ -205,7 +206,14 @@ const (
 	present
 	absent
 	arbitrary // absent, but for a user picked at random
+	cannot    // the probe could not run; see the detail
 )
+
+// result is a probe's verdict; detail says what was missing for cannot.
+type result struct {
+	v      verdict
+	detail string
+}
 
 // Run probes and returns the verdict on every category of in.APIs.
 func Run(ctx context.Context, in Input) Recommendation {
@@ -236,7 +244,7 @@ func Run(ctx context.Context, in Input) Recommendation {
 	// Probes, only for services some still-open category depends on.
 	var user userLookup
 	user.in = in
-	results := make([]verdict, len(probes))
+	results := make([]result, len(probes))
 	var wg sync.WaitGroup
 	for i, p := range probes {
 		open := false
@@ -250,6 +258,7 @@ func Run(ctx context.Context, in Input) Recommendation {
 		}
 		api, ok := pickAPI(in, byID, p)
 		if !ok {
+			results[i] = result{cannot, "scopes:" + strings.Join(probeScopes(in, byID, p), ",")}
 			continue
 		}
 		wg.Add(1)
@@ -266,7 +275,9 @@ func Run(ctx context.Context, in Input) Recommendation {
 			if a == nil || a.Status != Recommended {
 				continue
 			}
-			switch results[i] {
+			switch results[i].v {
+			case cannot:
+				a.Status, a.Reason = Maybe, ReasonCannotProbe+":"+results[i].detail
 			case absent:
 				a.Status, a.Reason = Unavailable, p.Reason
 			case arbitrary:
@@ -318,6 +329,22 @@ func permissionProblem(in Input, category string) string {
 	return ReasonMissingPermission + ":" + strings.Join(need, ",")
 }
 
+// probeScopes lists, for a probe none of whose APIs is allowed, the first
+// (recommended minimum) scope of each of them.
+func probeScopes(in Input, byID map[string]catalog.API, p probe) []string {
+	var out []string
+	for _, id := range p.APIs {
+		a, ok := byID[id]
+		if !ok || a.Path(in.Kind) == "" {
+			continue
+		}
+		if sc := a.ScopesFor(in.Kind); len(sc) > 0 && !slices.Contains(out, sc[0]) {
+			out = append(out, sc[0])
+		}
+	}
+	return out
+}
+
 // pickAPI returns the first API of the probe that the granted permissions allow.
 func pickAPI(in Input, byID map[string]catalog.API, p probe) (catalog.API, bool) {
 	have := map[string]bool{}
@@ -338,29 +365,29 @@ func pickAPI(in Input, byID map[string]catalog.API, p probe) (catalog.API, bool)
 	return catalog.API{}, false
 }
 
-func runProbe(ctx context.Context, in Input, user *userLookup, api catalog.API, p probe) verdict {
+func runProbe(ctx context.Context, in Input, user *userLookup, api catalog.API, p probe) result {
 	path := api.Path(in.Kind)
 	picked := false
 	if api.UsesUser(in.Kind) {
 		u, ok := user.get(ctx)
 		if !ok {
-			return unknown
+			return result{cannot, "user"}
 		}
 		picked = in.Username == ""
 		path = strings.ReplaceAll(path, "{user}", url.PathEscape(u))
 	}
 	res := in.Graph.Call(ctx, in.Token, path, probeQuery(api))
 	if res.Class == graph.OK {
-		return present
+		return result{v: present}
 	}
 	if slices.Contains(p.Absent, res.Status) {
 		// A user picked at random says nothing certain about the others.
 		if picked {
-			return arbitrary
+			return result{v: arbitrary}
 		}
-		return absent
+		return result{v: absent}
 	}
-	return unknown
+	return result{v: unknown}
 }
 
 // userLookup finds the target user of an application identity once.

@@ -130,3 +130,37 @@ func TestDefaultCategoriesExcludeReports(t *testing.T) {
 		t.Fatalf("%v %v", d, err)
 	}
 }
+
+func TestApplyCategoriesFreezesOnlyWhenDifferentFromDefaults(t *testing.T) {
+	e := newTestEnv(t)
+	e.addDevice(t, "main")
+	ctx := context.Background()
+	defaults, err := e.DefaultCategories()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// An explicit list that is not the defaults is written as it is.
+	explicit, err := e.ApplyCategories(ctx, "main", []string{"user", "files"})
+	if err != nil || !explicit {
+		t.Fatalf("explicit=%v err=%v", explicit, err)
+	}
+	if in, _ := e.GetAccount("main"); !slices.Equal(in.Categories, []string{"user", "files"}) {
+		t.Fatalf("categories %v", in.Categories)
+	}
+	// Exactly the defaults (any order) leaves the list empty, so the account follows the catalog.
+	rev := slices.Clone(defaults)
+	slices.Reverse(rev)
+	explicit, err = e.ApplyCategories(ctx, "main", rev)
+	if err != nil || explicit {
+		t.Fatalf("explicit=%v err=%v", explicit, err)
+	}
+	if in, _ := e.GetAccount("main"); len(in.Categories) != 0 {
+		t.Fatalf("categories %v, want empty", in.Categories)
+	}
+	if _, err := e.ApplyCategories(ctx, "main", nil); err == nil {
+		t.Error("empty list must be refused")
+	}
+	if _, err := e.ApplyCategories(ctx, "ghost", defaults); err == nil {
+		t.Error("unknown account must fail")
+	}
+}
