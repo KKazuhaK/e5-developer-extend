@@ -46,21 +46,6 @@ export function validateAccountInput(
   return e;
 }
 
-/**
- * Union of scopes of the usable APIs, sorted. This is "what was granted" as far as the catalog can tell.
- * An all-of group counts only when it is the entry's sole way in: next to any-of scopes a usable entry
- * does not say which of the two ways the account has.
- */
-export function grantedScopes(entries: { usable: boolean; scopes: string[]; scopeSets?: string[][] }[]): string[] {
-  const s = new Set<string>();
-  for (const e of entries) {
-    if (!e.usable) continue;
-    e.scopes.forEach((x) => s.add(x));
-    if (e.scopes.length === 0) e.scopeSets?.forEach((g) => g.forEach((x) => s.add(x)));
-  }
-  return [...s].sort();
-}
-
 export function summarizeByCategory(entries: { category: string; usable: boolean }[]): { category: string; usable: number; total: number }[] {
   const m = new Map<string, { usable: number; total: number }>();
   for (const e of entries) {

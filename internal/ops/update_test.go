@@ -44,15 +44,21 @@ func TestRestartManaged(t *testing.T) {
 		m        fakeManager
 		state    string
 		restarts int
+		running  func() (bool, bool)
 	}{
-		{"running", fakeManager{st: service.Status{Installed: true, Running: service.Yes}}, "restarted", 1},
-		{"stopped", fakeManager{st: service.Status{Installed: true, Running: service.No}}, "not_running", 0},
-		{"unknown", fakeManager{st: service.Status{Installed: true, Running: service.Unknown}}, "failed", 0},
-		{"status error", fakeManager{statusErr: errors.New("boom")}, "failed", 0},
+		{"running", fakeManager{st: service.Status{Installed: true, Running: service.Yes}}, "restarted", 1, nil},
+		{"stopped", fakeManager{st: service.Status{Installed: true, Running: service.No}}, "not_running", 0, nil},
+		{"unknown, engine runs as the service", fakeManager{st: service.Status{Installed: true, Running: service.Unknown}}, "restarted", 1, func() (bool, bool) { return true, true }},
+		{"unknown, engine stopped", fakeManager{st: service.Status{Installed: true, Running: service.Unknown}}, "not_running", 0, func() (bool, bool) { return false, true }},
+		{"unknown, no signal", fakeManager{st: service.Status{Installed: true, Running: service.Unknown}}, "failed", 0, func() (bool, bool) { return false, false }},
+		{"status error", fakeManager{statusErr: errors.New("boom")}, "failed", 0, nil},
 	}
 	for _, c := range cases {
 		m := c.m
-		state, note := restartManaged(&m)
+		if c.running == nil {
+			c.running = func() (bool, bool) { return false, false }
+		}
+		state, note := restartManaged(&m, c.running)
 		if state != c.state || m.restarts != c.restarts {
 			t.Errorf("%s: state %q restarts %d", c.name, state, m.restarts)
 		}

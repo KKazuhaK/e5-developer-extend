@@ -283,3 +283,16 @@ func EngineHost(dataDir string) string {
 
 // PidAlive reports whether a process with this id exists.
 func PidAlive(pid int) bool { return pidAlive(pid) }
+
+// ProcStart is a token for when the process started ("" when unknown). With
+// the id it names one process even after the id is reused.
+func ProcStart(pid int) string { return procStart(pid) }
+
+// PidMatches reports whether the process with this id is alive and, when
+// start is known, is the one that started at that time.
+func PidMatches(pid int, start string) bool {
+	if !pidAlive(pid) {
+		return false
+	}
+	return start == "" || procStart(pid) == start
+}
