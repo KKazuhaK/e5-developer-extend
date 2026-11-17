@@ -577,6 +577,7 @@ export const zh = {
   "backup.note.stats_not_imported": "账号和 secret 已导入，但这些没能写入：{names}。",
   "backup.note.stale_not_removed": "有些旧 secret 没能删除（{names}），它们已不再使用。",
   "backup.note.merge_settings": "计划、告警设置、Webhook 和界面设置（合并保留这台机器自己的）。",
+  "backup.note.orphan_vault": "不属于任何账号的 vault 条目（上次添加账号中断留下的）没有导入。",
   "backup.note.merge_logs": "调用记录（合并不导入）。",
   "settings.err.duration": "格式不对，请用 20m、1h30m 这样的写法",
   "settings.err.minInterval": "不能短于 5 分钟",

@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/appsetup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
@@ -298,4 +300,82 @@ func keys(m map[string]string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// legacyRenamed sets up what a renamed legacy account looks like: it is called
+// "x" now, its key (and its secret's vault entry) is still "old".
+func legacyRenamed(t *testing.T, e *testEnv) {
+	t.Helper()
+	cfg := config.Default()
+	cfg.Accounts = []config.Account{{Name: "old", Auth: config.AuthClientSecret, Tenant: "t.example", ClientID: testGUID}}
+	if err := cfg.Save(filepath.Join(e.cfgDir, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	v, err := e.OpenVault(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Put(vault.SecretKey("old"), []byte("X-SECRET")); err != nil {
+		t.Fatal(err)
+	}
+	e.rename(t, "old", "x")
+}
+
+func TestAppSetupRefusesAnAccountsEarlierNameBeforeTouchingAnything(t *testing.T) {
+	e := newSetupEnv(t)
+	legacyRenamed(t, e.testEnv)
+
+	check := func(what string, err error) {
+		t.Helper()
+		if err == nil || !strings.Contains(err.Error(), "still used internally by account \"x\"") {
+			t.Errorf("%s: %v", what, err)
+		}
+	}
+	check("PrepareAddAccount", e.PrepareAddAccount(AccountInput{Name: "old", Auth: config.AuthClientSecret, Username: "u@t.example"}))
+	check("PrepareAddAccount (delegated)", e.PrepareAddAccount(AccountInput{Name: "old", Auth: config.AuthDeviceCode}))
+	_, err := e.BeginAppSetup(context.Background(), AppSetupOptions{AppOnly: true, Account: "old"}, &recUI{}, nil)
+	check("BeginAppSetup", err)
+	if len(e.scopes) != 0 {
+		t.Error("the administrator was asked to sign in")
+	}
+	check("AddAccount", e.AddAccount(context.Background(), AccountInput{Name: "old", Auth: config.AuthClientSecret, Tenant: "t.example", ClientID: testGUID, UseStoredSecret: true}))
+
+	// The session guards hold even when the checks above were skipped.
+	s := &AppSetupSession{o: e.Ops, opts: AppSetupOptions{AppOnly: true, Account: "old"}}
+	check("storeSecret", s.storeSecret("NEW"))
+	check("checkSecretTarget", s.checkSecretTarget(appsetup.AppRef{}))
+	if done, err := s.DiscardSecret(context.Background(), &appsetup.Result{SecretKeyID: "k"}); done || err != nil {
+		t.Errorf("DiscardSecret: %v %v", done, err)
+	}
+	if got := e.secretOf(t, "old"); got != "X-SECRET" {
+		t.Errorf("the secret of x is %q", got)
+	}
+}
+
+func TestImportSkipsVaultEntriesOfNoAccount(t *testing.T) {
+	good := "version = 1\n\n[[accounts]]\nname = \"main\"\nauth = \"client_secret\"\ntenant = \"t.example\"\nclient_id = \"" + testGUID + "\"\n"
+	data, err := backup.Seal(&backup.Payload{Config: good, Vault: map[string][]byte{
+		"secret/main": []byte("S"), "secret/orphan": []byte("O"), "tokencache/orphan": []byte("T")}}, bkPass)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "x.e5backup")
+	if err := os.WriteFile(file, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	b := newMachine(t)
+	b.use()
+	sum, err := b.ImportBackup(context.Background(), file, bkPass, ImportDefault)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sum.VaultEntries != 1 || len(sum.SkippedCodes) != 1 || sum.SkippedCodes[0].Code != SkippedOrphanVault {
+		t.Errorf("summary: %+v", sum)
+	}
+	if b.mustGet("secret/main") != "S" {
+		t.Error("the account's secret was not imported")
+	}
+	if _, err := b.get("secret/orphan"); !vault.IsNotFound(err) {
+		t.Errorf("orphan imported: %v", err)
+	}
 }

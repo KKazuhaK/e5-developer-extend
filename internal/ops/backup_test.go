@@ -600,7 +600,7 @@ func TestImportValidatesThePayloadBeforeWriting(t *testing.T) {
 	cases := map[string]*backup.Payload{
 		"invalid config":     {Config: "version = 1\n[schedule]\ninterval_min = \"x\"\n"},
 		"newer config":       {Config: "version = 99\n"},
-		"unknown vault key":  {Config: good, Vault: map[string][]byte{"secret/ghost": []byte("x")}},
+		"unknown vault key":  {Config: good, Vault: map[string][]byte{"other/ghost": []byte("x")}},
 		"traversing key":     {Config: good, Vault: map[string][]byte{"../../evil": []byte("x")}},
 		"bad state":          {Config: good, State: json.RawMessage(`[1,2]`)},
 		"newer state":        {Config: good, State: json.RawMessage(`{"version":99,"accounts":{}}`)},

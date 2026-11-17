@@ -59,6 +59,7 @@ const (
 	NoteStatsNotImported = "stats_not_imported" // import: the state, interface settings or call records could not be written; Args name which (state, gui, logs)
 	NoteStaleNotRemoved  = "stale_not_removed"  // import: Args are old vault entries that could not be removed
 	SkippedMergeSettings = "merge_settings"     // import: merge keeps this machine's settings
+	SkippedOrphanVault   = "orphan_vault"       // import: vault entries of no account were not imported
 	SkippedMergeLogs     = "merge_logs"         // import: merge does not import call records
 )
 
@@ -328,6 +329,8 @@ type importPlan struct {
 	cfg   *config.Config
 	state *store.State
 	gui   []byte
+	// orphans counts the vault entries of no account that were left out.
+	orphans int
 }
 
 // ImportBackup restores a backup file. Everything is decrypted and checked
@@ -442,9 +445,17 @@ func checkBackup(p *backup.Payload, machineVault config.Vault) (*importPlan, err
 	}
 
 	for k := range p.Vault {
-		if !knownVaultKey(cfg, k) {
-			return nil, invalidBackup("the backup holds a vault entry that this version does not know: "+k, nil)
+		if knownVaultKey(cfg, k) {
+			continue
 		}
+		// A secret or token cache of no account of the backup (a leftover of an
+		// interrupted add) is dropped with a note; anything else is not ours.
+		if strings.HasPrefix(k, "secret/") || strings.HasPrefix(k, "tokencache/") {
+			delete(p.Vault, k)
+			plan.orphans++
+			continue
+		}
+		return nil, invalidBackup("the backup holds a vault entry that this version does not know: "+k, nil)
 	}
 	for name := range p.Logs {
 		if !logNameRe.MatchString(name) {
@@ -600,6 +611,10 @@ func (o *Ops) applyImport(ctx context.Context, plan *importPlan, mode ImportMode
 	sum := ImportSummary{
 		Mode: mode, SourceOS: p.SourceOS, SourceVersion: p.AppVersion, Created: p.Created,
 		Hint: "accounts whose tenant ties tokens to the device (Conditional Access) may ask you to sign in again; run `e5extend doctor` to check",
+	}
+
+	if plan.orphans > 0 {
+		sum.addSkipped(SkippedOrphanVault, fmt.Sprintf("%d vault entries that belong to no account", plan.orphans))
 	}
 
 	tcfg, cfgPath, broken, err := o.targetConfig(mode)

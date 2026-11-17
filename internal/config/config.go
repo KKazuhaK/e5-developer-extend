@@ -231,6 +231,18 @@ func (c *Config) keyOrNameTaken(s string) bool {
 	return false
 }
 
+// KeyOwner returns the account that has s as its key although it is not called
+// s: a renamed account, whose old name stays its key. A new account must not
+// take that name, or it would share the other's secret, state and log.
+func (c *Config) KeyOwner(s string) (*Account, bool) {
+	for i := range c.Accounts {
+		if c.Accounts[i].Key() == s && c.Accounts[i].Name != s {
+			return &c.Accounts[i], true
+		}
+	}
+	return nil, false
+}
+
 // FindKey returns the account with the given key.
 func (c *Config) FindKey(key string) (*Account, bool) {
 	for i := range c.Accounts {

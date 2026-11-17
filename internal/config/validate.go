@@ -195,14 +195,14 @@ func validateAccountKeys(accts []Account, add func(path, format string, args ...
 			continue
 		}
 		if j, ok := byKey[a.Key()]; ok {
-			add(p, "key %q is already the key of account %q", a.Key(), accts[j].Name)
+			add(p, "the id %q is already used by account %q", a.Key(), accts[j].Name)
 			continue
 		}
 		byKey[a.Key()] = i
 	}
 	for i := range accts {
 		if j, ok := byKey[accts[i].Name]; ok && j != i {
-			add(fmt.Sprintf("accounts[%d].name", i), "%q is the key of account %q", accts[i].Name, accts[j].Name)
+			add(fmt.Sprintf("accounts[%d].name", i), "the name %q is still used internally by account %q (its earlier name) and cannot be reused; choose another name", accts[i].Name, accts[j].Name)
 		}
 	}
 }

@@ -95,7 +95,7 @@ func TestAccountKeysAreValidated(t *testing.T) {
 	// A hand-edited file is checked the same way.
 	text := "version = 1\n[[accounts]]\nname = \"one\"\nid = \"two\"\nauth = \"device_code\"\ntenant = \"t.example\"\nclient_id = \"" + guid + "\"\n" +
 		"[[accounts]]\nname = \"two\"\nauth = \"device_code\"\ntenant = \"t.example\"\nclient_id = \"" + guid + "\"\n"
-	if _, err := Parse([]byte(text)); err == nil || !strings.Contains(err.Error(), "key") {
+	if _, err := Parse([]byte(text)); err == nil || !strings.Contains(err.Error(), "internally") {
 		t.Errorf("hand-edited clash: %v", err)
 	}
 }

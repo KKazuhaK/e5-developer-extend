@@ -578,6 +578,7 @@ export const en: Dict = {
   "backup.note.stats_not_imported": "The accounts and secrets were imported, but this could not be written: {names}.",
   "backup.note.stale_not_removed": "Some old secrets could not be removed ({names}); they are not used any more.",
   "backup.note.merge_settings": "Schedule, alert settings, webhook and interface settings (a merge keeps this machine's).",
+  "backup.note.orphan_vault": "Vault entries that belong to no account (left by an interrupted add) were not imported.",
   "backup.note.merge_logs": "Call records (a merge does not import them).",
   "settings.err.duration": "Not a valid duration; use something like 20m or 1h30m",
   "settings.err.minInterval": "Must be at least 5 minutes",
