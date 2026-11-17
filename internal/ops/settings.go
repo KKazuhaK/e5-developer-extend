@@ -41,7 +41,7 @@ proxy = ""                  # empty uses HTTPS_PROXY and friends
 webhook_url = ""            # legacy plaintext address; set-webhook moves it into the vault
 stale_after = "72h"         # alert when an account has had no successful call for this long
 events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended, failure_spike, all_failing,
-                            # subscription_expiring, subscription_status, subscription_renewed
+                            # subscription_expiring, subscription_status, subscription_renewed, update_available
 cooldown = "6h"             # the same alert for the same account is not repeated within this time (critical: half); empty means the default, only "0" turns it off
 quiet_hours = ""            # for example "23:00-08:00": only critical alerts, the rest is sent as one summary afterwards
 spike_rounds = 3            # failure_spike: look at this many recent rounds ...
@@ -50,6 +50,10 @@ spike_min_failures = 5      # ... and at least this many calls failed (calls tha
 
 [subscription]
 skus = []                   # SKU part numbers to watch (each matches by prefix); empty means DEVELOPERPACK, the E5 developer subscription
+
+[update]
+check = true                # look for a newer release once a day (e5extend update check always works)
+channel = "stable"          # stable | prerelease
 
 [vault]
 backend = "auto"            # auto | keyring | file

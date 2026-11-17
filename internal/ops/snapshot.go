@@ -14,6 +14,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/update"
 )
 
 // StaleAfter marks an account whose last success is older than this.
@@ -71,10 +72,21 @@ type Snapshot struct {
 	Accounts    []AccountSummary `json:"accounts"`
 	GeneratedAt string           `json:"generatedAt"`
 
+	// Update says whether the last update check found a newer release; the tray shows it.
+	Update UpdateNote `json:"update"`
+
 	// Heartbeat is the engine's last heartbeat, zero if none was readable.
 	Heartbeat time.Time `json:"-"`
 	// StateErr is set when state.json could not be read; the accounts then show no history.
 	StateErr error `json:"-"`
+}
+
+// UpdateNote is the part of the update check the tray needs on every refresh.
+// It is read from update.json and never makes a request.
+type UpdateNote struct {
+	Available bool   `json:"available"`
+	Version   string `json:"version"`
+	URL       string `json:"url"`
 }
 
 func rfc3339(t time.Time) *string {
@@ -99,6 +111,13 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	now := time.Now()
 	st := store.New(dataDir)
 	snap := Snapshot{GeneratedAt: now.Format(time.RFC3339), Accounts: []AccountSummary{}}
+
+	if cfg.Update.Check {
+		cur := o.updateCurrent()
+		if c := update.LoadCache(dataDir); c.Channel == cfg.Update.Channel && c.Available(cur) {
+			snap.Update = UpdateNote{Available: true, Version: c.Latest.Version, URL: c.Latest.URL}
+		}
+	}
 
 	snap.Engine = EngineInfo{Host: HostNone}
 	if hb, err := engine.ReadHeartbeat(dataDir); err == nil {

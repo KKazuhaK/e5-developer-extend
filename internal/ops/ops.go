@@ -61,6 +61,8 @@ type Ops struct {
 	// RefreshWait is how long a subscription refresh waits for a running
 	// engine; zero means the default of about 75 seconds.
 	RefreshWait time.Duration
+	// Update replaces the outside world of the update check and upgrade.
+	Update UpdateHooks
 }
 
 // New returns Ops that talk to the real services.

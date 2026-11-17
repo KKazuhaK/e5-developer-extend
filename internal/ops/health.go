@@ -16,6 +16,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/update"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
@@ -46,6 +47,17 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 			return auth.NewHTTPClient(proxy)
 		},
 		Hint: Hint, HintCode: HintCode,
+		Update: func(cfg *config.Config) *doctor.UpdateNote {
+			if !cfg.Update.Check {
+				return nil
+			}
+			cur := o.updateCurrent()
+			c := update.LoadCache(dataDir)
+			if c.Channel != cfg.Update.Channel || !c.Available(cur) {
+				return nil
+			}
+			return &doctor.UpdateNote{Current: cur, Latest: c.Latest.Version, URL: c.Latest.URL}
+		},
 	}
 	if m, err := o.ServiceManager(); err == nil {
 		d.Service = m.Status

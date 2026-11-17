@@ -13,6 +13,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -156,7 +157,7 @@ func TestInstallLinuxStandalone(t *testing.T) {
 	if read(t, exe) != "NEW PROGRAM" {
 		t.Fatal("the program was not replaced")
 	}
-	if fi, _ := os.Stat(exe); fi.Mode().Perm()&0o111 == 0 {
+	if fi, _ := os.Stat(exe); runtime.GOOS != "windows" && fi.Mode().Perm()&0o111 == 0 {
 		t.Fatalf("the new program is not executable: %v", fi.Mode())
 	}
 	if !out.Done || !out.RestartService || out.ExitNow || out.Version != "0.3.0" || len(out.Manual) != 0 {
@@ -269,8 +270,8 @@ func TestInstallRefusals(t *testing.T) {
 }
 
 func TestInstallLinuxStandaloneNotWritable(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("root can write anywhere")
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("root can write anywhere, and Windows has no read-only folders in this sense")
 	}
 	f := newFixture(t, "v0.3.0", map[string][]byte{"e5extend_0.3.0_linux_amd64.tar.gz": tarGz(t, "e5extend", "NEW")}, fixtureOpts{})
 	bin := t.TempDir()
