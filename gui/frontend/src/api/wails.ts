@@ -1,9 +1,9 @@
 import { Browser, Events } from "@wailsio/runtime";
 import {
-  AccountService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService,
+  AccountService, AppSetupService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService,
 } from "../../bindings/github.com/KKazuhaK/e5-developer-extend/gui/services";
 import type { Api } from "./interface";
-import type { LoginEvent, RunDone, Snapshot } from "./types";
+import type { AppSetupEvent, LoginEvent, RunDone, Snapshot } from "./types";
 
 // The bindings are generated (gitignored); see README. Generated models are
 // classes whose structure matches ./types.ts, so results are cast. Go nil
@@ -34,6 +34,7 @@ export const wailsApi: Api = {
     remove: (n) => AccountService.Remove(n),
     setSecret: (n, s) => AccountService.SetSecret(n, s),
     login: (n) => AccountService.Login(n),
+    loginAfterSetup: (n) => AccountService.LoginAfterSetup(n),
     cancelLogin: (n) => AccountService.CancelLogin(n),
     test: async (n) => {
       const r = await AccountService.Test(n);
@@ -46,6 +47,17 @@ export const wailsApi: Api = {
       return { ...cast<import("./types").AccountInput>(a), categories: arr(a.categories) };
     },
     onLoginEvent: (name, cb) => Events.On(`login:${name}`, (ev) => cb(payload<LoginEvent>(ev))),
+  },
+  appSetup: {
+    begin: (id, s) => AppSetupService.Begin(id, cast(s)),
+    apply: (id, c) => AppSetupService.Apply(id, cast(c)),
+    cancel: (id) => AppSetupService.Cancel(id),
+    onEvent: (id, cb) =>
+      Events.On(`appsetup:${id}`, (ev) => {
+        const e = payload<AppSetupEvent>(ev);
+        const p = e.plan;
+        cb(p ? { ...e, plan: { ...p, tags: arr(p.tags), permissions: arr(p.permissions), missing: arr(p.missing), candidates: arr(p.candidates), actions: arr(p.actions) } } : e);
+      }),
   },
   logs: { read: async (a, h, l) => arr(cast<import("./types").LogEntry[]>(await LogService.Read(a, h, l))) },
   settings: {

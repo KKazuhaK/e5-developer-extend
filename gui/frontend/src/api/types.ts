@@ -37,13 +37,64 @@ export interface AccountInput {
   categories: string[];
   secretExpires: string;
   secret?: string; // only sent on add or replace; the backend never returns it
+  /** Take the secret automatic app setup already put in the vault under this name (app identity). */
+  useStoredSecret?: boolean;
 }
 export interface LoginEvent {
   // pushed through the Wails event "login:<name>"
-  kind: "device_code" | "browser_opened" | "done" | "error";
+  kind: "device_code" | "browser_opened" | "progress" | "done" | "error";
   message: string;
   userCode?: string;
   verificationUri?: string;
+}
+
+// ---- automatic app registration (docs/design/app-setup.md section 7) ----
+export interface AppSetupStart {
+  name: string; // account name
+  appOnly: boolean; // client secret identity; otherwise `auth` is the account's own sign-in
+  auth: "device_code" | "browser";
+  username: string; // user an app identity reads
+  method: "device_code" | "browser"; // how the administrator signs in
+}
+export interface AppSetupApp { clientId: string; displayName: string }
+export interface AppSetupAction { code: string; text: string }
+export interface AppSetupPlan {
+  kind: "delegated" | "app";
+  tenantId: string;
+  displayName: string;
+  tags: string[];
+  permissions: string[];
+  missing: string[];
+  existing: AppSetupApp | null;
+  candidates: AppSetupApp[];
+  actions: AppSetupAction[];
+  needsChoice: boolean;
+}
+export interface AppSetupChoice { adopt: string; createNew: boolean; rename: boolean }
+export interface AppSetupResult {
+  kind: "delegated" | "app";
+  tenantId: string;
+  clientId: string;
+  displayName: string;
+  createdApp: boolean;
+  adoptedApp: boolean;
+  renamed: boolean;
+  consentGranted: boolean;
+  adminConsentUrl: string;
+  consentError: string;
+  secretExpires: string; // YYYY-MM-DD, app identity only; the secret itself stays in the vault
+}
+export type AppSetupErrorCode = "forbidden" | "blocked" | "unknown_permission" | "cancelled" | "other";
+export interface AppSetupEvent {
+  // pushed through the Wails event "appsetup:<id>"
+  kind: "device_code" | "browser_opened" | "signed_in" | "plan" | "progress" | "result" | "error";
+  message: string;
+  userCode?: string;
+  verificationUri?: string;
+  plan?: AppSetupPlan;
+  result?: AppSetupResult;
+  code?: AppSetupErrorCode;
+  roles?: string[];
 }
 export interface LogEntry {
   ts: string;

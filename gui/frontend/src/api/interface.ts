@@ -1,5 +1,5 @@
 import type {
-  AccountInput, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
+  AccountInput, AppSetupChoice, AppSetupEvent, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
   TestResult, ValidationError,
 } from "./types";
 
@@ -23,6 +23,8 @@ export interface Api {
     setSecret(name: string, secret: string): Promise<void>;
     /** Starts a login; progress and result arrive via onLoginEvent. */
     login(name: string): Promise<void>;
+    /** Login for an account whose app registration was just created: waits while Microsoft replicates it ("progress" events). */
+    loginAfterSetup(name: string): Promise<void>;
     cancelLogin(name: string): Promise<void>;
     test(name: string): Promise<TestResult>;
     pause(name: string): Promise<void>;
@@ -30,6 +32,18 @@ export interface Api {
     get(name: string): Promise<AccountInput>;
     /** Subscribes to the "login:<name>" event. Returns the unsubscribe function. */
     onLoginEvent(name: string, cb: (e: LoginEvent) => void): () => void;
+  };
+  /**
+   * Automatic app registration. The caller picks the session id (letters, digits, - and _, 8 to 64)
+   * so it can subscribe before begin(). Progress and results arrive via onEvent; any failure ends
+   * the session with an "error" event. Nothing in them is a token or a secret.
+   */
+  appSetup: {
+    begin(id: string, start: AppSetupStart): Promise<void>;
+    apply(id: string, choice: AppSetupChoice): Promise<void>;
+    cancel(id: string): Promise<void>;
+    /** Subscribes to the "appsetup:<id>" event. Returns the unsubscribe function. */
+    onEvent(id: string, cb: (e: AppSetupEvent) => void): () => void;
   };
   logs: {
     read(account: string, sinceHours: number, limit: number): Promise<LogEntry[]>;

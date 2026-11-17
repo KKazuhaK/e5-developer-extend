@@ -3,7 +3,7 @@
 // doctor details) is Chinese here, as the Go side will produce.
 import type { Api } from "./interface";
 import type {
-  AccountInput, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
+  AccountInput, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
   Settings, Snapshot, ValidationError,
 } from "./types";
 
@@ -213,6 +213,76 @@ function finishLogin(name: string) {
   emit(name, { kind: "done", message: "登录成功" });
 }
 
+// ---- automatic app registration ----
+// Variants, picked with ?appsetup=: candidates (a hand-made app is found),
+// noconsent (the admin lacks the role to grant consent), forbidden (403 when
+// creating the app), blocked (the tenant refuses Graph Command Line Tools),
+// existing (an app made by an earlier run: only a missing permission is added).
+const setupVariant = q.get("appsetup") ?? "";
+const setupListeners = new Map<string, Set<(e: AppSetupEvent) => void>>();
+const setupTimers = new Map<string, number[]>();
+const DELEGATED_PERMS = [
+  "User.Read", "User.ReadBasic.All", "Mail.ReadBasic", "Mail.Read", "MailboxSettings.Read", "Calendars.Read", "Contacts.Read", "Files.Read",
+  "Organization.Read.All", "Domain.Read.All", "Group.ReadBasic.All", "Sites.Read.All", "Team.ReadBasic.All", "Tasks.Read", "Notes.Read", "Application.Read.All",
+];
+const APP_PERMS = ["User.Read.All", "Mail.Read", "Calendars.Read", "Contacts.Read", "Files.Read.All", "Organization.Read.All", "Domain.Read.All", "Group.Read.All", "Sites.Read.All", "Reports.Read.All", "Application.Read.All"];
+const MOCK_TENANT = "7d3f2a10-55c1-4c88-b1d4-0a3e9c61f2b8";
+const MOCK_CLIENT = "3c9e41b7-8a0d-4f62-b5e1-2d7a60c4e9f3";
+function setupEmit(id: string, e: AppSetupEvent) {
+  setupListeners.get(id)?.forEach((cb) => cb(e));
+}
+function setupAt(id: string, ms: number, fn: () => void) {
+  const t = window.setTimeout(fn, controls.slow ? ms * 4 : ms);
+  setupTimers.set(id, [...(setupTimers.get(id) ?? []), t]);
+}
+function setupClear(id: string) {
+  (setupTimers.get(id) ?? []).forEach((t) => clearTimeout(t));
+  setupTimers.delete(id);
+}
+const setupPlans = new Map<string, AppSetupPlan>();
+function mockPlan(start: AppSetupStart): AppSetupPlan {
+  const app = start.appOnly;
+  const permissions = app ? APP_PERMS : DELEGATED_PERMS;
+  const displayName = app ? "E5 Developer Extend (app-only)" : "E5 Developer Extend";
+  const base = { kind: (app ? "app" : "delegated") as AppSetupPlan["kind"], tenantId: MOCK_TENANT, displayName, tags: ["e5extend", app ? "e5extend:app" : "e5extend:delegated"], permissions };
+  if (setupVariant === "candidates") {
+    return {
+      ...base, missing: permissions, existing: null, needsChoice: true,
+      candidates: [{ clientId: MOCK_CLIENT, displayName: "e5renew" }, { clientId: "a1b2c3d4-0000-4b6e-9d11-77aa55cc33ee", displayName: "e5extend" }],
+      actions: [
+        { code: "adopt_or_create", text: `adopt one of the existing app registrations (2 found) or create "${displayName}"` },
+        ...(app ? [{ code: "create_secret", text: "create a client secret" }] : []),
+      ],
+    };
+  }
+  if (setupVariant === "existing") {
+    return {
+      ...base, missing: permissions.slice(-2), existing: { clientId: MOCK_CLIENT, displayName }, candidates: [], needsChoice: false,
+      actions: [{ code: "update_app", text: `update the app registration "${displayName}"` }, { code: "grant_consent", text: "grant administrator consent" }],
+    };
+  }
+  return {
+    ...base, missing: permissions, existing: null, candidates: [], needsChoice: false,
+    actions: [
+      { code: "create_app", text: `create the app registration "${displayName}"` },
+      { code: "create_service_principal", text: "create the service principal" },
+      ...(app ? [{ code: "assign_roles", text: "grant the application permissions" }, { code: "create_secret", text: "create a client secret" }] : [{ code: "grant_consent", text: "grant administrator consent" }]),
+    ],
+  };
+}
+function mockResult(plan: AppSetupPlan, choice: AppSetupChoice): AppSetupResult {
+  const adopted = !!choice.adopt;
+  const noConsent = setupVariant === "noconsent";
+  return {
+    kind: plan.kind, tenantId: plan.tenantId, clientId: adopted ? choice.adopt : MOCK_CLIENT, displayName: plan.displayName,
+    createdApp: !adopted && !plan.existing, adoptedApp: adopted, renamed: adopted && choice.rename,
+    consentGranted: !noConsent,
+    adminConsentUrl: noConsent ? `https://login.microsoftonline.com/${plan.tenantId}/adminconsent?client_id=${adopted ? choice.adopt : MOCK_CLIENT}` : "",
+    consentError: noConsent ? "this account is not allowed to grant administrator consent: it needs the role Privileged Role Administrator or Global Administrator" : "",
+    secretExpires: plan.kind === "app" ? day(365) : "",
+  };
+}
+
 // ---- settings / health state ----
 let settings: Settings = {
   schedule: {
@@ -310,8 +380,9 @@ export const mockApi: Api = {
     async add(input) {
       await wait(350);
       if (accounts.some((a) => a.input.name === input.name)) throw new Error(`账号 ${input.name} 已存在。请换一个名称。`);
-      const { secret, ...rest } = input;
+      const { secret, useStoredSecret, ...rest } = input;
       void secret; // never stored in the mock either
+      void useStoredSecret;
       accounts.push({
         input: rest, status: "not_signed_in", reason: "尚未登录", fix: "完成一次登录后才会开始调用",
         lastRunAt: null, lastSuccessAt: null, nextRunAt: null, todayOk: 0, todayFailed: 0,
@@ -350,6 +421,25 @@ export const mockApi: Api = {
         at(7000, () => finishLogin(name));
       } else {
         at(1000, () => finishLogin(name));
+      }
+    },
+    async loginAfterSetup(name) {
+      // Microsoft takes a moment to know the new app: two waits, then the normal sign-in.
+      const a = find(name);
+      clearLogin(name);
+      const timers: number[] = [];
+      const at = (ms: number, fn: () => void) => timers.push(window.setTimeout(fn, controls.slow ? ms * 4 : ms));
+      loginTimers.set(name, timers);
+      at(300, () => emit(name, { kind: "progress", message: "waiting for Microsoft to replicate the new app, retrying sign-in in 5s..." }));
+      const t0 = 2800;
+      if (a.input.auth === "device_code") {
+        at(t0, () => emit(name, { kind: "device_code", message: "在浏览器中打开链接并输入代码", userCode: "H7K2-QX9M", verificationUri: "https://microsoft.com/devicelogin" }));
+        at(t0 + 7000, () => finishLogin(name));
+      } else if (a.input.auth === "browser") {
+        at(t0, () => emit(name, { kind: "browser_opened", message: "已在浏览器中打开登录页，请在浏览器中完成登录" }));
+        at(t0 + 5000, () => finishLogin(name));
+      } else {
+        at(t0, () => finishLogin(name));
       }
     },
     async cancelLogin(name) {
@@ -391,6 +481,69 @@ export const mockApi: Api = {
     onLoginEvent(name, cb) {
       let set = loginListeners.get(name);
       if (!set) loginListeners.set(name, (set = new Set()));
+      set.add(cb);
+      return () => void set.delete(cb);
+    },
+  },
+  appSetup: {
+    async begin(id, start) {
+      await wait(150);
+      if (accounts.some((a) => a.input.name === start.name)) throw new Error(`account "${start.name}" already exists`);
+      if (start.appOnly && !start.username.trim()) throw new Error("an application identity reads one user's data: enter that user's name (UPN)");
+      setupClear(id);
+      const plan = mockPlan(start);
+      setupPlans.set(id, plan);
+      if (start.method === "device_code") {
+        setupAt(id, 400, () => setupEmit(id, { kind: "device_code", message: "To sign in, open https://microsoft.com/devicelogin and enter the code to authenticate.", userCode: "K4PD-82MQ", verificationUri: "https://microsoft.com/devicelogin" }));
+      } else {
+        setupAt(id, 400, () => setupEmit(id, { kind: "browser_opened", message: "complete the sign-in in your browser" }));
+      }
+      if (setupVariant === "blocked") {
+        setupAt(id, 3000, () => setupEmit(id, {
+          kind: "error", code: "blocked",
+          message: "the tenant does not allow signing in with Microsoft Graph Command Line Tools (AADSTS65001)\nUse the manual setup instead: docs/user/app-registration.md",
+        }));
+        return;
+      }
+      setupAt(id, 6000, () => setupEmit(id, { kind: "signed_in", message: "signed in" }));
+      setupAt(id, 7200, () => setupEmit(id, { kind: "plan", message: "", plan }));
+    },
+    async apply(id, choice) {
+      await wait(100);
+      const plan = setupPlans.get(id);
+      if (!plan) throw new Error("this app setup is not running any more");
+      if (plan.needsChoice && !choice.adopt && !choice.createNew) throw new Error("choose whether to adopt an existing app registration or create a new one");
+      const steps = [
+        `creating the app registration "${plan.displayName}"...`,
+        "creating the service principal...",
+        ...(setupVariant === "existing" ? [] : ["waiting for Microsoft to replicate the new app (service principal), retrying in 3s..."]),
+        plan.kind === "app" ? "granting User.Read.All..." : "granting administrator consent...",
+        ...(plan.kind === "app" ? ["creating a client secret \"e5extend dev-box 2026-11-16\"..."] : []),
+      ];
+      if (setupVariant === "forbidden") {
+        setupAt(id, 600, () => setupEmit(id, { kind: "progress", message: steps[0] }));
+        setupAt(id, 1700, () => {
+          setupPlans.delete(id);
+          setupEmit(id, {
+            kind: "error", code: "forbidden", roles: ["Application Administrator", "Cloud Application Administrator", "Global Administrator"],
+            message: "this account is not allowed to create or update the app registration: it needs the role Application Administrator or Cloud Application Administrator or Global Administrator",
+          });
+        });
+        return;
+      }
+      steps.forEach((m, i) => setupAt(id, 600 + i * 1100, () => setupEmit(id, { kind: "progress", message: m })));
+      setupAt(id, 600 + steps.length * 1100, () => {
+        setupPlans.delete(id);
+        setupEmit(id, { kind: "result", message: "done", result: mockResult(plan, choice) });
+      });
+    },
+    async cancel(id) {
+      setupClear(id);
+      if (setupPlans.delete(id)) setupEmit(id, { kind: "error", code: "cancelled", message: "app setup cancelled" });
+    },
+    onEvent(id, cb) {
+      let set = setupListeners.get(id);
+      if (!set) setupListeners.set(id, (set = new Set()));
       set.add(cb);
       return () => void set.delete(cb);
     },
