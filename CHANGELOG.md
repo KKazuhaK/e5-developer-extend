@@ -25,4 +25,4 @@
 - 桌面版 E5 Renew：托盘图标和主窗口（React），中英文界面。
 - 发布包：Windows 安装包、macOS dmg、Linux deb/rpm、命令行压缩包、Docker 镜像（暂未代码签名）。
 
-[0.1.0]: https://github.com/KKazuhaK/e5-renew/releases/tag/v0.1.0
+[0.1.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.1.0
