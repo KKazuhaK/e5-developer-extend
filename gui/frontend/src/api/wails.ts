@@ -148,7 +148,7 @@ export const wailsApi: Api = {
     onProgress: (cb) => Events.On("update:progress", (ev) => cb(normProgress(payload<UpdateProgress>(ev)))),
   },
   catalog: {
-    list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes) })),
+    list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes), scopeSets: arr(e.scopeSets).map((g) => arr(g)) })),
     categories: async () => arr(await CatalogService.Categories()),
     defaultCategories: async () => arr(await CatalogService.DefaultCategories()),
   },

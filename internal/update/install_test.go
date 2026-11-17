@@ -603,6 +603,18 @@ func TestDownloaderStallAndCap(t *testing.T) {
 	if _, err = d.Fetch(context.Background(), Asset{Name: "b.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "took longer") {
 		t.Fatalf("overall cap: %v", err)
 	}
+	// A deadline of the caller is not the cap, and a cancel is neither.
+	d = &Downloader{Allow: func(string) bool { return true }, Stall: time.Second, MaxTime: time.Minute}
+	cctx, ccancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer ccancel()
+	if _, err = d.Fetch(cctx, Asset{Name: "c.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "time limit of the request") || strings.Contains(err.Error(), "took longer") {
+		t.Fatalf("caller deadline: %v", err)
+	}
+	kctx, kcancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, kcancel)
+	if _, err = d.Fetch(kctx, Asset{Name: "d.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("caller cancel: %v", err)
+	}
 }
 
 func TestCleanOldWorkDirs(t *testing.T) {

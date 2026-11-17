@@ -322,14 +322,27 @@ func permissionProblem(in Input, category string) string {
 		return ""
 	}
 	var need []string
-	dup := map[string]bool{}
 	for _, a := range inCat {
-		if s := a.ScopesFor(in.Kind); len(s) > 0 && !dup[s[0]] {
-			dup[s[0]] = true
-			need = append(need, s[0])
+		for _, s := range leastScopes(a, in.Kind) {
+			if !slices.Contains(need, s) {
+				need = append(need, s)
+			}
 		}
 	}
 	return ReasonMissingPermission + ":" + strings.Join(need, ",")
+}
+
+// leastScopes is the permission(s) to suggest for an API: its all-of group when
+// it has one (the documented least-privileged combination, which can avoid the
+// admin-consent permission that heads the any-of list), else the first any-of.
+func leastScopes(a catalog.API, kind string) []string {
+	if all := a.AllScopesFor(kind); len(all) > 0 {
+		return all
+	}
+	if s := a.ScopesFor(kind); len(s) > 0 {
+		return s[:1]
+	}
+	return nil
 }
 
 // probeScopes lists, for a probe none of whose APIs is allowed, the first
@@ -341,8 +354,10 @@ func probeScopes(in Input, byID map[string]catalog.API, p probe) []string {
 		if !ok || a.Path(in.Kind) == "" {
 			continue
 		}
-		if sc := a.ScopesFor(in.Kind); len(sc) > 0 && !slices.Contains(out, sc[0]) {
-			out = append(out, sc[0])
+		for _, s := range leastScopes(a, in.Kind) {
+			if !slices.Contains(out, s) {
+				out = append(out, s)
+			}
 		}
 	}
 	return out

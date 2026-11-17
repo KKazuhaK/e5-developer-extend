@@ -201,9 +201,54 @@ func (c *Checker) Check(ctx context.Context, channel string, prev Cache, now tim
 // get makes the request. For the list endpoint the newest release of the
 // channel is picked here.
 func (c *Checker) get(ctx context.Context, channel, etag string) (rel *Release, newETag string, notModified bool, err error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base()+endpoint(channel), nil)
+	body, newETag, notModified, found, err := c.fetch(ctx, endpoint(channel), etag, channel != ChannelPrerelease)
+	if err != nil || notModified || !found {
+		return nil, newETag, notModified, err
+	}
+	if channel == ChannelPrerelease {
+		rs, err := ParseReleases(body)
+		if err != nil {
+			return nil, "", false, err
+		}
+		r, ok := PickLatest(rs, channel)
+		if !ok {
+			return nil, newETag, false, nil
+		}
+		return &r, newETag, false, nil
+	}
+	r, err := ParseRelease(body)
 	if err != nil {
 		return nil, "", false, err
+	}
+	if v, verr := r.Version(); r.Draft || r.Prerelease || (verr == nil && v.IsPrerelease()) {
+		if r.Draft || r.Prerelease {
+			return nil, newETag, false, nil // never offered on the stable channel
+		}
+		// The newest release has a pre-release tag although GitHub does not
+		// flag it: offer the newest proper stable release instead.
+		list, _, _, ok, lerr := c.fetch(ctx, endpoint(ChannelPrerelease), "", false)
+		if lerr != nil || !ok {
+			return nil, newETag, false, lerr
+		}
+		rs, perr := ParseReleases(list)
+		if perr != nil {
+			return nil, "", false, perr
+		}
+		best, ok := PickLatest(rs, ChannelStable)
+		if !ok {
+			return nil, newETag, false, nil
+		}
+		return &best, newETag, false, nil
+	}
+	return &r, newETag, false, nil
+}
+
+// fetch requests path and returns the body. found is false for a 404 when
+// missingOK is set (no release has been published yet).
+func (c *Checker) fetch(ctx context.Context, path, etag string, missingOK bool) (body []byte, newETag string, notModified, found bool, err error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base()+path, nil)
+	if err != nil {
+		return nil, "", false, false, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("X-GitHub-Api-Version", "2022-11-28")
@@ -213,42 +258,24 @@ func (c *Checker) get(ctx context.Context, channel, etag string) (rel *Release, 
 	}
 	resp, err := c.client().Do(req)
 	if err != nil {
-		return nil, "", false, fmt.Errorf("ask GitHub for the latest release: %w", urlErrorText(err))
+		return nil, "", false, false, fmt.Errorf("ask GitHub for the latest release: %w", urlErrorText(err))
 	}
 	defer resp.Body.Close()
 	switch {
 	case resp.StatusCode == http.StatusNotModified:
-		return nil, resp.Header.Get("ETag"), true, nil
-	case resp.StatusCode == http.StatusNotFound && channel != ChannelPrerelease:
-		return nil, "", false, nil // no release has been published yet
+		return nil, resp.Header.Get("ETag"), true, false, nil
+	case resp.StatusCode == http.StatusNotFound && missingOK:
+		return nil, "", false, false, nil
 	case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusForbidden && rateLimited(resp):
-		return nil, "", false, &RateLimitError{Until: resetTime(resp)}
+		return nil, "", false, false, &RateLimitError{Until: resetTime(resp)}
 	case resp.StatusCode != http.StatusOK:
-		return nil, "", false, fmt.Errorf("GitHub answered %s", resp.Status)
+		return nil, "", false, false, fmt.Errorf("GitHub answered %s", resp.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAPIBody))
+	body, err = io.ReadAll(io.LimitReader(resp.Body, maxAPIBody))
 	if err != nil {
-		return nil, "", false, fmt.Errorf("read the answer of GitHub: %w", err)
+		return nil, "", false, false, fmt.Errorf("read the answer of GitHub: %w", err)
 	}
-	if channel == ChannelPrerelease {
-		rs, err := ParseReleases(body)
-		if err != nil {
-			return nil, "", false, err
-		}
-		r, ok := PickLatest(rs, channel)
-		if !ok {
-			return nil, resp.Header.Get("ETag"), false, nil
-		}
-		return &r, resp.Header.Get("ETag"), false, nil
-	}
-	r, err := ParseRelease(body)
-	if err != nil {
-		return nil, "", false, err
-	}
-	if v, verr := r.Version(); r.Draft || r.Prerelease || (verr == nil && v.IsPrerelease()) {
-		return nil, resp.Header.Get("ETag"), false, nil // never offered on the stable channel
-	}
-	return &r, resp.Header.Get("ETag"), false, nil
+	return body, resp.Header.Get("ETag"), false, true, nil
 }
 
 func orDev(v string) string {

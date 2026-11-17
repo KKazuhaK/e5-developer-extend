@@ -53,6 +53,14 @@ describe("catalog summaries", () => {
   it("grantedScopes unions the scopes of usable APIs only", () => {
     expect(grantedScopes(entries)).toEqual(["Mail.Read", "Mail.ReadBasic", "User.Read"]);
   });
+  it("grantedScopes counts an all-of group only as the sole way in", () => {
+    const sets = [
+      { usable: true, scopes: ["User.Read.All"], scopeSets: [["User.Read", "User.ReadBasic.All"]] },
+      { usable: true, scopes: [], scopeSets: [["Mail.Read", "Mail.Send"]] },
+      { usable: false, scopes: [], scopeSets: [["Files.Read", "Files.ReadWrite"]] },
+    ];
+    expect(grantedScopes(sets)).toEqual(["Mail.Read", "Mail.Send", "User.Read.All"]);
+  });
   it("summarizeByCategory counts usable and total", () => {
     expect(summarizeByCategory(entries)).toEqual([
       { category: "mail", usable: 1, total: 2 },

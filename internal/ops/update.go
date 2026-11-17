@@ -331,6 +331,11 @@ func restartManaged(m service.Manager) (state, note string) {
 	if st.Installed && st.Running == service.No {
 		return "not_running", ""
 	}
+	if st.Installed && st.Running == service.Unknown {
+		// Task Scheduler cannot tell whether the task runs; restarting could
+		// start one the user stopped on purpose.
+		return "failed", "cannot tell whether the service is running; restart it yourself if it is"
+	}
 	if _, err := m.Restart(); err != nil {
 		if errors.Is(err, service.ErrNotInstalled) {
 			return "not_installed", ""

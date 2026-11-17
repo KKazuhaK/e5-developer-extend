@@ -55,8 +55,12 @@ func TestRestartScriptWaitsForTheOldProcess(t *testing.T) {
 		t.Errorf("waits for nothing: %s", s)
 	}
 	start = time.Now()
-	if err := exec.Command("sh", "-c", restartScript([]int{os.Getpid()}, 2, false), "true").Run(); err != nil {
-		t.Fatal(err)
+	gone := filepath.Join(t.TempDir(), "never")
+	if err := exec.Command("sh", "-c", restartScript([]int{os.Getpid()}, 2, false), "touch", gone).Run(); err == nil {
+		t.Error("started a new app while the old one was alive")
+	}
+	if _, err := os.Stat(gone); err == nil {
+		t.Error("the app was started")
 	}
 	if d := time.Since(start); d < 1500*time.Millisecond || d > 6*time.Second {
 		t.Errorf("gave up after %v, want about 2 s", d)

@@ -11,6 +11,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/pkg/browser"
@@ -225,10 +226,12 @@ func passThroughArgs() []string {
 }
 
 // restartWait is how long the helper waits for the old processes to exit
-// before it starts the app anyway. The old tray polls the quit file every 3 s
-// and stops its engine (up to 10 s) before it lets go of its single-instance
-// lock, and the window may wait for an upgrade, so this is generous.
-const restartWait = 30
+// before it gives up. The old tray polls the quit file every 3 s and stops its
+// engine (up to 10 s) before it lets go of its single-instance lock, and the
+// window may wait for an upgrade, so this is generous. A process still alive
+// after this long would only make a new app hit the single-instance lock, so
+// the helper starts nothing and leaves the old one as it is.
+const restartWait = 90
 
 // trayPidFile is where a running tray records its process id, from the moment
 // it holds the single-instance lock until it exits.
@@ -251,11 +254,14 @@ func markTrayRunning() func() {
 	if err := paths.WriteFileAtomic(f, []byte(pid+"\n")); err != nil {
 		return func() {}
 	}
+	var once sync.Once
 	return func() {
-		// Only remove our own record, never a newer tray's.
-		if b, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(b)) == pid {
-			_ = os.Remove(f)
-		}
+		once.Do(func() {
+			// Only remove our own record, never a newer tray's.
+			if b, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(b)) == pid {
+				_ = os.Remove(f)
+			}
+		})
 	}
 }
 
@@ -282,7 +288,8 @@ func readTrayPID(file string, alive func(int) bool) int {
 
 // restartScript is the shell script of the helper that starts the app again:
 // it waits until every process in pids has exited (at most wait seconds), then
-// runs the command given as "$0" "$@" (through open for a bundle).
+// runs the command given as "$0" "$@" (through open for a bundle). If a
+// process is still alive after wait seconds it starts nothing and exits 1.
 func restartScript(pids []int, wait int, bundle bool) string {
 	var cond []string
 	for _, p := range pids {
@@ -297,8 +304,10 @@ func restartScript(pids []int, wait int, bundle bool) string {
 	if len(cond) == 0 {
 		return launch
 	}
-	return fmt.Sprintf("i=0; while [ $i -lt %d ] && { %s; }; do sleep 1; i=$((i+1)); done; %s",
-		wait, strings.Join(cond, " || "), launch)
+	alive := strings.Join(cond, " || ")
+	return fmt.Sprintf("i=0; while [ $i -lt %d ] && { %s; }; do sleep 1; i=$((i+1)); done; "+
+		"if { %s; }; then echo 'restart: the old app is still running, not starting a new one' >&2; exit 1; fi; %s",
+		wait, alive, alive, launch)
 }
 
 // restartApp closes the app and starts it again once the old processes have

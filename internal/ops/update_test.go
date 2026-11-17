@@ -47,6 +47,7 @@ func TestRestartManaged(t *testing.T) {
 	}{
 		{"running", fakeManager{st: service.Status{Installed: true, Running: service.Yes}}, "restarted", 1},
 		{"stopped", fakeManager{st: service.Status{Installed: true, Running: service.No}}, "not_running", 0},
+		{"unknown", fakeManager{st: service.Status{Installed: true, Running: service.Unknown}}, "failed", 0},
 		{"status error", fakeManager{statusErr: errors.New("boom")}, "failed", 0},
 	}
 	for _, c := range cases {
