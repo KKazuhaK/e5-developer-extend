@@ -669,3 +669,43 @@ func TestSubscriptionChecks(t *testing.T) {
 	save(&store.TenantState{Access: store.AccessError, Detail: "could not sign in", Attempted: now})
 	expect(t, r.run(true), id, Warn, "could not sign in")
 }
+
+func TestUpdateLineOnlyWhenNewerVersionExists(t *testing.T) {
+	r := newRig(t)
+	if _, ok := r.run(true)["update"]; ok {
+		t.Fatal("an update line without a source of update information")
+	}
+	d := r.deps()
+	var note *UpdateNote
+	d.Update = func(*config.Config) *UpdateNote { return note }
+	get := func() map[string]Check {
+		out := map[string]Check{}
+		for _, c := range Run(context.Background(), d, Options{Offline: true}) {
+			out[c.ID] = c
+		}
+		return out
+	}
+	if _, ok := get()["update"]; ok {
+		t.Fatal("an update line although nothing newer is known")
+	}
+	note = &UpdateNote{Current: "0.2.0", Latest: "0.3.0", URL: "https://example.test/v0.3.0"}
+	got := get()
+	expect(t, got, "update", OK, "version 0.3.0 is available (this is 0.2.0)")
+	if !strings.Contains(got["update"].Fix, "e5extend update install") {
+		t.Errorf("fix = %q", got["update"].Fix)
+	}
+	// An information line never changes the exit code.
+	var all []Check
+	for _, c := range got {
+		all = append(all, c)
+	}
+	with := ExitCode(all)
+	delete(got, "update")
+	all = nil
+	for _, c := range got {
+		all = append(all, c)
+	}
+	if ExitCode(all) != with {
+		t.Error("the update line changed the exit code")
+	}
+}

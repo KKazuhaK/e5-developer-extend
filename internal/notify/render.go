@@ -86,7 +86,7 @@ var labels = map[string]map[string]string{
 		NeedsAttention: "需要处理", Recovered: "已恢复", AutoPaused: "已自动暂停", Stale: "长时间没有成功调用",
 		SecretExpiring: "密钥即将过期", PeriodEnded: "运行周期已结束", FailureSpike: "调用失败率过高",
 		AllFailing: "所有账号同时异常", SubscriptionExpiring: "E5 订阅即将到期", SubscriptionStatus: "E5 订阅状态变化",
-		SubscriptionRenewed: "E5 订阅已续期", Test: "测试消息", Digest: "免打扰期间的告警汇总",
+		SubscriptionRenewed: "E5 订阅已续期", UpdateAvailable: "有新版本可以升级", Test: "测试消息", Digest: "免打扰期间的告警汇总",
 		"level.info": "提示", "level.warning": "警告", "level.critical": "严重",
 	},
 	"en": {
@@ -94,7 +94,7 @@ var labels = map[string]map[string]string{
 		Stale: "No successful call for a long time", SecretExpiring: "Client secret expiring",
 		PeriodEnded: "Run period ended", FailureSpike: "High failure rate", AllFailing: "All accounts failing",
 		SubscriptionExpiring: "E5 subscription expiring", SubscriptionStatus: "E5 subscription status changed",
-		SubscriptionRenewed: "E5 subscription renewed", Test: "Test message", Digest: "Alerts held during quiet hours",
+		SubscriptionRenewed: "E5 subscription renewed", UpdateAvailable: "A new version is available", Test: "Test message", Digest: "Alerts held during quiet hours",
 		"level.info": "Info", "level.warning": "Warning", "level.critical": "Critical",
 	},
 }
@@ -141,6 +141,8 @@ func Hint(kind, account, lang string) string {
 		return pick("运行 e5extend subscription 查看当前状态，并在 Microsoft 365 管理中心（账单 > 你的产品）核对订阅。", "Run e5extend subscription to see the status, and check the subscription in the Microsoft 365 admin center (Billing > Your products).")
 	case AllFailing:
 		return pick("先检查网络、代理和 Microsoft 365 服务状态，再逐个看账号。", "Check the network, the proxy and the Microsoft 365 service status first, then each account.")
+	case UpdateAvailable:
+		return pick("运行 e5extend update install 升级；桌面版在概览页点“立即升级”。Docker 请拉取新镜像。", "Run e5extend update install to upgrade; the desktop app has an Upgrade now button on the Overview page. For Docker, pull the new image.")
 	}
 	return ""
 }
@@ -393,6 +395,9 @@ func SampleEvent(kind string, now time.Time) Event {
 	case SubscriptionRenewed:
 		ev.Account, ev.Subscription = "", "sub-1"
 		ev.Message = "subscription DEVELOPERPACK_E5 of tenant contoso.onmicrosoft.com was renewed: the end date moved from " + now.AddDate(0, 0, 3).UTC().Format("2006-01-02") + " to " + now.AddDate(0, 3, 3).UTC().Format("2006-01-02")
+	case UpdateAvailable:
+		ev.Account = ""
+		ev.Message = "version 0.3.0 is available (this is 0.2.0): https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.0"
 	case FailureSpike:
 		ev.Message, ev.Failures, ev.Rounds, ev.FailRate = "9 of the last 12 calls failed (75%) over the last 3 rounds", 9, 3, 0.75
 	case AllFailing:

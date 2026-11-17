@@ -25,6 +25,8 @@ const (
 	SubscriptionExpiring = "subscription_expiring"
 	SubscriptionStatus   = "subscription_status"
 	SubscriptionRenewed  = "subscription_renewed"
+	// UpdateAvailable says a newer release exists; sent once per version.
+	UpdateAvailable = "update_available"
 	// Test is only sent by `e5extend notify test`.
 	Test = "test"
 	// Digest is the summary of alerts that were held during the quiet hours.

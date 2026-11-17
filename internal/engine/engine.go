@@ -60,6 +60,24 @@ type Notifier interface {
 	Close()
 }
 
+// UpdateStatus is what the update check knows about the newest release.
+type UpdateStatus struct {
+	// Version is the newest version when it is newer than the running one, else "".
+	Version string
+	// URL is the release page.
+	URL string
+	// Next is when the next check is due; the engine does not ask before.
+	Next time.Time
+}
+
+// UpdateChecker looks for a newer release on behalf of the engine. Check
+// makes a request only when one is due (once a day, with a backoff after a
+// failure) and otherwise answers from what it saved; it must be safe to call
+// from a goroutine of its own. A development build reports no update.
+type UpdateChecker interface {
+	Check(ctx context.Context, channel string) (UpdateStatus, error)
+}
+
 // Options configure an Engine. Use DefaultOptions and override fields.
 type Options struct {
 	Config     *config.Config // initial configuration (required)
@@ -88,6 +106,9 @@ type Options struct {
 	// NoSubscriptionCheck turns the daily subscription check off; tests that
 	// count token requests use it.
 	NoSubscriptionCheck bool
+	// Updater checks for a newer release once a day; nil turns the check off.
+	// config.Update.Check turns it off too.
+	Updater UpdateChecker
 
 	Tick             time.Duration // how often the main loop wakes
 	ConfigCheckEvery int           // ticks between config file checks
@@ -146,6 +167,12 @@ type Engine struct {
 	roundsDone bool
 	subRunning map[string]bool
 	subMu      sync.Mutex // one subscription check at a time
+
+	// update is what the last update check found (nil before the first one);
+	// updNext is when to ask the checker again; updRunning marks a check in flight.
+	update     *UpdateStatus
+	updNext    time.Time
+	updRunning bool
 
 	// Touched by the tick goroutine only.
 	lastTick  time.Time
@@ -433,7 +460,7 @@ func (e *Engine) evalNotify() {
 		evs, changed = notify.Evaluate(notify.Input{
 			Now: e.clock.Now(), Start: e.started, Config: e.cfg.Notify,
 			Accounts: e.cfg.Accounts, State: e.state, Calls: calls, APIs: e.apis,
-			Subscription: e.cfg.Subscription,
+			Subscription: e.cfg.Subscription, Update: e.updateOfferLocked(),
 		})
 		if changed {
 			e.saveLocked()
@@ -718,6 +745,7 @@ func (e *Engine) tick(ctx context.Context) {
 	e.reportClockFix(fixed)
 
 	e.subscriptionTick(ctx, now, e.forceSub)
+	e.updateTick(ctx, now)
 	e.evalNotify()
 
 	if day := now.Format("2006-01-02"); day != e.lastPrune {
