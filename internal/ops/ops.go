@@ -58,6 +58,9 @@ type Ops struct {
 	SetupHostname string
 	// SaveConfig replaces how an import saves config.toml; tests inject failures.
 	SaveConfig func(cfg *config.Config, path string) error
+	// RefreshWait is how long a subscription refresh waits for a running
+	// engine; zero means the default of about 75 seconds.
+	RefreshWait time.Duration
 }
 
 // New returns Ops that talk to the real services.

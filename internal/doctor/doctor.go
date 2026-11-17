@@ -27,6 +27,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/recommend"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/subscription"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
@@ -151,6 +152,13 @@ func Run(ctx context.Context, d Deps, o Options) []Check {
 				func(ctx context.Context) []Check {
 					return checkAccount(ctx, d, cfg, acct, st.Accounts[acct.Name], o.Offline)
 				}})
+		}
+	}
+	if cfg != nil && cfgErr == nil {
+		st, _ := store.New(d.DataDir).LoadState()
+		for _, tv := range subscription.Build(cfg, st, d.now()) {
+			groups = append(groups, group{"subscription." + tv.Tenant, "Subscription " + tv.Label,
+				func(context.Context) []Check { return []Check{checkSubscription(d, cfg, tv)} }})
 		}
 	}
 	if !o.Offline {
@@ -578,6 +586,106 @@ func checkState(acct config.Account, as *store.AccountState, id, title string) C
 		c.Level, c.Detail = OK, "ok"
 	}
 	return c
+}
+
+// subscriptionWarnDays is how close an end date must be for the doctor to warn.
+const subscriptionWarnDays = 7
+
+// checkSubscription judges what the last subscription check saw. A missing
+// permission is a state to explain, not a problem: the check is optional.
+func checkSubscription(d Deps, cfg *config.Config, tv subscription.TenantView) Check {
+	c := Check{ID: "subscription." + tv.Tenant, Title: "Subscription " + tv.Label}
+	const renew = "renew it in the Microsoft 365 admin center (Billing > Your products), then run: e5extend subscription"
+	note := "" // the failure of the last check, when older data is still shown
+	manual := func() {
+		switch d := tv.ManualDaysLeft; {
+		case d == nil:
+		case *d <= subscriptionWarnDays:
+			c.Level = Warn
+			c.Detail += fmt.Sprintf("; the date you entered (%s) is %s", tv.ManualExpires, daysPhrase(*d))
+			c.Fix = renew
+		default:
+			c.Detail += fmt.Sprintf("; the date you entered (%s) is %s", tv.ManualExpires, daysPhrase(*d))
+		}
+	}
+	switch tv.Access {
+	case subscription.AccessUnchecked:
+		c.Level, c.Detail = OK, "not checked yet; the engine checks once a day (or run: e5extend subscription)"
+		manual()
+		return c
+	case store.AccessNoPermission:
+		c.Level = OK
+		c.Detail = "cannot read the subscription: Organization.Read.All is needed (run: e5extend app setup --account <name> to add it)"
+		if tv.ManualExpires != "" {
+			c.Detail = "cannot read the subscription (Organization.Read.All is needed)"
+			manual()
+		}
+		return c
+	case store.AccessError:
+		c.Level = OK
+		c.Detail = "the last check failed: " + tv.Detail
+		note = c.Detail
+		if tv.CheckedAt == nil {
+			c.Level = Warn
+			c.Fix = "e5extend subscription"
+		}
+		if len(tv.Subscriptions) == 0 {
+			manual()
+			return c
+		}
+	}
+
+	var parts []string
+	watched := 0
+	for _, s := range tv.Subscriptions {
+		if !s.Watched {
+			continue
+		}
+		watched++
+		part := s.SKU + " " + s.Status
+		if s.DaysLeft != nil {
+			part += ", ends " + s.Expires + " (" + daysPhrase(*s.DaysLeft) + ")"
+		}
+		parts = append(parts, part)
+		switch {
+		case s.Status != notify.StatusEnabled:
+			c.Level = Warn
+			c.Fix = "check the subscription in the Microsoft 365 admin center (Billing > Your products)"
+		case s.DaysLeft != nil && *s.DaysLeft <= subscriptionWarnDays:
+			c.Level = Warn
+			c.Fix = renew
+		}
+	}
+	if c.Level == "" {
+		c.Level = OK
+	}
+	if watched == 0 {
+		c.Detail = "no E5 developer subscription found in the tenant (watched SKUs: " + strings.Join(cfg.Subscription.SKUPrefixes(), ", ") + ")"
+		if len(tv.Subscriptions) > 0 {
+			c.Detail = fmt.Sprintf("%d subscription(s), none of the watched SKUs", len(tv.Subscriptions))
+		}
+		return c
+	}
+	c.Detail = strings.Join(parts, "; ")
+	if note != "" {
+		c.Detail += "; " + note
+	}
+	if tv.ManualRedundant {
+		c.Detail += "; the date entered by hand is no longer needed, remove subscription_expires"
+	}
+	return c
+}
+
+func daysPhrase(d int) string {
+	switch {
+	case d < 0:
+		return fmt.Sprintf("%d day(s) ago", -d)
+	case d == 0:
+		return "today"
+	case d == 1:
+		return "tomorrow"
+	}
+	return fmt.Sprintf("in %d days", d)
 }
 
 func checkSecret(d Deps, acct config.Account, id, title string) Check {
