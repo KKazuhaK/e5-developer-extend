@@ -26,6 +26,10 @@ export function reasonMsg(reason: string): Msg | null {
       return { key: "rec.reason.not_supported" };
     case "probe_failed":
       return { key: "rec.reason.probe_failed" };
+    case "cannot_probe":
+      return rest === "user"
+        ? { key: "rec.reason.cannot_probe_user" }
+        : { key: "rec.reason.cannot_probe_scopes", params: { scopes: rest.replace(/^scopes:/, "").split(",").filter(Boolean).join(" / ") } };
     case "probe_arbitrary_user":
       return { key: "rec.reason.probe_arbitrary_user" };
     default:
@@ -72,4 +76,20 @@ export function diffFromRecommended(all: string[], selected: string[], rec: Reco
     drop: all.filter((c) => sel.has(c) && status.get(c) === "unavailable"),
     add: all.filter((c) => !sel.has(c) && status.get(c) === "recommended"),
   };
+}
+
+/** True when both lists hold the same categories, ignoring order and case. */
+export function sameCategories(a: string[], b: string[]): boolean {
+  const n = (x: string[]) => [...new Set(x.map((c) => c.toLowerCase()))].sort();
+  const [p, q] = [n(a), n(b)];
+  return p.length === q.length && p.every((c, i) => c === q[i]);
+}
+
+/**
+ * What to store in the account: exactly the catalog defaults is stored as an empty list, so the
+ * account keeps following the defaults (new default categories apply by themselves); anything else
+ * is stored as the explicit list, which does not pick up new categories automatically.
+ */
+export function categoriesToSave(selected: string[], defaults: string[]): string[] {
+  return defaults.length > 0 && sameCategories(selected, defaults) ? [] : selected;
 }

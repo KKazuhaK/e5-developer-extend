@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RecommendResult } from "@/api/types";
-import { adviceByCategory, diffFromRecommended, hasFailedProbes, preselect, reasonMsg } from "./recommend";
+import { adviceByCategory, diffFromRecommended, categoriesToSave, hasFailedProbes, preselect, reasonMsg, sameCategories } from "./recommend";
 
 const rec: RecommendResult = {
   needsLogin: false,
@@ -22,6 +22,13 @@ describe("reasonMsg", () => {
   it("splits the scope list of a missing permission", () => {
     expect(reasonMsg("missing_permission:Mail.ReadBasic,Mail.Read")).toEqual({
       key: "rec.reason.missing_permission",
+      params: { scopes: "Mail.ReadBasic / Mail.Read" },
+    });
+  });
+  it("explains a probe that could not run", () => {
+    expect(reasonMsg("cannot_probe:user")?.key).toBe("rec.reason.cannot_probe_user");
+    expect(reasonMsg("cannot_probe:scopes:Mail.ReadBasic,Mail.Read")).toEqual({
+      key: "rec.reason.cannot_probe_scopes",
       params: { scopes: "Mail.ReadBasic / Mail.Read" },
     });
   });
@@ -85,5 +92,23 @@ describe("diffFromRecommended", () => {
   it("does not flag maybe categories and needs a result", () => {
     expect(diffFromRecommended(all, ["user", "files", "reports"], rec)).toEqual({ drop: [], add: [] });
     expect(diffFromRecommended(all, ["mail"], null)).toEqual({ drop: [], add: [] });
+  });
+});
+
+describe("categoriesToSave", () => {
+  const defaults = ["user", "mail", "files"];
+  it("saves exactly the defaults as an empty list", () => {
+    expect(categoriesToSave(["files", "user", "mail"], defaults)).toEqual([]);
+  });
+  it("saves anything else as the explicit list", () => {
+    expect(categoriesToSave(["user", "mail"], defaults)).toEqual(["user", "mail"]);
+    expect(categoriesToSave(["user", "mail", "files", "reports"], defaults)).toEqual(["user", "mail", "files", "reports"]);
+  });
+  it("does not freeze when the defaults are not known", () => {
+    expect(categoriesToSave(["user"], [])).toEqual(["user"]);
+  });
+  it("compares ignoring order and case", () => {
+    expect(sameCategories(["User", "mail"], ["mail", "user"])).toBe(true);
+    expect(sameCategories(["user"], ["user", "mail"])).toBe(false);
   });
 });

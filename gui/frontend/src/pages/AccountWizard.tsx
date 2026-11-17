@@ -17,7 +17,7 @@ import type { AccountErrorCode } from "@/lib/account";
 import { cn, errMsg } from "@/lib/utils";
 import { BrowserPrompt, DevicePrompt } from "@/components/signin";
 import { progressMsg, validateAutoStart } from "@/lib/appsetup";
-import { adviceByCategory, diffFromRecommended, hasFailedProbes, preselect, reasonMsg } from "@/lib/recommend";
+import { adviceByCategory, diffFromRecommended, categoriesToSave, hasFailedProbes, preselect, reasonMsg } from "@/lib/recommend";
 import { AppSetupStep, AutoStartForm, ChoiceCard, ConsentNotice, type AdminMethod } from "./AppSetupFlow";
 
 type Mode = "add" | "edit";
@@ -164,6 +164,8 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
     setSaving(true);
     try {
       const payload: AccountInput = { ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim() };
+      // Exactly the catalog defaults is saved as an empty list so new default categories keep applying.
+      payload.categories = categoriesToSave(input.categories, defaultCategories);
       // Automatic setup already put the client secret in the vault.
       if (auto && setup && payload.auth === "client_secret" && !persisted) payload.useStoredSecret = true;
       if (persisted) await api.accounts.update({ ...payload, secret: payload.secret || undefined });
@@ -175,7 +177,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         setupSid.current = null;
       }
       setSavedAuth(payload.auth);
-      setInput((i) => ({ ...i, ...payload, secret: undefined })); // the secret is gone from memory after this
+      setInput((i) => ({ ...i, ...payload, categories: i.categories, secret: undefined })); // the secret is gone from memory after this
       void snapshot.refresh();
       return true;
     } catch (ex) {

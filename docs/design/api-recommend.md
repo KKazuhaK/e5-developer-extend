@@ -34,15 +34,15 @@ func (o *Ops) RecommendCategories(ctx context.Context, name string) (Recommendat
 | SharePoint | `sites.root` | sites | HTTP 404 | `no_sharepoint` |
 
 - 请求的**路径来自目录**（`API.Path(kind)`），不在代码里再写一遍；全部是 GET，永远不写。
-- 探测不会下载大量数据：返回单个对象的 API（`mail.settings`、`drive.info`、`sites.root`）不带查询；集合 API 一律 `$top=1&$select=id`
-  （`teams.joined` 不支持 `$top`，只带 `$select=id`，结果只是用户自己的团队）。测试检查了这一点。
+- 探测不会下载大量数据：返回单个对象的 API（`mail.settings`、`drive.info`、`sites.root`）不带查询；`teams.joined` 也不带任何查询
+  （Graph 文档说明 List joinedTeams 不支持 OData 查询参数，结果只是用户自己的团队）；其余集合 API 一律 `$top=1&$select=id`。测试检查了这一点。
 - “没有”只认 HTTP 404 / 400（Teams、SharePoint 只认 404）；402、403、405、409、422 等其他 4xx 都不能证明“没有”，一律 `maybe` + `probe_failed`。
 - 其他分类（user、org、group、apps）没有探测：只要权限够就是 `recommended`。
 - `reports` 没有安全的探测（报表需要管理员角色，请求会返回一个很大的 CSV），权限够时一律 `maybe`，原因 `needs_admin_role`。
 - `tasks` 里有 To Do（要 Exchange）也有 Planner（不要）；按 To Do 算，没有邮箱就是 `unavailable`（一半的调用会 404）。
 - 应用身份读的是 `/users/{user}/...`：目标用户是账号的 `username`；没填就取租户用户列表的第一个（需要 `User.Read.All`）。
   这个用户是随便挑的，所以应用身份**没填 username** 时，探测得到的“没有”只算 `maybe`，原因码 `probe_arbitrary_user`（只用任意一个用户检查过，填写用户后才可靠），不算 `unavailable`。
-  取不到任何用户时，需要目标用户的探测不运行，相关分类 `maybe`。
+  取不到任何用户时，需要目标用户的探测不运行，相关分类 `maybe` + `cannot_probe:user`。
 
 ### 探测结果 → 分类状态
 
@@ -51,7 +51,7 @@ func (o *Ops) RecommendCategories(ctx context.Context, name string) (Recommendat
 | `ok` | 有 → `recommended` |
 | 状态码在“判没有”集合里 | 没有 → `unavailable` + 原因码 |
 | 其他（429、5xx、网络错误、401、集合之外的 4xx、超时） | 不确定 → `maybe` + `probe_failed`；**暂时性错误永远不会变成 unavailable** |
-| 没有可用的探测 API（权限不足以探测，但分类本身有权限） | `maybe` + `probe_failed` |
+| 探测根本跑不了：它的 API 都没有权限（分类本身有权限），或应用身份找不到可看的用户 | `maybe` + `cannot_probe:<缺什么>`：`cannot_probe:scopes:<权限列表>` 或 `cannot_probe:user`。这**不是**暂时失败，不会触发 `--apply` 的拒绝 |
 
 结果类型：
 
@@ -79,7 +79,11 @@ func (r Recommendation) Recommended() []string // 状态为 recommended 的分�
 `--apply`（要和 `--recommend` 一起用）：把建议的分类写进账号（只改 `categories`，在配置锁里读—改—写），然后 `ReloadEngine`。
 **建议的分类 = 推荐的 ∪（`maybe` ∩ 账号现在实际的选择）**。账号现在的选择是它的 `categories`；为空时是目录里默认开启的分类（`Default` 标记，`reports` 不在其中）。
 也就是说“可能可用”的分类永远不会因为没能确认而被去掉，不可用的永远不会被留下。
-只要有分类的原因是 `probe_failed`（探测暂时失败），`--apply` 拒绝写入并提示 “some probes failed temporarily; try again later”，加 `--force` 才写（写入时同样保留 `maybe`）。
+只要有分类的原因是 `probe_failed`（探测真的暂时失败；`cannot_probe` 不算），`--apply` 拒绝写入并提示 “some probes failed temporarily; try again later”，加 `--force` 才写（写入时同样保留 `maybe`）。
+“没有要改的”是拿目录的**有效分类**（账号的 `categories`，为空时是目录默认分类）和建议比较，而不是比较原始列表。
+**冻结规则**：建议恰好等于目录默认分类时，`categories` 保持**空**（命令行 `--apply` 和桌面版保存都是），这样以后新增的默认分类会自动生效；
+不同时才写成显式列表，而显式列表**不会**自动带上以后新增的分类（命令行写完会提示，需要时更新之后再运行一次）。
+这个规则成立的前提是目录里每个分类要么全部是默认项、要么全都不是（`internal/catalog` 有测试守着）。
 写之前打印改动并确认，`--yes` 跳过确认。建议列表为空时拒绝写入（空列表会让引擎回到“目录默认项”，不是用户想要的）。
 
 ## 3. 健康检查
