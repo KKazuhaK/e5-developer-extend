@@ -1,11 +1,11 @@
 package doctor
 
 import (
-	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
@@ -89,6 +89,39 @@ func TestFirstSignInHint(t *testing.T) {
 			as.APISkipUntil = map[string]time.Time{"mail.messages": until, "mail.folders": until, "drive.info": until}
 		})
 		expect(t, r.run(true), id, OK, hint)
+	})
+	t.Run("a fresh refusal keeps the warning and the fix", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r0", -9*24*time.Hour, map[string]int{"mail.messages": 404, "user.me": 200})
+		r.logRound("r1", -2*time.Hour, map[string]int{"drive.info": 404})
+		r.state(func(as *store.AccountState) {
+			until := now.Add(3 * time.Hour)
+			as.APISkipUntil = map[string]time.Time{"mail.messages": until, "mail.folders": until, "drive.info": until}
+		})
+		if c := r.run(true)["account.main.apis"]; c.Level != Warn || c.Fix == "" {
+			t.Errorf("check = %+v", c)
+		}
+	})
+	t.Run("information line has no fix", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r0", -9*24*time.Hour, map[string]int{"mail.messages": 404, "user.me": 200})
+		r.state(func(as *store.AccountState) {
+			until := now.Add(3 * time.Hour)
+			as.APISkipUntil = map[string]time.Time{"mail.messages": until, "mail.folders": until, "drive.info": until}
+		})
+		if c := r.run(true)[id]; c.Level != OK || c.Fix != "" {
+			t.Errorf("check = %+v", c)
+		}
+	})
+	t.Run("paused APIs of a disabled category do not count", func(t *testing.T) {
+		r := newRig(t)
+		r.cfg.Accounts[0].Categories = []string{"user", "mail", "contacts"}
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404, "user.me": 200})
+		r.state(func(as *store.AccountState) {
+			until := now.Add(3 * time.Hour)
+			as.APISkipUntil = map[string]time.Time{"mail.messages": until, "mail.folders": until, "drive.info": until, "drive.root": until}
+		})
+		expect(t, r.run(true), id, OK, "no category")
 	})
 	t.Run("a few refusals are fine", func(t *testing.T) {
 		r := newRig(t)

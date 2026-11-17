@@ -864,7 +864,7 @@ func (e *Engine) resumeAccount(name string, now time.Time) {
 		if as.Status == store.StatusOK {
 			// Nothing to resume, but the 24 h API pauses may be cleared: after the
 			// first sign-in at office.com the refused APIs work again.
-			if len(as.APISkipUntil) == 0 {
+			if callstat.PausedAPIs(as.APISkipUntil, now) == 0 {
 				return
 			}
 			as.APISkipUntil = nil

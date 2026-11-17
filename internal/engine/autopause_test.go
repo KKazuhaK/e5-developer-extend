@@ -36,6 +36,56 @@ func TestAutoPauseOffResumesAutoPausedAccountOnReload(t *testing.T) {
 	if as.Status != store.StatusOK || !as.NextProbe.IsZero() || as.Probes != 0 || as.NextRun.IsZero() {
 		t.Fatalf("auto pause not ended: %+v", as)
 	}
+	f.h.setStatus(nil)
+	for i := 0; i < 3; i++ {
+		f.clock.Advance(time.Minute)
+		f.tickWait()
+	}
+	if n := countEvents(f, "account_resume"); n != 1 {
+		t.Errorf("account_resume fired %d times, want 1", n)
+	}
+}
+
+func countEvents(f *fixture, name string) int {
+	es, _ := store.New(f.dir).Read(store.Filter{})
+	n := 0
+	for _, e := range es {
+		if e.Event == name {
+			n++
+		}
+	}
+	return n
+}
+
+func TestAutoPauseOffLeavesUserPausedAccountAlone(t *testing.T) {
+	a := delegatedAcct("main")
+	a.Paused = true
+	f := newFixture(t, a)
+	f.cfg.Schedule.AutoPause = false
+	f.start()
+	for i := 0; i < 3; i++ {
+		f.clock.Advance(time.Hour)
+		f.tickWait()
+	}
+	if f.h.total() != 0 || countEvents(f, "account_resume") != 0 {
+		t.Errorf("user-paused account touched: calls=%d", f.h.total())
+	}
+}
+
+func TestResumeIgnoresExpiredAPIPauses(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	f.start()
+	f.round("main")
+	f.e.mu.Lock()
+	f.e.state.Accounts["main"].APISkipUntil = map[string]time.Time{"mail.messages": f.clock.Now().Add(-time.Hour)}
+	f.e.mu.Unlock()
+	if err := TriggerResume(f.dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	f.tickWait()
+	if f.hasEvent("account_resume") {
+		t.Error("account_resume fired with nothing to clear")
+	}
 }
 
 func TestResumeClearsAPIPausesOfARunningAccount(t *testing.T) {
