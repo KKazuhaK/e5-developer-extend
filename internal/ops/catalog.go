@@ -54,7 +54,7 @@ func (o *Ops) Catalog(account string) (CatalogList, error) {
 	}
 	state, _ := store.New(dataDir).LoadState()
 	var granted []string
-	if as := state.Accounts[acct.Name]; as != nil {
+	if as := state.Accounts[acct.Key()]; as != nil {
 		granted = as.GrantedScopes
 	}
 	kind := catalog.Delegated

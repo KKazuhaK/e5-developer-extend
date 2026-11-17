@@ -50,7 +50,7 @@ func TestPasswordBlockIsClearedBySetSecretLoginAndEdit(t *testing.T) {
 	if err := e.AddAccount(ctx, in); err != nil {
 		t.Fatal(err)
 	}
-	trigger := filepath.Join(e.dataDir, "trigger", "pw.pwreset")
+	trigger := filepath.Join(e.dataDir, "trigger", e.keyOf(t, "pw")+".pwreset")
 	expect := func(what string, do func() error) {
 		t.Helper()
 		_ = os.Remove(trigger)

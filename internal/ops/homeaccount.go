@@ -11,7 +11,7 @@ import (
 // engine signed in with; if the account was edited meanwhile the ID belongs to
 // a sign-in that no longer applies and is dropped.
 func (o *Ops) saveHomeAccount(ctx context.Context, signedIn config.Account, homeID string) error {
-	return o.updateAccount(ctx, signedIn.Name, func(ac *config.Account) {
+	return o.updateAccountKey(ctx, signedIn.Key(), func(ac *config.Account) {
 		if ac.Auth == signedIn.Auth && ac.Tenant == signedIn.Tenant && ac.ClientID == signedIn.ClientID && ac.Username == signedIn.Username {
 			ac.HomeAccountID = homeID
 		}

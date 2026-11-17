@@ -23,13 +23,30 @@ type LogFilter struct {
 	Limit   int           // newest entries only; 0 for all
 }
 
+// AccountLogFilter selects the log lines of the account called name: those
+// written under its key, so the lines from before a rename are included. A name
+// no configured account has selects the lines written under that name. An empty
+// name selects everything.
+func (o *Ops) AccountLogFilter(name string) store.Filter {
+	if name == "" {
+		return store.Filter{}
+	}
+	if cfg, _, err := o.LoadConfig(); err == nil {
+		if a, ok := cfg.Find(name); ok {
+			return store.Filter{Account: a.Key()}
+		}
+	}
+	return store.Filter{Name: name}
+}
+
 // ReadLogs returns the call log, oldest first.
 func (o *Ops) ReadLogs(f LogFilter) ([]store.Entry, error) {
 	st, err := o.Store()
 	if err != nil {
 		return nil, err
 	}
-	sf := store.Filter{Account: f.Account, Limit: f.Limit}
+	sf := o.AccountLogFilter(f.Account)
+	sf.Limit = f.Limit
 	if f.Since > 0 {
 		sf.Since = time.Now().Add(-f.Since)
 	}

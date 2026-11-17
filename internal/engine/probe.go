@@ -72,7 +72,7 @@ func (e *Engine) probe(ctx context.Context, acct config.Account) {
 	defer e.wg.Done()
 	defer func() {
 		e.withLock(func() {
-			if rt := e.rt[acct.Name]; rt != nil {
+			if rt := e.rt[acct.Key()]; rt != nil {
 				rt.running = false
 			}
 		})
@@ -102,15 +102,15 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 		reason := e.attentionReason(err, acct.Name)
 		now := e.clock.Now()
 		e.withLock(func() {
-			if as := e.state.Accounts[acct.Name]; as != nil && as.Status == store.StatusPaused {
+			if as := e.state.Accounts[acct.Key()]; as != nil && as.Status == store.StatusPaused {
 				as.Status, as.Reason = store.StatusNeedsAttention, reason
 				as.NextProbe, as.Probes = time.Time{}, 0
 				e.setNextLocked(as, now.Add(attentionRetry))
 				e.saveLocked()
 			}
 		})
-		e.emit(store.Entry{Account: acct.Name, Event: "probe", Failed: 1, Message: "sign-in failed"})
-		e.event(acct.Name, "needs_attention", reason)
+		e.emit(store.Entry{Account: acct.Name, AccountID: acct.ID, Event: "probe", Failed: 1, Message: "sign-in failed"})
+		e.event(acct.Key(), "needs_attention", reason)
 		e.evalNotify()
 		return
 	}
@@ -118,7 +118,7 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 	class, api := graph.OK, "token"
 	var skipUntil map[string]time.Time
 	e.withLock(func() {
-		if as := e.state.Accounts[acct.Name]; as != nil {
+		if as := e.state.Accounts[acct.Key()]; as != nil {
 			skipUntil = maps.Clone(as.APISkipUntil)
 		}
 	})
@@ -142,7 +142,7 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 	default:
 		if class == graph.AuthFailed { // do not trust the cached token at the next probe
 			e.withLock(func() {
-				if rt := e.rt[acct.Name]; rt != nil {
+				if rt := e.rt[acct.Key()]; rt != nil {
 					rt.forceTok = true
 				}
 			})
@@ -155,7 +155,7 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 func (e *Engine) afterProbe(acct config.Account, why string, v probeVerdict) {
 	now := e.clock.Now()
 	e.withLock(func() {
-		as := e.state.Accounts[acct.Name]
+		as := e.state.Accounts[acct.Key()]
 		if as == nil || as.Status != store.StatusPaused {
 			return
 		}
@@ -167,7 +167,7 @@ func (e *Engine) afterProbe(acct config.Account, why string, v probeVerdict) {
 		}
 		e.saveLocked()
 	})
-	e.emit(store.Entry{Account: acct.Name, Event: "probe", Failed: 1, Message: why})
+	e.emit(store.Entry{Account: acct.Name, AccountID: acct.ID, Event: "probe", Failed: 1, Message: why})
 }
 
 // resumeFromProbe resumes an account whose probe worked and lets the alert
@@ -176,7 +176,7 @@ func (e *Engine) resumeFromProbe(acct config.Account, api string) {
 	now := e.clock.Now()
 	resumed := false
 	e.withLock(func() {
-		as := e.state.Accounts[acct.Name]
+		as := e.state.Accounts[acct.Key()]
 		if as == nil || as.Status != store.StatusPaused {
 			return
 		}
@@ -188,9 +188,9 @@ func (e *Engine) resumeFromProbe(acct config.Account, api string) {
 		e.saveLocked()
 		resumed = true
 	})
-	e.emit(store.Entry{Account: acct.Name, Event: "probe", OK: 1, Message: api})
+	e.emit(store.Entry{Account: acct.Name, AccountID: acct.ID, Event: "probe", OK: 1, Message: api})
 	if resumed {
-		e.event(acct.Name, "auto_resume", "the paused account answered a probe call")
+		e.event(acct.Key(), "auto_resume", "the paused account answered a probe call")
 		e.evalNotify()
 	}
 }

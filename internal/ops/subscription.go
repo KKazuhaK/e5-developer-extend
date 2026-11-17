@@ -130,7 +130,11 @@ func (o *Ops) RefreshSubscriptions(ctx context.Context, account string) (Subscri
 		if st != nil && st.Tenants[v.Tenant] != nil {
 			before[v.Tenant] = st.Tenants[v.Tenant].Attempted
 		}
-		if err := engine.TriggerSubscription(eo.DataDir, v.Accounts[0]); err != nil {
+		trigger := v.Accounts[0] // a name; the trigger file is named by the key
+		if a, ok := cfg.Find(trigger); ok {
+			trigger = a.Key()
+		}
+		if err := engine.TriggerSubscription(eo.DataDir, trigger); err != nil {
 			return SubscriptionRefresh{}, err
 		}
 	}

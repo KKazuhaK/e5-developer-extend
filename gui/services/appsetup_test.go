@@ -406,7 +406,7 @@ func TestAppSetupApplicationIdentityKeepsTheSecretInTheVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := v.Get(vault.SecretKey("app1")); err != nil || string(got) != r.g.Secrets[0] {
+	if got, err := v.Get(vault.SecretKey(func() string { a, _ := cfg.Find("app1"); return a.Key() }())); err != nil || string(got) != r.g.Secrets[0] {
 		t.Errorf("vault: %q %v", got, err)
 	}
 	r.noLeak()
@@ -566,12 +566,18 @@ func TestAppSetupAddRacingCancelNeverLeavesAnAccountWithoutItsSecret(t *testing.
 		go func() { defer wg.Done(); r.svc.Cancel(id) }()
 		wg.Wait()
 		cfg, _, _ := r.b.Ops.LoadConfigOrDefault()
-		_, saved := cfg.Find("app1")
+		acct, saved := cfg.Find("app1")
 		v, err := r.b.Ops.OpenVault(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		has, _ := v.Has(vault.SecretKey("app1"))
+		// A saved account keeps its secret under its key; otherwise the
+		// pending secret was stored under the name.
+		key := "app1"
+		if saved {
+			key = acct.Key()
+		}
+		has, _ := v.Has(vault.SecretKey(key))
 		switch {
 		case saved && (!has || liveSecrets(r) != 1):
 			t.Fatalf("round %d: account saved without its secret (vault %v, %d live, add err %v)", i, has, liveSecrets(r), addErr)

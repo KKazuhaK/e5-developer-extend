@@ -100,7 +100,11 @@ func vaultSecret(t *testing.T, e *setupEnv, account string) string {
 	if err != nil {
 		t.Fatal(err)
 	}
-	got, err := v.Get(vault.SecretKey(account))
+	key := account // an account that is not added yet has its secret under the bare name
+	if a, ok := cfg.Find(account); ok {
+		key = a.Key()
+	}
+	got, err := v.Get(vault.SecretKey(key))
 	if err != nil {
 		return ""
 	}
@@ -320,8 +324,17 @@ func TestAddAccountWithStoredSecret(t *testing.T) {
 	if err := e.AddAccount(ctx, in); err != nil {
 		t.Fatal(err)
 	}
-	if got, _ := v.Get(vault.SecretKey("app1")); string(got) != "stored" {
+	cfg, _, _ = e.LoadConfig()
+	acct, _ := cfg.Find("app1")
+	if acct == nil || acct.ID == "" {
+		t.Fatalf("the account has no ID: %+v", acct)
+	}
+	// The secret moved from the bare name to the ID.
+	if got, _ := v.Get(vault.SecretKey(acct.Key())); string(got) != "stored" {
 		t.Errorf("secret = %q", got)
+	}
+	if ok, _ := v.Has(vault.SecretKey("app1")); ok {
+		t.Error("the secret is still under the bare name")
 	}
 	if err := e.PrepareAddAccount(in); err == nil {
 		t.Error("PrepareAddAccount accepted a taken name")

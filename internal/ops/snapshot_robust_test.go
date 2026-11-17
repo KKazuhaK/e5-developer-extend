@@ -16,7 +16,7 @@ func TestSnapshotShowsThrottlingPausedAPIsAndAutoResume(t *testing.T) {
 	now := time.Now()
 	st := store.New(e.dataDir)
 	state := store.NewState()
-	state.Accounts["main"] = &store.AccountState{
+	state.Accounts[e.keyOf(t, "main")] = &store.AccountState{
 		Status: store.StatusPaused, Reason: "3 rounds in a row failed; it is tried again automatically",
 		NextProbe: now.Add(6 * time.Hour), Probes: 1,
 		APISkipUntil: map[string]time.Time{"mail.messages": now.Add(time.Hour), "old": now.Add(-time.Hour)},
@@ -25,6 +25,7 @@ func TestSnapshotShowsThrottlingPausedAPIsAndAutoResume(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, en := range mixedLog(now) {
+		en.AccountID = e.keyOf(t, "main")
 		if err := st.Append(en); err != nil {
 			t.Fatal(err)
 		}

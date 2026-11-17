@@ -6,6 +6,7 @@
 
 ### 新增
 
+- 账号可以改名：`e5extend account rename <旧名称> <新名称>`，桌面版的编辑页里直接改“账号名称”。改名保留历史和密钥：Secret、已保存的登录、统计、告警记录、订阅信息和调用日志都留在账号上，不需要重新登录，也不会触发告警；按新名称查看日志时，改名前写入的条目也会显示。做法是给账号一个固定的 ID（配置里的 `id`，新添加的账号一开始就有；没有 ID 的老账号第一次改名时以旧名称作为 ID），所有按账号保存的数据都以 ID 为键，改名只改 `config.toml`。名称规则不变（小写字母、数字、`-`、`_`，1-64 个字符）。带 `id` 的配置不能被旧版本（v0.2.0 及以前）读取：旧版后台服务会记一条 `config_error` 并继续用旧配置，重启到新版本后才生效。详见 [docs/design/account-rename.md](docs/design/account-rename.md)。
 - 检查更新和一键升级。引擎每天查一次 GitHub 上有没有新版本（走配置的代理，支持 `ETag`，遇到限流或离线按退避重试，开发构建从不检查），结果存在数据目录的 `update.json`。`config.toml` 新增 `[update]`：`check = true`（默认；`false` 只关闭每天的自动检查，手动检查不受影响）、`channel = "stable"`（默认）或 `"prerelease"`。新增告警事件 `update_available`（提示级别，每个版本只通知一次，走现有渠道、过滤、免打扰和重试）；`doctor` 在有新版本时多一行 `update`（不影响退出码）；`e5extend update check [--json]`、`e5extend update install [--yes]`。
 - 升级前验证发布签名：发布流水线用 Ed25519 密钥给 `SHA256SUMS` 签名（minisign 兼容格式，文件 `SHA256SUMS.minisig`，可用 `minisign -Vm SHA256SUMS -P <公钥>` 自己验证），仓库密钥 `RELEASE_SIGNING_KEY` 不存在时发布照常成功、只是没有签名，程序也就只提示新版本并给出发布页。公钥编进程序（`internal/update/pubkey.go`，`RWQh2HcJZFOJwdJXpwW2YFjr8hItSVKWgwOQWcMS0lbd7ZJo0I2HTZ41`），私钥是仓库密钥 `RELEASE_SIGNING_KEY`；细节见 [docs/design/update.md](docs/design/update.md) 和 [docs/design/release.md](docs/design/release.md)。
 - 按安装方式升级：Windows 安装包（静默运行新安装包）、Windows 命令行 zip（改名替换，正在运行的文件先改名为 `.old`）、macOS 应用（挂载 dmg 替换 `.app`）、macOS / Linux 的 tar 包（原子替换）、Linux deb / rpm（命令行包和桌面包一起装；桌面版用 `pkexec`，命令行不是 root 时给出确切的 `sudo` 命令）；Docker 只通知。升级后自动重启后台服务（服务管理器新增 `Restart`），先验证签名和 SHA-256，任何一步失败都不会改动现有程序。详见 [docs/design/update.md](docs/design/update.md) 和 [安装 → 升级](docs/user/install.md#升级)。
@@ -23,6 +24,8 @@
 
 ### 变更
 
+- 桌面版编辑账号不再重新走一遍添加向导，而是一页表单：名称、租户、客户端 ID、用户名、Secret / 密码（留空保留）、到期日、API 分类、暂停都在同一页，保存一次。登录和测试改为账号列表上单独的按钮（弹出对话框）；概览和账号页的“登录”按钮也直接打开登录对话框。添加向导只用于添加。
+- 添加向导第 1 步分成“选择方式”和“账号信息 / 登录方式”两个有明显分隔的区块。
 - 默认全天调用（`work_start` 和 `work_end` 都是 `"00:00"`，两者相等表示全天）；以前是 08:00 到 22:00。已有的配置不变。
 - 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
 - 返回 403 的接口现在在第一次就暂停 24 小时（之前连续 3 次后暂停 7 天），404 也一样；`failure_spike` 和“今日失败”不再把 403、404 和限流算作失败。

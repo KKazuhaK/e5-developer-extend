@@ -47,6 +47,20 @@ func (s *AccountService) Update(in AccountInput) error {
 	return err
 }
 
+// Rename gives an account a new name; its secret, sign-in, statistics and log
+// stay with it (only the configuration changes). A sign-in in progress under
+// the old name is abandoned. Update the other fields afterwards under the new
+// name. The returned list is always empty; it is kept for the caller, which
+// shows warnings when there are some.
+func (s *AccountService) Rename(from, to string) ([]string, error) {
+	s.CancelLogin(from)
+	if err := s.b.Ops.RenameAccount(context.Background(), from, to); err != nil {
+		return []string{}, err
+	}
+	s.b.Ops.ReloadEngine()
+	return []string{}, nil
+}
+
 // Remove deletes an account with its stored secret and sign-in.
 func (s *AccountService) Remove(name string) error {
 	s.CancelLogin(name)

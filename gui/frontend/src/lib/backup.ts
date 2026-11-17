@@ -22,7 +22,7 @@ export const PROBLEM_CODES = [
 ] as const;
 /** Note codes of exports and imports; each has a `backup.note.<code>` text (skipped ones too). */
 export const NOTE_CODES = [
-  "state_damaged", "gui_damaged", "config_set_aside", "stale_not_removed", "stats_not_imported", "merge_settings", "merge_logs",
+  "state_damaged", "gui_damaged", "config_set_aside", "stale_not_removed", "stats_not_imported", "merge_settings", "merge_logs", "orphan_vault",
 ] as const;
 /** Parts a `stats_not_imported` note names; each has a `backup.part.<name>` text. */
 export const PART_CODES = ["state", "gui", "logs"] as const;

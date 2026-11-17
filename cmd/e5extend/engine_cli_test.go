@@ -51,7 +51,7 @@ func TestCatalogList(t *testing.T) {
 	}
 	st := store.New(e.dataDir)
 	state := store.NewState()
-	state.Accounts["main"] = &store.AccountState{Status: store.StatusOK, GrantedScopes: []string{"Mail.Read"}}
+	state.Accounts[e.keyOf("main")] = &store.AccountState{Status: store.StatusOK, GrantedScopes: []string{"Mail.Read"}}
 	if err := st.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +80,7 @@ func TestPauseAndResume(t *testing.T) {
 	if e.loadCfg().Accounts[0].Paused {
 		t.Fatal("still paused")
 	}
-	if _, err := os.Stat(filepath.Join(e.dataDir, "trigger", "main.resume")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.dataDir, "trigger", e.keyOf("main")+".resume")); err != nil {
 		t.Errorf("no resume trigger: %v", err)
 	}
 	if _, _, err := e.run("", "account", "pause", "ghost"); err == nil {
@@ -203,7 +203,7 @@ func TestRunNowWithEngineWritesTrigger(t *testing.T) {
 	if !strings.Contains(out, "the engine is running") {
 		t.Errorf("out: %s", out)
 	}
-	if _, err := os.Stat(filepath.Join(e.dataDir, "trigger", "main")); err != nil {
+	if _, err := os.Stat(filepath.Join(e.dataDir, "trigger", e.keyOf("main"))); err != nil {
 		t.Errorf("no trigger file: %v", err)
 	}
 	if out := e.mustRun("", "status"); !strings.Contains(out, "engine: running") {
@@ -218,7 +218,7 @@ func TestStatusMarksStaleAccounts(t *testing.T) {
 	e := newEnv(t)
 	addDelegated(e, "main")
 	state := store.NewState()
-	state.Accounts["main"] = &store.AccountState{Status: store.StatusOK, LastSuccess: time.Now().Add(-4 * 24 * time.Hour),
+	state.Accounts[e.keyOf("main")] = &store.AccountState{Status: store.StatusOK, LastSuccess: time.Now().Add(-4 * 24 * time.Hour),
 		Reason: "something to read", Totals: store.Totals{Rounds: 5}}
 	if err := store.New(e.dataDir).SaveState(state); err != nil {
 		t.Fatal(err)

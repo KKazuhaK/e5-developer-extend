@@ -98,6 +98,16 @@ func (e *env) mustRun(stdin string, args ...string) string {
 	return out
 }
 
+// keyOf is the key of the named account: what its state, vault entries and trigger files are named by.
+func (e *env) keyOf(name string) string {
+	e.t.Helper()
+	a, ok := e.loadCfg().Find(name)
+	if !ok {
+		e.t.Fatalf("no account %q", name)
+	}
+	return a.Key()
+}
+
 func (e *env) loadCfg() *config.Config {
 	e.t.Helper()
 	cfg, err := config.Load(filepath.Join(e.cfgDir, "config.toml"))
@@ -189,7 +199,7 @@ func TestAccountLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	v := vault.New(filepath.Join(e.dataDir, "vault"), func() ([]byte, error) { return key, nil })
-	got, err := v.Get("secret/svc")
+	got, err := v.Get("secret/" + e.keyOf("svc"))
 	if err != nil || string(got) != "s3cr3t-value" {
 		t.Fatalf("vault secret = %q, %v", got, err)
 	}
@@ -208,6 +218,7 @@ func TestAccountLifecycle(t *testing.T) {
 		t.Fatal("duplicate add should fail")
 	}
 
+	svcKey := e.keyOf("svc")
 	// Without --yes and without confirmation nothing is removed.
 	if _, _, err := e.run("n\n", "account", "remove", "svc"); err == nil {
 		t.Fatal("declined remove should fail")
@@ -215,14 +226,14 @@ func TestAccountLifecycle(t *testing.T) {
 	if len(e.loadCfg().Accounts) != 2 {
 		t.Fatal("account removed despite refusal")
 	}
-	if err := v.Put("tokencache/svc", []byte("{}")); err != nil {
+	if err := v.Put("tokencache/"+svcKey, []byte("{}")); err != nil {
 		t.Fatal(err)
 	}
 	e.mustRun("", "account", "remove", "svc", "--yes")
-	if _, err := v.Get("secret/svc"); !errors.Is(err, vault.ErrNotFound) {
+	if _, err := v.Get("secret/" + svcKey); !errors.Is(err, vault.ErrNotFound) {
 		t.Fatalf("secret should be deleted: %v", err)
 	}
-	if _, err := v.Get("tokencache/svc"); !errors.Is(err, vault.ErrNotFound) {
+	if _, err := v.Get("tokencache/" + svcKey); !errors.Is(err, vault.ErrNotFound) {
 		t.Fatalf("token cache should be deleted: %v", err)
 	}
 	e.mustRun("y\n", "account", "remove", "main")
@@ -407,7 +418,7 @@ func TestSetSecret(t *testing.T) {
 	}
 	key, _, _ := vault.ResolveMasterKey("auto", "")
 	v := vault.New(filepath.Join(e.dataDir, "vault"), func() ([]byte, error) { return key, nil })
-	if got, _ := v.Get("secret/svc"); string(got) != "new-value" {
+	if got, _ := v.Get("secret/" + e.keyOf("svc")); string(got) != "new-value" {
 		t.Fatalf("secret = %q", got)
 	}
 	if _, _, err := e.run("\n", "account", "set-secret", "svc"); err == nil {
@@ -509,6 +520,52 @@ func TestAccountChangesAskARunningEngineToReload(t *testing.T) {
 	expectReload("account add (client secret)")
 	e.mustRun("n3w-s3cr3t\n", "account", "set-secret", "svc")
 	expectReload("account set-secret")
-	e.mustRun("", "account", "remove", "svc", "--yes")
+	e.mustRun("", "account", "rename", "svc", "svc2")
+	expectReload("account rename")
+	e.mustRun("", "account", "remove", "svc2", "--yes")
 	expectReload("account remove")
+}
+
+func TestAccountRename(t *testing.T) {
+	e := newEnv(t)
+	e.mustRun("s3cr3t-value\n", "account", "add", "svc", "--auth", "client_secret",
+		"--tenant", "contoso.onmicrosoft.com", "--client-id", testGUID)
+	e.mustRun("", "account", "add", "other", "--auth", "device_code", "--tenant", "t", "--client-id", testGUID)
+
+	before := e.keyOf("svc")
+	out := e.mustRun("", "account", "rename", "svc", "work")
+	if !strings.Contains(out, `renamed account "svc" to "work"`) {
+		t.Errorf("output: %s", out)
+	}
+	if _, ok := e.loadCfg().Find("svc"); ok {
+		t.Error("svc is still configured")
+	}
+	if _, ok := e.loadCfg().Find("work"); !ok {
+		t.Error("work is not configured")
+	}
+	key, _, err := vault.ResolveMasterKey("auto", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := vault.New(filepath.Join(e.dataDir, "vault"), func() ([]byte, error) { return key, nil })
+	// The key, and with it the stored secret, did not change.
+	if got := e.keyOf("work"); got != before {
+		t.Errorf("key %q, was %q", got, before)
+	}
+	if got, err := v.Get("secret/" + before); err != nil || string(got) != "s3cr3t-value" {
+		t.Errorf("secret = %q, %v", got, err)
+	}
+	if _, err := v.Get("secret/work"); !errors.Is(err, vault.ErrNotFound) {
+		t.Errorf("secret/work: %v", err)
+	}
+	for _, args := range [][]string{
+		{"account", "rename", "work", "other"},
+		{"account", "rename", "work", "Bad Name"},
+		{"account", "rename", "ghost", "x"},
+		{"account", "rename", "work"},
+	} {
+		if _, _, err := e.run("", args...); err == nil {
+			t.Errorf("%v should fail", args)
+		}
+	}
 }

@@ -102,8 +102,8 @@ func (ev *evaluator) buildSummary() (string, []SummaryRow) {
 	var ok, failed, throttled int
 	for _, acct := range in.Accounts {
 		row := SummaryRow{Account: acct.Name, State: SumOK}
-		as := in.State.Accounts[acct.Name]
-		cn := callstat.Tally(in.Calls[acct.Name], since)
+		as := in.State.Accounts[acct.Key()]
+		cn := callstat.Tally(in.Calls[acct.Key()], since)
 		row.OK, row.Failed, row.Throttled = cn.OK, cn.Failed, cn.Throttled
 		switch {
 		case acct.Paused:

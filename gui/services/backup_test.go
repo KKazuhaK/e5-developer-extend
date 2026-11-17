@@ -94,7 +94,7 @@ func TestBackupServiceRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got, err := v.Get("secret/main"); err != nil || string(got) != secretValue {
+	if got, err := v.Get("secret/" + func() string { a, _ := cfgB.Find("main"); return a.Key() }()); err != nil || string(got) != secretValue {
 		t.Fatalf("secret in B: %q %v", got, err)
 	}
 	if res, err := bb.Import(guiBackupPass, "default", "Open"); err != nil || res.Problem == nil || res.Problem.Code != "target_has_data" {

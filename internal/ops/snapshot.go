@@ -154,7 +154,7 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	today, _ := st.Read(store.Filter{Since: midnight})
 	todayBy := map[string][]store.Entry{}
 	for _, en := range today {
-		todayBy[en.Account] = append(todayBy[en.Account], en)
+		todayBy[en.Key()] = append(todayBy[en.Key()], en)
 	}
 
 	apis, _ := catalog.Load()
@@ -167,12 +167,12 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	}
 
 	for _, acct := range cfg.Accounts {
-		as := state.Accounts[acct.Name]
+		as := state.Accounts[acct.Key()]
 		sum := AccountSummary{
 			Name: acct.Name, Auth: acct.Auth, Tenant: acct.Tenant, Account: acct, State: as,
 			TotalAPIs: len(apis), Paused: acct.Paused,
 		}
-		cn := callstat.Tally(todayBy[acct.Name], midnight)
+		cn := callstat.Tally(todayBy[acct.Key()], midnight)
 		sum.TodayOK, sum.TodayFailed, sum.TodayThrottled = cn.OK, cn.Failed, cn.Throttled
 		if acct.SecretExpires != "" {
 			s := acct.SecretExpires
