@@ -157,7 +157,7 @@ func Run(ctx context.Context, d Deps, o Options) []Check {
 	if cfg != nil && cfgErr == nil {
 		st, _ := store.New(d.DataDir).LoadState()
 		for _, tv := range subscription.Build(cfg, st, d.now()) {
-			groups = append(groups, group{"subscription." + tv.Tenant, "Subscription " + tv.Label,
+			groups = append(groups, group{"subscription." + tv.Label, "Subscription " + tv.Label,
 				func(context.Context) []Check { return []Check{checkSubscription(d, cfg, tv)} }})
 		}
 	}
@@ -594,7 +594,7 @@ const subscriptionWarnDays = 7
 // checkSubscription judges what the last subscription check saw. A missing
 // permission is a state to explain, not a problem: the check is optional.
 func checkSubscription(d Deps, cfg *config.Config, tv subscription.TenantView) Check {
-	c := Check{ID: "subscription." + tv.Tenant, Title: "Subscription " + tv.Label}
+	c := Check{ID: "subscription." + tv.Label, Title: "Subscription " + tv.Label}
 	const renew = "renew it in the Microsoft 365 admin center (Billing > Your products), then run: e5extend subscription"
 	note := "" // the failure of the last check, when older data is still shown
 	manual := func() {
@@ -615,7 +615,7 @@ func checkSubscription(d Deps, cfg *config.Config, tv subscription.TenantView) C
 		return c
 	case store.AccessNoPermission:
 		c.Level = OK
-		c.Detail = "cannot read the subscription: Organization.Read.All is needed (run: e5extend app setup to add it)"
+		c.Detail = "cannot read the subscription: Organization.Read.All is needed (add it to the app of account " + tv.FixAccount + " with: " + tv.FixCommand + ")"
 		if tv.ManualExpires != "" {
 			c.Detail = "cannot read the subscription (Organization.Read.All is needed)"
 			manual()

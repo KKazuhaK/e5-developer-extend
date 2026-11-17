@@ -73,7 +73,8 @@ e5extend doctor          # 全面检查
 ## 概览页的“E5 订阅”卡片说读不到订阅信息
 
 读订阅（`GET /directory/subscriptions`）需要 `Organization.Read.All`。应用身份的推荐权限里本来就有；委托身份（设备码、浏览器、账号密码）是新加的，
-旧的应用注册没有。重新运行 `e5extend app setup`（自动模式会补权限并授予管理员同意），或在 Entra 里手动添加后授予同意，再点“立即刷新”或运行
+旧的应用注册没有。给账号正在用的应用注册补上它：桌面版点卡片上的“补齐权限”；命令行委托账号 `e5extend app setup --tenant <租户>`，
+Client Secret 账号 `e5extend app setup --app-only --account <账号> --no-new-secret`（不会新建 Secret）；或在 Entra 里手动添加后授予同意。然后点“立即刷新”或运行
 `e5extend subscription`。登录的用户本身要能读目录，开发者租户的管理员满足。一时补不了就手动填写到期日，同样会提醒。
 
 ## 我的数据安全吗？

@@ -84,8 +84,11 @@ type scope struct {
 	tenant  string
 	// subscription is the subscription ID of a tenant-level alert.
 	subscription string
-	notified     *map[string]store.Notice
-	sent         *map[string]time.Time
+	// sku, status and end describe that subscription (end is YYYY-MM-DD); for
+	// the date entered by hand only end is set.
+	sku, status, end string
+	notified         *map[string]store.Notice
+	sent             *map[string]time.Time
 }
 
 func (s scope) get(kind string) (store.Notice, bool) { n, ok := (*s.notified)[kind]; return n, ok }
@@ -113,7 +116,8 @@ func (s scope) del(kind string) {
 // event rebuilds the event of a notice. key carries what the decision was
 // based on: the numbers of a failure_spike, the origin of a recovery.
 func (s scope) event(kind, key, msg string, at, attempt time.Time) Event {
-	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt, Subscription: s.subscription}
+	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt, Subscription: s.subscription,
+		SKU: s.sku, SubStatus: s.status, EndDate: s.end}
 	if sev := LevelOfKey(kind, key); sev != LevelOf(kind) {
 		e.Severity = sev
 	}

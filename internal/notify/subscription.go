@@ -7,7 +7,9 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/subscription"
 )
 
 const (
@@ -20,35 +22,22 @@ const (
 	statusDeleted = "Deleted"
 )
 
-// tenantLabel names a tenant in a message.
-func tenantLabel(key string) string {
-	if name, ok := strings.CutPrefix(key, "account:"); ok {
-		return "of account " + name
-	}
-	return "of tenant " + key
-}
-
 // evalSubscriptions raises the subscription alerts of every tenant that has
 // accounts: expiring (30, 7 and 1 day before, once each), status changes and
 // renewals. A date entered by hand stands in until real data is read.
 func (ev *evaluator) evalSubscriptions() {
 	in := ev.in
-	manual := map[string]string{}
-	var keys []string
-	for _, a := range in.Accounts {
-		key := a.TenantKey()
-		if !slices.Contains(keys, key) {
-			keys = append(keys, key)
+	for _, g := range subscription.Group(&config.Config{Accounts: in.Accounts}, in.State) {
+		key, where := g.Key, "of tenant "+g.Label
+		manual := ""
+		for _, a := range g.Accounts {
+			if a.SubscriptionExpires != "" && manual == "" {
+				manual = a.SubscriptionExpires
+			}
 		}
-		if a.SubscriptionExpires != "" && manual[key] == "" {
-			manual[key] = a.SubscriptionExpires
-		}
-	}
-	slices.Sort(keys)
-	for _, key := range keys {
 		ts := in.State.Tenants[key]
 		if ts == nil {
-			if manual[key] == "" {
+			if manual == "" {
 				continue
 			}
 			ts = &store.TenantState{}
@@ -58,7 +47,6 @@ func (ev *evaluator) evalSubscriptions() {
 			in.State.Tenants[key] = ts
 			ev.changed = true
 		}
-		where := tenantLabel(key)
 		haveReal := false
 		ids := make([]string, 0, len(ts.Subscriptions))
 		for id := range ts.Subscriptions {
@@ -73,11 +61,10 @@ func (ev *evaluator) evalSubscriptions() {
 			haveReal = true
 			ev.evalSubscription(key, where, id, sub)
 		}
-		s := scope{ev: ev, tenant: key, subscription: manualID, notified: &ts.Notified, sent: &ts.LastSent}
-		if !haveReal && manual[key] != "" {
-			date := manual[key]
-			s.expiry(SubscriptionExpiring, in.Now, date, func(days int) string {
-				return expiryMessage("E5 subscription "+where, "", days, date)
+		s := scope{ev: ev, tenant: key, subscription: manualID, notified: &ts.Notified, sent: &ts.LastSent, end: manual}
+		if !haveReal && manual != "" {
+			s.expiry(SubscriptionExpiring, in.Now, manual, func(days int) string {
+				return expiryMessage("E5 subscription "+where, "", days, manual)
 			})
 			s.retry()
 		} else {
@@ -88,7 +75,12 @@ func (ev *evaluator) evalSubscriptions() {
 
 func (ev *evaluator) evalSubscription(key, where, id string, sub *store.SubscriptionState) {
 	now := ev.in.Now
-	s := scope{ev: ev, tenant: key, subscription: id, notified: &sub.Notified, sent: &sub.LastSent}
+	loc := now.Location()
+	ymd := func(t time.Time) string { return t.In(loc).Format("2006-01-02") }
+	s := scope{ev: ev, tenant: key, subscription: id, notified: &sub.Notified, sent: &sub.LastSent, sku: sub.SKU, status: sub.Status}
+	if !sub.NextLifecycle.IsZero() {
+		s.end = ymd(sub.NextLifecycle)
+	}
 	subject := "subscription " + sub.SKU + " " + where
 
 	// A change of status. The first time a subscription is seen only a status
@@ -116,9 +108,9 @@ func (ev *evaluator) evalSubscription(key, where, id string, sub *store.Subscrip
 		last := sub.History[n-1]
 		if last.SeenAt.After(sub.RenewalNotified) {
 			if now.Sub(last.SeenAt) <= renewalFresh {
-				_, _ = s.announce(SubscriptionRenewed, last.To.UTC().Format("2006-01-02"), fmt.Sprintf(
+				_, _ = s.announce(SubscriptionRenewed, ymd(last.To), fmt.Sprintf(
 					"%s was renewed: the end date moved from %s to %s",
-					subject, last.From.UTC().Format("2006-01-02"), last.To.UTC().Format("2006-01-02")))
+					subject, ymd(last.From), ymd(last.To)))
 			}
 			sub.RenewalNotified = last.SeenAt
 			ev.changed = true
@@ -126,9 +118,9 @@ func (ev *evaluator) evalSubscription(key, where, id string, sub *store.Subscrip
 	}
 
 	if sub.Status != statusDeleted && !sub.NextLifecycle.IsZero() {
-		date := sub.NextLifecycle.UTC().Format("2006-01-02")
+		date := ymd(sub.NextLifecycle)
 		status := sub.Status
-		s.expiry(SubscriptionExpiring, now.UTC(), date, func(days int) string {
+		s.expiry(SubscriptionExpiring, now, date, func(days int) string {
 			return expiryMessage(subject, status, days, date)
 		})
 	} else {

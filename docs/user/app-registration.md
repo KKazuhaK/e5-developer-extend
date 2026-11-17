@@ -16,6 +16,7 @@ e5extend account add app1 --auto --auth client_secret --username <目标用户�
 # 只创建/更新应用，打印租户 ID 和客户端 ID
 e5extend app setup            # 委托身份
 e5extend app setup --app-only --account app1   # 应用身份，Secret 存进 vault 里 app1 的位置
+e5extend app setup --app-only --account app1 --no-new-secret   # 只给 app1 用的应用补缺的权限，不动 Secret
 ```
 
 `e5extend init` 向导里选“自动创建（推荐）”也是同一个流程。

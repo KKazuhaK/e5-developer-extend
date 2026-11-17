@@ -2,6 +2,7 @@ package ops
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -11,9 +12,15 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
+
+// canReadSubscriptions gives the fake sign-in the permission the check needs.
+func (e *testEnv) canReadSubscriptions() {
+	e.fa.tok.Scopes = append(e.fa.tok.Scopes, "Organization.Read.All")
+}
 
 func subsServer(t *testing.T, code int, hits *atomic.Int32) *httptest.Server {
 	t.Helper()
@@ -28,7 +35,7 @@ func subsServer(t *testing.T, code int, hits *atomic.Int32) *httptest.Server {
 		}
 		w.WriteHeader(code)
 		if code == 200 {
-			_, _ = w.Write([]byte(`{"value":[{"id":"s1","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T00:00:00Z","isTrial":false,"totalLicenses":25,"ownerTenantId":"tid"}]}`))
+			_, _ = w.Write([]byte(`{"value":[{"id":"s1","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T12:00:00Z","isTrial":false,"totalLicenses":25,"ownerTenantId":"tid"}]}`))
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -37,6 +44,7 @@ func subsServer(t *testing.T, code int, hits *atomic.Int32) *httptest.Server {
 
 func TestRefreshSubscriptionsInProcess(t *testing.T) {
 	e := newTestEnv(t)
+	e.canReadSubscriptions()
 	e.addDevice(t, "main")
 	e.addDevice(t, "second") // same tenant: one call
 	var hits atomic.Int32
@@ -72,6 +80,7 @@ func TestRefreshSubscriptionsInProcess(t *testing.T) {
 
 func TestRefreshSubscriptionsWithoutPermission(t *testing.T) {
 	e := newTestEnv(t)
+	e.canReadSubscriptions()
 	e.addDevice(t, "main")
 	var hits atomic.Int32
 	e.GraphBase = subsServer(t, 403, &hits).URL
@@ -86,6 +95,7 @@ func TestRefreshSubscriptionsWithoutPermission(t *testing.T) {
 
 func TestRefreshSubscriptionsAsksARunningEngine(t *testing.T) {
 	e := newTestEnv(t)
+	e.canReadSubscriptions()
 	e.addDevice(t, "main")
 	e.RefreshWait = 5 * time.Second
 	var hits atomic.Int32
@@ -177,5 +187,56 @@ func TestUpdateAccountKeepsTheManualSubscriptionDate(t *testing.T) {
 	cfg, _, _ := e.LoadConfig()
 	if cfg.Accounts[0].SubscriptionExpires != "2027-02-14" {
 		t.Errorf("the date was lost: %+v", cfg.Accounts[0])
+	}
+}
+
+func TestRefreshSubscriptionsSkipsTheCallWhenTheTokenLacksThePermission(t *testing.T) {
+	e := newTestEnv(t) // the fake token has no Organization.Read.All
+	e.addDevice(t, "main")
+	var hits atomic.Int32
+	e.GraphBase = subsServer(t, 200, &hits).URL
+	res, err := e.RefreshSubscriptions(context.Background(), "")
+	if err != nil || hits.Load() != 0 || res.Tenants[0].Access != store.AccessNoPermission {
+		t.Fatalf("hits %d, %+v, %v", hits.Load(), res, err)
+	}
+	tv := res.Tenants[0]
+	if tv.FixAccount != "main" || tv.FixKind != "delegated" || !strings.Contains(tv.FixCommand, "e5extend app setup --tenant t.example --adopt "+testGUID) {
+		t.Errorf("fix advice: %+v", tv)
+	}
+}
+
+func TestRefreshSubscriptionsSaysAtOnceWhenNoAccountCanSignIn(t *testing.T) {
+	e := newTestEnv(t)
+	e.canReadSubscriptions()
+	e.addDevice(t, "main")
+	if _, err := e.Pause(context.Background(), "main"); err != nil {
+		t.Fatal(err)
+	}
+	release, err := engine.AcquireLock(e.dataDir) // an engine runs: it would never answer
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	start := time.Now()
+	_, err = e.RefreshSubscriptions(context.Background(), "main")
+	if !errors.Is(err, engine.ErrNoUsableAccount) || time.Since(start) > time.Second {
+		t.Errorf("err = %v after %s", err, time.Since(start))
+	}
+	// And without an engine.
+	release()
+	if _, err := e.RefreshSubscriptions(context.Background(), ""); !errors.Is(err, engine.ErrNoUsableAccount) {
+		t.Errorf("no engine: %v", err)
+	}
+}
+
+func TestSubscriptionFixAdviceForAClientSecretAccount(t *testing.T) {
+	e := newTestEnv(t)
+	in := AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "contoso.onmicrosoft.com", ClientID: testGUID, Secret: "S"}
+	if err := e.AddAccount(context.Background(), in); err != nil {
+		t.Fatal(err)
+	}
+	tv, _ := e.Subscriptions("")
+	if tv[0].FixKind != "app" || tv[0].FixCommand != "e5extend app setup --app-only --account app1 --no-new-secret" {
+		t.Errorf("fix advice: %+v", tv[0])
 	}
 }

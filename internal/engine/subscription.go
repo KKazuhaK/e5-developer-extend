@@ -2,10 +2,12 @@ package engine
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
@@ -27,33 +29,17 @@ func TriggerSubscription(dataDir, account string) error {
 	return writeTrigger(dataDir, account+subscriptionSuffix)
 }
 
-// tenantGroups groups the configured accounts by tenant, in configuration order.
-func tenantGroups(cfg *config.Config) (keys []string, groups map[string][]config.Account) {
-	groups = map[string][]config.Account{}
-	for _, a := range cfg.Accounts {
-		k := a.TenantKey()
-		if _, ok := groups[k]; !ok {
-			keys = append(keys, k)
-		}
-		groups[k] = append(groups[k], a)
-	}
-	return keys, groups
-}
+// ErrNoUsableAccount means no account of the tenant can sign in now.
+var ErrNoUsableAccount = errors.New("no account in this tenant can sign in")
 
-// usableForSubscription lists the accounts that can sign in now, in
-// configuration order. A forced check also tries accounts that need attention:
-// the sign-in may work again.
+// usableForSubscription lists the accounts of a tenant that can be asked now,
+// in configuration order (see subscription.Usable).
 func (e *Engine) usableForSubscriptionLocked(accts []config.Account, forced bool) []config.Account {
 	var out []config.Account
 	for _, a := range accts {
-		as := e.state.Accounts[a.Name]
-		if a.Paused || as == nil || as.Status == store.StatusPaused || as.Status == store.StatusPeriodEnded {
-			continue
+		if subscription.Usable(e.state, a, forced) {
+			out = append(out, a)
 		}
-		if as.Status == store.StatusNeedsAttention && !forced {
-			continue
-		}
-		out = append(out, a)
 	}
 	return out
 }
@@ -70,16 +56,19 @@ func (e *Engine) subscriptionTick(ctx context.Context, now time.Time, force map[
 			return
 		}
 		ready := e.roundsDone || now.Sub(e.started) >= subscriptionGrace
-		keys, groups := tenantGroups(e.cfg)
-		for _, key := range keys {
+		for _, g := range subscription.Group(e.cfg, e.state) {
+			key, forced := g.Key, force[g.Key]
 			if e.subRunning[key] {
 				continue
 			}
-			if !force[key] && !(ready && !now.Before(subscription.NextCheck(e.state.Tenants[key]))) {
+			if !forced && !(ready && !now.Before(subscription.NextCheck(e.state.Tenants[key]))) {
 				continue
 			}
-			usable := e.usableForSubscriptionLocked(groups[key], force[key])
+			usable := e.usableForSubscriptionLocked(g.Accounts, forced)
 			if len(usable) == 0 {
+				if forced {
+					e.event("", "subscription_check", "no account of "+g.Label+" can sign in now")
+				}
 				continue
 			}
 			if e.subRunning == nil {
@@ -89,7 +78,7 @@ func (e *Engine) subscriptionTick(ctx context.Context, now time.Time, force map[
 			e.wg.Add(1)
 			go func() {
 				defer e.wg.Done()
-				e.guard("subscription check", func() { e.checkTenant(ctx, key, usable) })
+				e.guard("subscription check", func() { e.checkTenant(ctx, key, usable, forced) })
 			}()
 		}
 	})
@@ -97,12 +86,20 @@ func (e *Engine) subscriptionTick(ctx context.Context, now time.Time, force map[
 
 // checkTenant reads the subscriptions of one tenant with the token of the
 // first account that works, and records the outcome. A refusal counts as
-// "no permission" only when every account that could ask was refused.
-func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Account) {
-	defer e.withLock(func() { delete(e.subRunning, key) })
+// "no permission" only when every account that could ask was refused: by
+// Graph, or by its token lacking the permission, which is not even tried.
+// Checks run one at a time, so a tenant that two accounts name differently
+// (a domain and a GUID) is found out by the first and read once.
+// A forced check asks for a fresh token, so permissions consented to a moment
+// ago show up in it.
+func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Account, forced bool) {
+	running := key // key may change to the tenant GUID below
+	defer e.withLock(func() { delete(e.subRunning, running) })
+	e.subMu.Lock()
+	defer e.subMu.Unlock()
 
 	var subs []graph.Subscription
-	var tid, used string
+	var used string
 	refused, ok := false, false
 	detail := "could not sign in"
 	for _, acct := range accts {
@@ -110,17 +107,45 @@ func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Acc
 		if err != nil {
 			continue
 		}
-		tok, err := au.Token(e.gateContext(ctx, acct.Name))
+		tctx := e.gateContext(ctx, acct.Name)
+		if forced {
+			tctx = auth.ForceRefresh(tctx)
+		}
+		tok, err := au.Token(tctx)
 		if ctx.Err() != nil {
 			return
 		}
 		if err != nil {
 			continue
 		}
+		// The token says which tenant this really is: when another group (or
+		// the saved state) already knows it, they are one.
+		if tid := strings.ToLower(tok.TenantID); tid != "" {
+			var skip bool
+			e.withLock(func() {
+				if e.state == nil {
+					return
+				}
+				if tid != key {
+					subscription.Merge(e.state, key, tid)
+					key = tid
+					e.saveLocked()
+				}
+				// Another group may have read this tenant a moment ago.
+				skip = !forced && e.clock.Now().Before(subscription.NextCheck(e.state.Tenants[key]))
+			})
+			if skip {
+				return
+			}
+		}
+		if subscription.MissingPermission(tok.Scopes) {
+			refused = true
+			continue
+		}
 		got, res := e.o.Graph.ListSubscriptions(ctx, tok.AccessToken)
 		switch res.Class {
 		case graph.OK:
-			subs, tid, used, ok = got, tok.TenantID, acct.Name, true
+			subs, used, ok = got, acct.Name, true
 		case graph.Forbidden, graph.AuthFailed:
 			refused = true
 			continue
@@ -159,7 +184,7 @@ func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Acc
 		case ok:
 			n := subscription.Apply(ts, subs, now)
 			if ts.TenantID == "" {
-				ts.TenantID = tid
+				ts.TenantID = key
 			}
 			msg = fmt.Sprintf("read %d subscription(s), %d renewal(s) seen", len(subs), n)
 		case refused:
@@ -178,9 +203,18 @@ func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Acc
 // pruneTenantsLocked forgets the subscription state of tenants that no
 // account belongs to any more.
 func (e *Engine) pruneTenantsLocked() {
+	configured := map[string]bool{}
+	for _, a := range e.cfg.Accounts {
+		configured[a.TenantKey()] = true
+	}
+	for k := range e.state.TenantAliases {
+		if !configured[k] {
+			delete(e.state.TenantAliases, k)
+		}
+	}
 	keys := map[string]bool{}
 	for _, a := range e.cfg.Accounts {
-		keys[a.TenantKey()] = true
+		keys[subscription.KeyOf(e.state, a)] = true
 	}
 	for k := range e.state.Tenants {
 		if !keys[k] {
@@ -189,6 +223,9 @@ func (e *Engine) pruneTenantsLocked() {
 	}
 	if len(e.state.Tenants) == 0 {
 		e.state.Tenants = nil
+	}
+	if len(e.state.TenantAliases) == 0 {
+		e.state.TenantAliases = nil
 	}
 }
 
@@ -208,32 +245,40 @@ func CheckSubscriptions(ctx context.Context, o Options, names []string) error {
 	defer e.closeNotifier()
 	e.init()
 
-	_, groups := tenantGroups(e.cfg)
-	done := map[string]bool{}
-	for _, a := range e.cfg.Accounts {
-		key := a.TenantKey()
-		if done[key] || (len(names) > 0 && !contains(names, a.Name) && !anyNamed(groups[key], names)) {
-			continue
+	type job struct {
+		g      subscription.Tenant
+		usable []config.Account
+	}
+	var jobs []job
+	var stuck []string
+	e.withLock(func() {
+		for _, g := range subscription.Group(e.cfg, e.state) {
+			named := len(names) == 0
+			for _, a := range g.Accounts {
+				named = named || contains(names, a.Name)
+			}
+			if !named {
+				continue
+			}
+			if u := e.usableForSubscriptionLocked(g.Accounts, true); len(u) > 0 {
+				jobs = append(jobs, job{g, u})
+			} else {
+				stuck = append(stuck, g.Label)
+			}
 		}
-		done[key] = true
-		var usable []config.Account
-		e.withLock(func() { usable = e.usableForSubscriptionLocked(groups[key], true) })
-		if len(usable) == 0 {
-			e.event("", "subscription_check", "no account of "+key+" can sign in now")
-			continue
+	})
+	if len(stuck) > 0 {
+		for _, label := range stuck {
+			e.event("", "subscription_check", "no account of "+label+" can sign in now")
 		}
-		e.checkTenant(ctx, key, usable)
+		if len(jobs) == 0 {
+			return fmt.Errorf("%w (%s): resume the account or sign it in first", ErrNoUsableAccount, strings.Join(stuck, ", "))
+		}
+	}
+	for _, j := range jobs {
+		e.checkTenant(ctx, j.g.Key, j.usable, true)
 	}
 	return nil
-}
-
-func anyNamed(accts []config.Account, names []string) bool {
-	for _, a := range accts {
-		if contains(names, a.Name) {
-			return true
-		}
-	}
-	return false
 }
 
 // handleSubscriptionTrigger turns the trigger file of an account into a forced check.
@@ -242,7 +287,7 @@ func (e *Engine) handleSubscriptionTrigger(file string, force map[string]bool) {
 	var key string
 	e.withLock(func() {
 		if a, ok := e.cfg.Find(name); ok {
-			key = a.TenantKey()
+			key = subscription.KeyOf(e.state, *a)
 		}
 	})
 	if key == "" {

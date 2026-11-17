@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -21,8 +22,8 @@ func fakeSubscriptions(t *testing.T, code int, hits *atomic.Int32) string {
 		w.WriteHeader(code)
 		if code == 200 {
 			_, _ = w.Write([]byte(`{"value":[
-{"id":"s1","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T00:00:00Z","isTrial":false,"totalLicenses":25,"ownerTenantId":"tid"},
-{"id":"s2","skuPartNumber":"POWER_BI_STANDARD","status":"Enabled","nextLifecycleDateTime":"2027-01-01T00:00:00Z","isTrial":true,"totalLicenses":1000000,"ownerTenantId":"tid"}]}`))
+{"id":"s1","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T12:00:00Z","isTrial":false,"totalLicenses":25,"ownerTenantId":"tid"},
+{"id":"s2","skuPartNumber":"POWER_BI_STANDARD","status":"Enabled","nextLifecycleDateTime":"2027-01-01T12:00:00Z","isTrial":true,"totalLicenses":1000000,"ownerTenantId":"tid"}]}`))
 		}
 	}))
 	t.Cleanup(srv.Close)
@@ -32,7 +33,7 @@ func fakeSubscriptions(t *testing.T, code int, hits *atomic.Int32) string {
 func TestSubscriptionCommandTableAndJSON(t *testing.T) {
 	e := newEnv(t)
 	addDelegated(e, "main")
-	useAuth(e, &fakeAuth{tok: goodToken()})
+	useAuth(e, &fakeAuth{tok: withOrgRead(goodToken())})
 	var hits atomic.Int32
 	e.graphBase = fakeSubscriptions(t, 200, &hits)
 
@@ -69,7 +70,7 @@ func TestSubscriptionCommandTableAndJSON(t *testing.T) {
 func TestSubscriptionCommandWithoutPermissionAndManualDate(t *testing.T) {
 	e := newEnv(t)
 	addDelegated(e, "main")
-	useAuth(e, &fakeAuth{tok: goodToken()})
+	useAuth(e, &fakeAuth{tok: withOrgRead(goodToken())})
 	var hits atomic.Int32
 	e.graphBase = fakeSubscriptions(t, 403, &hits)
 
@@ -102,7 +103,7 @@ func TestSubscriptionCommandWithoutPermissionAndManualDate(t *testing.T) {
 func TestSubscriptionCommandHelpListedAndDoctorCheck(t *testing.T) {
 	e := newEnv(t)
 	addDelegated(e, "main")
-	useAuth(e, &fakeAuth{tok: goodToken()})
+	useAuth(e, &fakeAuth{tok: withOrgRead(goodToken())})
 	out := e.mustRun("", "subscription", "--help")
 	if !strings.Contains(out, "--json") || !strings.Contains(out, "--cached") {
 		t.Errorf("help:\n%s", out)
@@ -111,4 +112,9 @@ func TestSubscriptionCommandHelpListedAndDoctorCheck(t *testing.T) {
 	if !strings.Contains(out, "Subscription t.example") {
 		t.Errorf("doctor has no subscription line:\n%s", out)
 	}
+}
+
+func withOrgRead(t auth.Token) auth.Token {
+	t.Scopes = append(t.Scopes, "Organization.Read.All")
+	return t
 }

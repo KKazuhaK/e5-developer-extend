@@ -27,7 +27,7 @@ type SubscriptionView struct {
 	Status   string `json:"status"`
 	IsTrial  bool   `json:"isTrial"`
 	Licenses int    `json:"licenses"`
-	// Expires is the end date (YYYY-MM-DD, UTC) and DaysLeft the days until it;
+	// Expires is the end date (YYYY-MM-DD, local time) and DaysLeft the days until it;
 	// both are empty/nil when Microsoft gave no date.
 	Expires   string        `json:"expires"`
 	DaysLeft  *int          `json:"daysLeft"`
@@ -59,6 +59,14 @@ type TenantView struct {
 	ManualDaysLeft  *int   `json:"manualDaysLeft"`
 	ManualInUse     bool   `json:"manualInUse"`
 	ManualRedundant bool   `json:"manualRedundant"`
+	// FixAccount is the account whose app registration lacks the permission to
+	// read the subscriptions (the first of the tenant), FixKind its identity
+	// ("delegated" or "app") and FixCommand the command line that repairs it.
+	FixAccount string `json:"fixAccount"`
+	FixKind    string `json:"fixKind"`
+	FixCommand string `json:"fixCommand"`
+	// WatchedSKUs are the SKU prefixes that alert (subscription.skus, or the default).
+	WatchedSKUs []string `json:"watchedSkus"`
 }
 
 // Label names a tenant key for display.
@@ -69,11 +77,12 @@ func Label(key string) string {
 	return key
 }
 
-// DaysUntil counts calendar days from now's date to the date of t, in UTC.
+// DaysUntil counts calendar days from now's date to the date of t, both in
+// now's time zone.
 func DaysUntil(now, t time.Time) int {
-	y, m, d := now.UTC().Date()
+	y, m, d := now.Date()
 	today := time.Date(y, m, d, 0, 0, 0, 0, time.UTC)
-	y, m, d = t.UTC().Date()
+	y, m, d = t.In(now.Location()).Date()
 	return int(time.Date(y, m, d, 0, 0, 0, 0, time.UTC).Sub(today) / (24 * time.Hour))
 }
 
@@ -99,21 +108,17 @@ func rfc(t time.Time) *string {
 // the tenants first appear. st may be nil.
 func Build(cfg *config.Config, st *store.State, now time.Time) []TenantView {
 	var out []TenantView
-	index := map[string]int{}
-	for _, a := range cfg.Accounts {
-		key := a.TenantKey()
-		i, ok := index[key]
-		if !ok {
-			i = len(out)
-			index[key] = i
-			out = append(out, TenantView{Tenant: key, Label: Label(key), Access: AccessUnchecked, Accounts: []string{},
-				Subscriptions: []SubscriptionView{}})
+	for _, g := range Group(cfg, st) {
+		v := TenantView{Tenant: g.Key, Label: g.Label, Access: AccessUnchecked, Accounts: []string{}, Subscriptions: []SubscriptionView{}}
+		for _, a := range g.Accounts {
+			v.Accounts = append(v.Accounts, a.Name)
+			if a.SubscriptionExpires != "" && v.ManualExpires == "" {
+				v.ManualExpires = a.SubscriptionExpires
+			}
 		}
-		v := &out[i]
-		v.Accounts = append(v.Accounts, a.Name)
-		if a.SubscriptionExpires != "" && v.ManualExpires == "" {
-			v.ManualExpires = a.SubscriptionExpires
-		}
+		v.FixAccount, v.FixKind, v.FixCommand = FixFor(g.Accounts[0])
+		v.WatchedSKUs = cfg.Subscription.SKUPrefixes()
+		out = append(out, v)
 	}
 	for i := range out {
 		v := &out[i]
@@ -137,12 +142,12 @@ func Build(cfg *config.Config, st *store.State, now time.Time) []TenantView {
 				sv := SubscriptionView{ID: id, SKU: s.SKU, Watched: cfg.Subscription.Watches(s.SKU), Status: s.Status,
 					IsTrial: s.IsTrial, Licenses: s.TotalLicenses, CheckedAt: s.CheckedAt.Format(time.RFC3339), Renewals: []RenewalView{}}
 				if !s.NextLifecycle.IsZero() {
-					sv.Expires = s.NextLifecycle.UTC().Format("2006-01-02")
+					sv.Expires = s.NextLifecycle.In(now.Location()).Format("2006-01-02")
 					d := DaysUntil(now, s.NextLifecycle)
 					sv.DaysLeft = &d
 				}
 				for _, r := range s.History {
-					sv.Renewals = append(sv.Renewals, RenewalView{From: r.From.UTC().Format("2006-01-02"), To: r.To.UTC().Format("2006-01-02"), SeenAt: r.SeenAt.Format(time.RFC3339)})
+					sv.Renewals = append(sv.Renewals, RenewalView{From: r.From.In(now.Location()).Format("2006-01-02"), To: r.To.In(now.Location()).Format("2006-01-02"), SeenAt: r.SeenAt.Format(time.RFC3339)})
 				}
 				v.Subscriptions = append(v.Subscriptions, sv)
 			}
@@ -169,4 +174,19 @@ func Build(cfg *config.Config, st *store.State, now time.Time) []TenantView {
 		}
 	}
 	return out
+}
+
+// FixFor says how to give an account's app registration the permission that
+// reads the subscriptions, without adding an account or a client secret.
+func FixFor(a config.Account) (account, kind, command string) {
+	if a.Auth == config.AuthClientSecret {
+		return a.Name, "app", "e5extend app setup --app-only --account " + a.Name + " --no-new-secret"
+	}
+	cmd := "e5extend app setup"
+	switch strings.ToLower(a.Tenant) {
+	case "organizations", "common", "consumers", "":
+	default:
+		cmd += " --tenant " + a.Tenant
+	}
+	return a.Name, "delegated", cmd + " --adopt " + a.ClientID
 }

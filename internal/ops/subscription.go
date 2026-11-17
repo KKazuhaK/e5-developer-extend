@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
+	"strings"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
@@ -31,19 +33,19 @@ func (o *Ops) Subscriptions(account string) ([]TenantSubscriptions, error) {
 }
 
 func (o *Ops) subscriptionViews(cfg *config.Config, account string) ([]TenantSubscriptions, error) {
+	dataDir, err := paths.DataDir()
+	if err != nil {
+		return nil, err
+	}
+	st, _ := store.New(dataDir).LoadState()
 	key := ""
 	if account != "" {
 		acct, err := o.FindAccount(cfg, account)
 		if err != nil {
 			return nil, err
 		}
-		key = acct.TenantKey()
+		key = subscription.KeyOf(st, *acct)
 	}
-	dataDir, err := paths.DataDir()
-	if err != nil {
-		return nil, err
-	}
-	st, _ := store.New(dataDir).LoadState()
 	var out []TenantSubscriptions
 	for _, v := range subscription.Build(cfg, st, time.Now()) {
 		if key == "" || v.Tenant == key {
@@ -60,7 +62,9 @@ func (o *Ops) subscriptionViews(cfg *config.Config, account string) ([]TenantSub
 type SubscriptionRefresh struct {
 	Tenants []TenantSubscriptions `json:"tenants"`
 	// Queued is true when a running engine was asked and had not answered yet
-	// when the wait ended; the result then shows the earlier state.
+	// when the wait ended; the result then shows the earlier state. That also
+	// happens when the engine is an older version that does not know this
+	// request: restart it (the background service or the tray app).
 	Queued bool `json:"queued"`
 }
 
@@ -87,6 +91,23 @@ func (o *Ops) RefreshSubscriptions(ctx context.Context, account string) (Subscri
 	var names []string
 	if account != "" {
 		names = []string{account}
+	}
+
+	// Say at once when nothing could answer, instead of waiting for it.
+	dataDir := eo.DataDir
+	if st, _ := store.New(dataDir).LoadState(); st != nil {
+		var stuck []string
+		for _, g := range subscription.Group(cfg, st) {
+			if account != "" && !slices.ContainsFunc(g.Accounts, func(a config.Account) bool { return a.Name == account }) {
+				continue
+			}
+			if !slices.ContainsFunc(g.Accounts, func(a config.Account) bool { return subscription.Usable(st, a, true) }) {
+				stuck = append(stuck, g.Label)
+			}
+		}
+		if len(stuck) > 0 && (account != "" || len(stuck) == len(views)) {
+			return SubscriptionRefresh{}, fmt.Errorf("%w (%s): resume the account or sign it in first", engine.ErrNoUsableAccount, strings.Join(stuck, ", "))
+		}
 	}
 
 	if !engine.Running(eo.DataDir) {
@@ -165,13 +186,17 @@ func (o *Ops) SetSubscriptionExpires(ctx context.Context, account, date string) 
 	if err != nil {
 		return err
 	}
-	key := acct.TenantKey()
+	var st *store.State
+	if dir, err := paths.DataDir(); err == nil {
+		st, _ = store.New(dir).LoadState()
+	}
+	key := subscription.KeyOf(st, *acct)
 	for i := range cfg.Accounts {
 		a := &cfg.Accounts[i]
 		switch {
 		case a.Name == account:
 			a.SubscriptionExpires = date
-		case a.TenantKey() == key:
+		case subscription.KeyOf(st, *a) == key:
 			a.SubscriptionExpires = ""
 		}
 	}

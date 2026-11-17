@@ -145,6 +145,7 @@ type Engine struct {
 	// checks wait for it. subRunning marks tenants being checked now.
 	roundsDone bool
 	subRunning map[string]bool
+	subMu      sync.Mutex // one subscription check at a time
 
 	// Touched by the tick goroutine only.
 	lastTick  time.Time

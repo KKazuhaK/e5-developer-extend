@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
@@ -20,7 +21,7 @@ func tenantAcct(name, tenant string) config.Account {
 	return config.Account{Name: name, Auth: config.AuthDeviceCode, Tenant: tenant, ClientID: testGUID}
 }
 
-var healthySubs = subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-02-14T00:00:00Z", false})
+var healthySubs = subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-02-14T12:00:00Z", false})
 
 type fakeSub struct {
 	id, sku, status, next string
@@ -49,6 +50,9 @@ type subFixture struct {
 func newSubFixture(t *testing.T, accts ...config.Account) *subFixture {
 	f := &subFixture{fixture: newFixture(t, accts...), n: &fakeNotifier{}, code: 200}
 	f.opts.NoSubscriptionCheck = false
+	for _, a := range f.auths { // tokens that can read the subscriptions
+		a.tok.Scopes = append(append([]string(nil), a.tok.Scopes...), "Organization.Read.All")
+	}
 	f.opts.Notifier = f.n
 	f.body = healthySubs
 	f.h.subs = func(r *http.Request) (int, string) {
@@ -160,7 +164,7 @@ func TestSubscriptionNextCheckSurvivesRestart(t *testing.T) {
 
 func TestSubscriptionExpiringAlertsOncePerThreshold(t *testing.T) {
 	f := newSubFixture(t, tenantAcct("main", subTenantName))
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2026-12-25T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2026-12-25T12:00:00Z", false}))
 	f.start()
 	got := map[string]int{}
 	for d := 0; d < 45; d++ {
@@ -199,7 +203,7 @@ func TestSubscriptionStatusWarningThenRecovered(t *testing.T) {
 	f := newSubFixture(t, tenantAcct("main", subTenantName))
 	f.start()
 	f.round("main")
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Warning", "2027-02-14T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Warning", "2027-02-14T12:00:00Z", false}))
 	f.day()
 	ev := f.subEvents()
 	if len(ev) != 1 || ev[0].Event != "subscription_status" || ev[0].Level() != config.LevelCritical || !strings.Contains(ev[0].Message, "Enabled to Warning") {
@@ -209,7 +213,7 @@ func TestSubscriptionStatusWarningThenRecovered(t *testing.T) {
 	if len(f.subEvents()) != 1 {
 		t.Fatalf("repeated: %+v", f.subEvents())
 	}
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-02-14T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-02-14T12:00:00Z", false}))
 	f.day()
 	ev = f.subEvents()
 	if len(ev) != 2 || ev[1].Level() != config.LevelInfo || !strings.Contains(ev[1].Message, "Enabled again") {
@@ -219,10 +223,10 @@ func TestSubscriptionStatusWarningThenRecovered(t *testing.T) {
 
 func TestSubscriptionRenewalRecordedAndAnnounced(t *testing.T) {
 	f := newSubFixture(t, tenantAcct("main", subTenantName))
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-02-14T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-02-14T12:00:00Z", false}))
 	f.start()
 	f.round("main")
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-05-14T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-05-14T12:00:00Z", false}))
 	f.day()
 	sub := f.tenant(subTenantName).Subscriptions["sub-1"]
 	if len(sub.History) != 1 || sub.History[0].From.Format("2006-01-02") != "2027-02-14" || sub.History[0].To.Format("2006-01-02") != "2027-05-14" || sub.History[0].SeenAt.IsZero() {
@@ -235,7 +239,7 @@ func TestSubscriptionRenewalRecordedAndAnnounced(t *testing.T) {
 	}
 	// The same date again is no renewal; an earlier date is not one either.
 	f.day()
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-04-01T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-04-01T12:00:00Z", false}))
 	f.day()
 	if sub := f.tenant(subTenantName).Subscriptions["sub-1"]; len(sub.History) != 1 || len(f.subEvents()) != 1 {
 		t.Errorf("history %+v events %+v", sub.History, f.subEvents())
@@ -247,7 +251,7 @@ func TestSubscriptionHistoryKeepsTwentyAndSurvivesRestart(t *testing.T) {
 	f.start()
 	f.round("main")
 	for i := 1; i <= 25; i++ {
-		f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", time.Date(2027, 2, 14+i, 0, 0, 0, 0, time.UTC).Format(time.RFC3339), false}))
+		f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", time.Date(2027, 2, 14+i, 12, 0, 0, 0, time.UTC).Format(time.RFC3339), false}))
 		f.day()
 	}
 	f.start()
@@ -272,14 +276,15 @@ func TestSubscriptionForbiddenIsAStateNotAnError(t *testing.T) {
 	if as := f.acct("main"); as.Status != store.StatusOK {
 		t.Errorf("the account was blamed: %+v", as)
 	}
-	f.clock.Advance(2 * time.Hour) // not retried before the next day
+	f.clock.Advance(30 * time.Minute) // not retried before the hour is over
 	f.tickWait()
 	if f.hits() != 1 {
 		t.Errorf("hits = %d", f.hits())
 	}
-	// Granting the permission shows up at the next check.
+	// Granting the permission shows up within the hour, not the next day.
 	f.answer(200, healthySubs)
-	f.day()
+	f.clock.Advance(31 * time.Minute)
+	f.tickWait()
 	if ts := f.tenant(subTenantName); ts.Access != store.AccessOK || len(ts.Subscriptions) != 1 {
 		t.Errorf("after the grant: %+v", ts)
 	}
@@ -417,7 +422,7 @@ func TestSubscriptionTriggerChecksNow(t *testing.T) {
 	f := newSubFixture(t, tenantAcct("main", subTenantName))
 	f.start()
 	f.round("main")
-	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Suspended", "2027-02-14T00:00:00Z", false}))
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Suspended", "2027-02-14T12:00:00Z", false}))
 	if err := TriggerSubscription(f.dir, "main"); err != nil {
 		t.Fatal(err)
 	}
@@ -457,5 +462,131 @@ func TestSubscriptionStateDroppedWithItsTenant(t *testing.T) {
 	f.e.mu.Unlock()
 	if len(f.e.state.Tenants) != 0 {
 		t.Errorf("tenants = %v", f.e.state.Tenants)
+	}
+}
+
+func TestSubscriptionWorseningWithADateJumpIsNotARenewal(t *testing.T) {
+	f := newSubFixture(t, tenantAcct("main", subTenantName))
+	f.start()
+	f.round("main")
+	// Enabled -> Warning: the date jumps to the end of the grace period.
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Warning", "2027-03-16T12:00:00Z", false}))
+	f.day()
+	sub := f.tenant(subTenantName).Subscriptions["sub-1"]
+	if len(sub.History) != 0 {
+		t.Errorf("a worse status with a later date was recorded as a renewal: %+v", sub.History)
+	}
+	ev := f.subEvents()
+	if len(ev) != 1 || ev[0].Event != "subscription_status" {
+		t.Fatalf("events = %+v", ev)
+	}
+	// Back to Enabled with a later date: that is a renewal.
+	f.answer(200, subsBody(fakeSub{"sub-1", "DEVELOPERPACK_E5", "Enabled", "2027-06-16T12:00:00Z", false}))
+	f.day()
+	if sub := f.tenant(subTenantName).Subscriptions["sub-1"]; len(sub.History) != 1 || sub.History[0].To.Format("2006-01-02") != "2027-06-16" {
+		t.Errorf("history = %+v", sub.History)
+	}
+	kinds := map[string]int{}
+	for _, e := range f.subEvents() {
+		kinds[e.Event]++
+	}
+	if kinds["subscription_status"] != 2 || kinds["subscription_renewed"] != 1 {
+		t.Errorf("events = %v", kinds)
+	}
+}
+
+func TestSubscriptionTokenWithoutThePermissionIsNotTried(t *testing.T) {
+	f := newSubFixture(t, tenantAcct("main", subTenantName))
+	f.auths["main"].tok.Scopes = delegatedScopes // no Organization.Read.All
+	f.start()
+	f.round("main")
+	if f.hits() != 0 {
+		t.Errorf("Graph was called with a token that cannot read the subscriptions: %d", f.hits())
+	}
+	if ts := f.tenant(subTenantName); ts.Access != store.AccessNoPermission || ts.Failures != 0 {
+		t.Errorf("state = %+v", ts)
+	}
+	// Roles of an application token count too, and Directory.Read.All is enough.
+	f.auths["main"].tok.Scopes = []string{"Directory.Read.All"}
+	f.clock.Advance(61 * time.Minute)
+	f.tickWait()
+	if f.hits() != 1 || f.tenant(subTenantName).Access != store.AccessOK {
+		t.Errorf("hits %d, state %+v", f.hits(), f.tenant(subTenantName))
+	}
+}
+
+func TestSubscriptionTriggerAsksForAFreshToken(t *testing.T) {
+	f := newSubFixture(t, tenantAcct("main", subTenantName))
+	f.start()
+	f.round("main")
+	scheduled := len(f.auths["main"].forced)
+	if got := f.auths["main"].forced[scheduled-1]; got {
+		t.Error("the daily check asked for a fresh token")
+	}
+	if err := TriggerSubscription(f.dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	f.clock.Advance(time.Minute)
+	f.tickWait()
+	forced := f.auths["main"].forced
+	if len(forced) != scheduled+1 || !forced[len(forced)-1] {
+		t.Errorf("token requests (forced?) = %v", forced)
+	}
+}
+
+func TestSubscriptionAccountsNamingOneTenantTwoWaysShareOneCheck(t *testing.T) {
+	const tenantGUID = "7d3f2a10-55c1-4c88-b1d4-0a3e9c61f2b8"
+	f := newSubFixture(t, tenantAcct("byname", "Contoso.OnMicrosoft.com"), tenantAcct("byguid", tenantGUID), tenantAcct("anyorg", "organizations"))
+	for _, a := range f.auths {
+		a.tok.TenantID = strings.ToUpper(tenantGUID) // the claim's case does not matter
+	}
+	f.start()
+	f.round("byname")
+	f.round("byguid")
+	f.round("anyorg")
+	if f.hits() != 1 {
+		t.Fatalf("hits = %d, want one read for one tenant", f.hits())
+	}
+	f.e.mu.Lock()
+	tenants, aliases := len(f.e.state.Tenants), f.e.state.TenantAliases
+	f.e.mu.Unlock()
+	if tenants != 1 || aliases["contoso.onmicrosoft.com"] != tenantGUID || aliases["account:anyorg"] != tenantGUID {
+		t.Errorf("tenants %d aliases %v", tenants, aliases)
+	}
+	if ts := f.tenant(tenantGUID); len(ts.Subscriptions) != 1 || ts.TenantID == "" {
+		t.Errorf("state = %+v", ts)
+	}
+	// The next day it is still one read for the three accounts.
+	f.day()
+	if f.hits() != 2 {
+		t.Errorf("hits after a day = %d", f.hits())
+	}
+	// A restart keeps the grouping.
+	f.start()
+	f.e.mu.Lock()
+	g := subscription.Group(f.cfg, f.e.state)
+	f.e.mu.Unlock()
+	if len(g) != 1 || len(g[0].Accounts) != 3 || g[0].Label != "Contoso.OnMicrosoft.com" {
+		t.Errorf("groups = %+v", g)
+	}
+}
+
+func TestSubscriptionForcedCheckWithoutAUsableAccount(t *testing.T) {
+	a := tenantAcct("main", subTenantName)
+	a.Paused = true
+	f := newSubFixture(t, a)
+	f.start()
+	if err := CheckSubscriptions(t.Context(), f.opts, []string{"main"}); !errors.Is(err, ErrNoUsableAccount) {
+		t.Errorf("err = %v", err)
+	}
+	if f.hits() != 0 {
+		t.Errorf("hits = %d", f.hits())
+	}
+	if err := TriggerSubscription(f.dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	f.tickWait()
+	if !f.hasEvent("subscription_check") {
+		t.Error("the engine did not say that nobody could be asked")
 	}
 }

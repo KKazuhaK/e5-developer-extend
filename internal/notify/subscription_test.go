@@ -1,6 +1,7 @@
 package notify
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -309,5 +310,53 @@ func TestSubscriptionLevelsAndLabels(t *testing.T) {
 		if ev := SampleEvent(k, t0); ev.Message == "" || ev.Subscription == "" || ev.Account != "" {
 			t.Errorf("sample %s: %+v", k, ev)
 		}
+	}
+}
+
+func TestSubscriptionEventsCarryTenantAndSubscriptionFields(t *testing.T) {
+	r := newSubRig()
+	r.at("2026-11-19")
+	r.acct.Tenant = "Contoso.OnMicrosoft.Com"
+	r.st.TenantAliases = map[string]string{"contoso.onmicrosoft.com": "0b3c0b0e-1111-4222-8333-444455556666"}
+	r.st.Tenants = map[string]*store.TenantState{"0b3c0b0e-1111-4222-8333-444455556666": r.st.Tenants[subTenant]}
+	evs := r.eval()
+	if len(evs) != 1 {
+		t.Fatalf("events = %+v", evs)
+	}
+	e := evs[0]
+	if e.Tenant != "0b3c0b0e-1111-4222-8333-444455556666" || e.SKU != "DEVELOPERPACK_E5" || e.SubStatus != "Enabled" || e.EndDate != "2026-11-19" {
+		t.Fatalf("event = %+v", e)
+	}
+	if !strings.Contains(e.Message, "of tenant Contoso.OnMicrosoft.Com") {
+		t.Errorf("the message names the tenant the way the configuration does: %s", e.Message)
+	}
+	b, _ := json.Marshal(e)
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["tenant"] != e.Tenant || got["subscription"] != "sub-1" || got["sku"] != "DEVELOPERPACK_E5" || got["status"] != "Enabled" || got["ends"] != "2026-11-19" || got["event"] != "subscription_expiring" {
+		t.Errorf("payload = %v", got)
+	}
+	// Other events keep their six-plus fields without the new ones.
+	b, _ = json.Marshal(SampleEvent(Stale, t0))
+	if strings.Contains(string(b), `"tenant"`) || strings.Contains(string(b), `"sku"`) {
+		t.Errorf("a plain event grew subscription fields: %s", b)
+	}
+	// The built-in template shows the tenant ID of a subscription event.
+	for _, lang := range []string{"zh", "en"} {
+		d := NewData(e, lang, "box", time.UTC)
+		rd, err := Render("telegram", lang, "", d)
+		if err != nil || !strings.Contains(rd.Body, "0b3c0b0e-1111-4222-8333-444455556666") {
+			t.Errorf("%s body lacks the tenant ID: %v\n%s", lang, err, rd.Body)
+		}
+		if d.SKU != "DEVELOPERPACK_E5" || d.EndDate != "2026-11-19" || d.Tenant == "" {
+			t.Errorf("template data: %+v", d)
+		}
+	}
+	// And a custom template can use the fields.
+	rd, err := Render("slack", "en", "{{define \"title\"}}t{{end}}{{define \"body\"}}{{.Tenant}} {{.SKU}} {{.SubStatus}} {{.EndDate}}{{end}}", NewData(e, "en", "box", time.UTC))
+	if err != nil || !strings.Contains(rd.Body, "0b3c0b0e-1111-4222-8333-444455556666 DEVELOPERPACK_E5 Enabled 2026-11-19") {
+		t.Errorf("custom template: %v %q", err, rd.Body)
 	}
 }

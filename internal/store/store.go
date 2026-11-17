@@ -103,6 +103,10 @@ type State struct {
 	LastSent map[string]time.Time `json:"last_sent,omitempty"`
 	// Tenants holds what the subscription check saw, per tenant (see config.Account.TenantKey).
 	Tenants map[string]*TenantState `json:"tenants,omitempty"`
+	// TenantAliases maps the key an account's configured tenant gives (a
+	// domain, or "account:<name>") to the tenant GUID a token revealed, so
+	// accounts that name one tenant in different ways share one state.
+	TenantAliases map[string]string `json:"tenant_aliases,omitempty"`
 }
 
 // NewState returns an empty state.

@@ -25,7 +25,8 @@ func (a *app) newSubscriptionCmd() *cobra.Command {
 			"days left, trial, when it was last read and how often it was renewed.\n" +
 			"The subscriptions are read from Microsoft Graph (GET /directory/subscriptions, which needs the\n" +
 			"Organization.Read.All permission) first; --cached shows what the engine saved at its last daily check.\n" +
-			"If the permission is missing, run: e5extend app setup, or write the end date yourself with --set-expires.",
+			"If the permission is missing, add it to the account's app registration (the command is shown), or write the\n" +
+			"end date yourself with --set-expires.",
 		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			account := ""
@@ -76,7 +77,7 @@ func (a *app) newSubscriptionCmd() *cobra.Command {
 				return nil
 			}
 			if queued {
-				fmt.Fprintln(cmd.ErrOrStderr(), "the running engine has not answered yet; showing what it saved before")
+				fmt.Fprintln(cmd.ErrOrStderr(), "the running engine has not answered yet; showing what it saved before (an engine started by an older version does not know this request: restart the background service or the tray app)")
 			}
 			writeSubscriptions(out, tenants, time.Now())
 			return nil
@@ -146,7 +147,7 @@ func tenantNote(tv ops.TenantSubscriptions) string {
 	var parts []string
 	switch tv.Access {
 	case store.AccessNoPermission:
-		parts = append(parts, "cannot read the subscription: Organization.Read.All is needed (run: e5extend app setup to add it)")
+		parts = append(parts, "cannot read the subscription: Organization.Read.All is needed; add it to the app of account "+tv.FixAccount+" with: "+tv.FixCommand)
 		if tv.ManualExpires == "" {
 			parts = append(parts, "or enter the end date yourself: e5extend subscription <account> --set-expires YYYY-MM-DD")
 		}

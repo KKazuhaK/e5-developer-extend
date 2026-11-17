@@ -90,6 +90,8 @@ type Event struct {
 	// ("manual" for the date entered by hand); Account is empty for them
 	// because a subscription belongs to the tenant.
 	Subscription string
+	// SKU, SubStatus and EndDate (YYYY-MM-DD) describe that subscription.
+	SKU, SubStatus, EndDate string
 	// Severity overrides the level of the kind (see LevelOfKey).
 	Severity string
 }
@@ -129,10 +131,16 @@ type payload struct {
 	Text    string `json:"text"`
 	Content string `json:"content"`
 	// Level, Origin and Items are only present when they apply.
-	Test   bool      `json:"test,omitempty"`
-	Level  string    `json:"level,omitempty"`
-	Origin string    `json:"origin,omitempty"`
-	Items  []payload `json:"items,omitempty"`
+	// Tenant and the subscription fields are only present for subscription events.
+	Tenant       string    `json:"tenant,omitempty"`
+	Subscription string    `json:"subscription,omitempty"`
+	SKU          string    `json:"sku,omitempty"`
+	SubStatus    string    `json:"status,omitempty"`
+	EndDate      string    `json:"ends,omitempty"`
+	Test         bool      `json:"test,omitempty"`
+	Level        string    `json:"level,omitempty"`
+	Origin       string    `json:"origin,omitempty"`
+	Items        []payload `json:"items,omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler.
@@ -147,6 +155,9 @@ func (e Event) payload() payload {
 		Event: e.Event, Account: e.Account, Message: e.Message,
 		Time: t.Format(time.RFC3339), Text: e.Text(), Content: e.Text(),
 		Level: e.Level(), Origin: e.Origin, Test: e.IsTest,
+	}
+	if e.Subscription != "" {
+		p.Tenant, p.Subscription, p.SKU, p.SubStatus, p.EndDate = e.Tenant, e.Subscription, e.SKU, e.SubStatus, e.EndDate
 	}
 	for _, it := range e.Items {
 		p.Items = append(p.Items, it.payload())

@@ -33,7 +33,7 @@ type Data struct {
 	Level      string // info, warning or critical
 	LevelLabel string
 	Account    string // account name; empty for global events
-	Tenant     string // tenant ID of the account; built-in templates never show it
+	Tenant     string // tenant ID (or configured tenant) of the account or subscription; built-in templates show it only for subscription events, inside Message
 	Message    string // what happened, without secrets
 	Time       string // local time of the event
 	Hint       string // a suggested next step
@@ -41,6 +41,8 @@ type Data struct {
 	FailRate string
 	Failures int
 	Rounds   int
+	// SKU, SubStatus and EndDate (YYYY-MM-DD) describe the subscription of a subscription event.
+	SKU, SubStatus, EndDate string
 	// Origin is, for a recovery, the kind of the event that ended; OriginLabel is its name.
 	Origin      string
 	OriginLabel string
@@ -157,6 +159,13 @@ func NewData(ev Event, lang, host string, loc *time.Location) Data {
 		Level: ev.Level(), LevelLabel: levelLabel(ev.Level(), lang), Account: ev.Account, Tenant: ev.Tenant,
 		Message: ev.Message, Time: t.In(loc).Format("2006-01-02 15:04 MST"), Hint: Hint(ev.Event, ev.Account, lang),
 		Failures: ev.Failures, Rounds: ev.Rounds, Origin: ev.Origin,
+	}
+	if ev.Subscription != "" {
+		d.SKU, d.SubStatus, d.EndDate = ev.SKU, ev.SubStatus, ev.EndDate
+		// The message names the tenant the way the configuration does; add its ID when that is another string.
+		if ev.Tenant != "" && !strings.Contains(ev.Message, ev.Tenant) {
+			d.Message += " (tenant " + ev.Tenant + ")"
+		}
 	}
 	if ev.IsTest {
 		// Titles and headlines are built from the label, so the mark shows everywhere.
@@ -396,6 +405,12 @@ func SampleEvent(kind string, now time.Time) Event {
 		ev.Account = ""
 		ev.Message = "2 alerts were held during the quiet hours"
 		ev.Items = []Event{SampleEvent(Stale, now), SampleEvent(SecretExpiring, now)}
+	}
+	if ev.Subscription != "" {
+		ev.Tenant, ev.SKU, ev.SubStatus, ev.EndDate = "0b3c0b0e-1111-4222-8333-444455556666", "DEVELOPERPACK_E5", "Enabled", now.AddDate(0, 0, 7).Format("2006-01-02")
+		if kind == SubscriptionStatus {
+			ev.SubStatus = "Warning"
+		}
 	}
 	return ev
 }
