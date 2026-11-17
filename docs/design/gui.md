@@ -140,7 +140,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 - **设置**：默认只显示最常用的几项，其余收进“高级设置”——
   - 运行方式：
     - “开机启动”（托盘开机自启）：和后台服务开关一样立即生效，调用 `SettingsService.SetStartAtLogin(on)`，失败时开关保持原状并弹 toast；它不在草稿里，`Save` 不再处理它；
-    - “在后台保持运行”：就是后台服务有没有安装。打开调用 `HealthService.InstallService`，关闭（先确认）调用 `UninstallService`，立即生效，不经过“保存”；复用健康检查页同一套接口和前置检查，出错用 toast 显示，安装结果里的“需要手动做的事”和警告留在卡片里。状态来自 `ServiceInfo`（运行中 / 已安装但没有运行 / 未安装 / 不支持），引擎在运行时附上 `Snapshot` 里最近的下次运行时间；平台不支持时说明原因并禁用开关。
+    - “在后台保持运行”：就是后台服务有没有安装。打开调用 `HealthService.InstallService`，关闭（先确认）调用 `UninstallService`，立即生效，不经过“保存”；复用健康检查页同一套接口和前置检查，出错用 toast 显示；安装和卸载的结果（需要手动做的事、警告）都用和健康检查页同一个组件显示在卡片里。“已安装但没有运行”时开关保持打开，但显示警告和“启动”按钮（`HealthService.StartService`，只启动、不重写服务文件，和安装一样先请托盘交出引擎）。状态来自 `ServiceInfo`（运行中 / 已安装但没有运行 / 未安装 / 不支持），引擎在运行时附上 `Snapshot` 里最近的下次运行时间；平台不支持时说明原因并禁用开关。
   - 调用节奏：三个预设加“自定义”，再加“每天 / 仅工作日”。预设只改 `intervalMin/Max` 和 `apisPerRoundMin/Max`，表在 `src/lib/pace.ts`：轻度 2h–4h、每轮 2–5 个；标准 40m–2h、每轮 3–8 个（等于 `config.Default()`）；频繁 20m–1h、每轮 5–12 个。当前值不属于任何预设时显示“自定义”，提示到高级设置里调整；运行日只认“每天”和“周一到周五”，其他组合同样提示。
   - 界面：语言、主题。
   - 备份与迁移。

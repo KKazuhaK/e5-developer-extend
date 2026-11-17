@@ -271,3 +271,16 @@ func (m *systemd) Status() (Status, error) {
 	}
 	return st, nil
 }
+
+// Start starts the installed unit.
+func (m *systemd) Start() (Result, error) {
+	var res Result
+	if !fileExists(m.unitPath()) {
+		return res, ErrNotInstalled
+	}
+	if _, err := m.env.Runner.Run(context.Background(), "systemctl", "--user", "start", UnitName); err != nil {
+		return res, fmt.Errorf("start %s: %w\n%s", UnitName, err, busHint)
+	}
+	res.Actions = append(res.Actions, "ran systemctl --user start "+UnitName)
+	return res, nil
+}

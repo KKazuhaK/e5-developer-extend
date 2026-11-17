@@ -46,6 +46,19 @@ describe("applyPace", () => {
   });
 });
 
+describe("re-applying the selected choice", () => {
+  it("keeps the user's spelling and order", () => {
+    const s = sched();
+    s.intervalMin = "0h40m";
+    s.intervalMax = "120m";
+    applyPace(s, "standard");
+    expect([s.intervalMin, s.intervalMax]).toEqual(["0h40m", "120m"]);
+    s.workDays = ["fri", "mon", "tue", "wed", "thu"];
+    applyDays(s, "weekdays");
+    expect(s.workDays).toEqual(["fri", "mon", "tue", "wed", "thu"]);
+  });
+});
+
 describe("days", () => {
   it("detects every day and weekdays regardless of order", () => {
     expect(detectDays(["sun", "mon", "tue", "wed", "thu", "fri", "sat"])).toBe("every");

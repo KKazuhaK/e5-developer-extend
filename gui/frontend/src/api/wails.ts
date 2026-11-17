@@ -92,6 +92,7 @@ export const wailsApi: Api = {
       return { ...i, details: arr(i.details) };
     },
     installService: async () => norm(await HealthService.InstallService()),
+    startService: async () => norm(await HealthService.StartService()),
     uninstallService: async () => norm(await HealthService.UninstallService()),
   },
   catalog: {

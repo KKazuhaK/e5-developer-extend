@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react";
-import { AlertTriangle, Power } from "lucide-react";
+import { AlertTriangle, Play, Power } from "lucide-react";
 import { api } from "@/api";
 import type { ServiceInfo, ServiceResult } from "@/api";
 import { useApp } from "@/state/app";
@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
+import { ServiceResultPanel } from "@/components/ServiceResultPanel";
 import { ErrorBlock, Spinner } from "@/components/common";
 import { serviceState, type ServiceState } from "@/lib/service";
 import { formatWhen } from "@/lib/time";
@@ -60,20 +61,23 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
     }
   };
 
-  const change = async (on: boolean) => {
+  // Install, start and uninstall share one guard: while one runs, nothing else starts.
+  const change = async (kind: "install" | "start" | "uninstall") => {
+    if (busy) return;
     setBusy(true);
     try {
-      const r = on ? await api.health.installService() : await api.health.uninstallService();
-      setResult(on ? r : null);
-      toast.success(t(on ? "health.installed" : "health.uninstalled"));
+      const r = kind === "install" ? await api.health.installService() : kind === "start" ? await api.health.startService() : await api.health.uninstallService();
+      setResult(r);
+      toast.success(t(kind === "install" ? "health.installed" : kind === "start" ? "settings.svcStarted" : "health.uninstalled"));
+      await load();
+      void snapshot.refresh();
     } catch (e) {
       toast.error(errMsg(e));
+      await load();
     } finally {
       setBusy(false);
       setConfirmOff(false);
     }
-    await load();
-    void snapshot.refresh();
   };
 
   const state = svc ? serviceState(svc) : null;
@@ -105,7 +109,7 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
               aria-describedby={hintId}
               checked={state === "running" || state === "stopped"}
               disabled={!svc || state === "unsupported" || busy}
-              onCheckedChange={(v) => (v ? void change(true) : setConfirmOff(true))}
+              onCheckedChange={(v) => { if (!busy) { if (v) void change("install"); else setConfirmOff(true); } }}
             />
             <span>
               <span className="flex items-center gap-2">
@@ -117,28 +121,19 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
           </label>
           {svcError && <ErrorBlock message={`${t("settings.svcLoadFailed")}: ${svcError}`} onRetry={() => void load()} />}
           {state && state !== "unsupported" && (
-            <p className="flex flex-wrap items-center gap-2 pl-[46px] text-xs text-muted-foreground" role="status">
-              <Badge tone={TONE[state]}>{statusText[state]}</Badge>
-              {nextRun && <span>{t("settings.svcNext", { when: formatWhen(nextRun) })}</span>}
-            </p>
-          )}
-          {state === "unsupported" && <p className="pl-[46px] text-xs text-muted-foreground" role="status">{statusText.unsupported}</p>}
-          {result && (result.manual.length > 0 || result.warnings.length > 0) && (
-            <div className="ml-[46px] space-y-2 text-[13px]" role="status">
-              {result.manual.length > 0 && (
-                <div className="rounded-md border-2 border-warning/60 bg-warning-bg px-3 py-2.5">
-                  <p className="mb-1 flex items-center gap-1.5 font-semibold text-warning"><AlertTriangle className="size-4" aria-hidden /> {t("health.manual")}</p>
-                  <ul className="list-disc space-y-1 pl-5 break-words">{result.manual.map((m) => <li key={m}>{m}</li>)}</ul>
-                </div>
-              )}
-              {result.warnings.length > 0 && (
-                <div className="rounded-md bg-muted px-3 py-2">
-                  <p className="mb-1 font-medium">{t("health.warnings")}</p>
-                  <ul className="list-disc space-y-0.5 pl-5 break-words">{result.warnings.map((m) => <li key={m}>{m}</li>)}</ul>
-                </div>
-              )}
+            <div className="flex flex-wrap items-center gap-2 pl-[46px] text-xs text-muted-foreground" role="status">
+              <Badge tone={TONE[state]}>{state === "stopped" && <AlertTriangle aria-hidden />}{statusText[state]}</Badge>
+              {nextRun && state === "running" && <span>{t("settings.svcNext", { when: formatWhen(nextRun) })}</span>}
             </div>
           )}
+          {state === "stopped" && (
+            <div className="ml-[46px] flex flex-wrap items-center gap-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px]">
+              <p className="min-w-0 flex-1">{t("settings.svcStoppedWarn")}</p>
+              <Button size="sm" onClick={() => void change("start")} disabled={busy}>{busy ? <Spinner /> : <Play />} {t("settings.svcStart")}</Button>
+            </div>
+          )}
+          {state === "unsupported" && <p className="pl-[46px] text-xs text-muted-foreground" role="status">{statusText.unsupported}</p>}
+          {result && <ServiceResultPanel result={result} showActions={false} className="ml-[46px]" />}
         </div>
       </CardContent>
 
@@ -150,7 +145,7 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" onClick={() => setConfirmOff(false)}>{t("common.cancel")}</Button>
-            <Button variant="destructive" onClick={() => void change(false)} disabled={busy}>{busy && <Spinner />} {t("health.uninstall")}</Button>
+            <Button variant="destructive" onClick={() => void change("uninstall")} disabled={busy}>{busy && <Spinner />} {t("health.uninstall")}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

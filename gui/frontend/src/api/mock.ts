@@ -224,7 +224,8 @@ let settings: Settings = {
   notify: { staleAfter: "72h", events: ["needs_attention", "auto_paused", "stale"], webhookConfigured: false },
   ui: { language: "auto", theme: "system", startAtLogin: false },
 };
-let service: { installed: boolean } = { installed: false };
+// ?service=stopped starts with the service installed but not running
+let service: { installed: boolean } = { installed: q.get("service") === "stopped" };
 /** What the last mock export "wrote"; the mock import reads it back. */
 const emptyExport = { path: "", accounts: [], vaultEntries: 0, includesLogs: false, logFiles: 0, notes: [], noteCodes: [] };
 const emptyImport = {
@@ -530,11 +531,21 @@ export const mockApi: Api = {
         manual: ["Run once so it survives sign-out: loginctl enable-linger $USER"],
       };
     },
+    async startService() {
+      await wait(700);
+      if (!service.installed) throw new Error("the background service is not installed");
+      mockControls.set({ host: "service" });
+      return { actions: ["ran systemctl --user start e5extend.service"], warnings: [], manual: [] };
+    },
     async uninstallService() {
       await wait(700);
       service.installed = false;
       if (controls.host === "service") mockControls.set({ host: "gui" });
-      return { actions: ["stopped and removed e5extend.service"], warnings: [], manual: [] };
+      return {
+        actions: ["stopped and removed e5extend.service"],
+        warnings: ["the master key file (master.key in the config directory) was left in place: it may be the only copy of the vault key; delete it yourself if you do not need it"],
+        manual: [],
+      };
     },
   },
   catalog: {

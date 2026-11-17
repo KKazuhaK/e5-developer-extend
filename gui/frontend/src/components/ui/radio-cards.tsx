@@ -1,4 +1,4 @@
-import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -11,7 +11,8 @@ export interface RadioCardOption<V extends string> {
 /**
  * A single-choice group drawn as cards. `value` may be null (or a value that
  * is not an option) when nothing is selected, e.g. a "custom" state.
- * Arrow keys move the selection, as for native radios.
+ * With a selection, arrow keys (and Home/End) move and select, as for native
+ * radios. With none, they only move focus; Space, Enter or a click selects.
  */
 export function RadioCards<V extends string>({
   value, onChange, options, labelledBy, className,
@@ -20,13 +21,18 @@ export function RadioCards<V extends string>({
 }) {
   const refs = useRef<(HTMLButtonElement | null)[]>([]);
   const idx = options.findIndex((o) => o.value === value);
+  const [focusIdx, setFocusIdx] = useState(0);
   const onKey = (e: KeyboardEvent, i: number) => {
-    const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
-    if (!step) return;
+    let n: number;
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") n = (i + 1) % options.length;
+    else if (e.key === "ArrowLeft" || e.key === "ArrowUp") n = (i - 1 + options.length) % options.length;
+    else if (e.key === "Home") n = 0;
+    else if (e.key === "End") n = options.length - 1;
+    else return;
     e.preventDefault();
-    const n = (i + step + options.length) % options.length;
     refs.current[n]?.focus();
-    onChange(options[n].value);
+    setFocusIdx(n);
+    if (idx >= 0) onChange(options[n].value);
   };
   return (
     <div role="radiogroup" aria-labelledby={labelledBy} className={cn("grid gap-2", className)}>
@@ -39,7 +45,8 @@ export function RadioCards<V extends string>({
             type="button"
             role="radio"
             aria-checked={on}
-            tabIndex={on || (idx < 0 && i === 0) ? 0 : -1}
+            tabIndex={idx >= 0 ? (on ? 0 : -1) : i === Math.min(focusIdx, options.length - 1) ? 0 : -1}
+            onFocus={() => setFocusIdx(i)}
             onClick={() => onChange(o.value)}
             onKeyDown={(e) => onKey(e, i)}
             className={cn(

@@ -584,3 +584,30 @@ func TestProxyPasswordIsHiddenAndKept(t *testing.T) {
 		t.Fatalf("proxy = %q", cfg.Network.Proxy)
 	}
 }
+
+func TestStartServiceNeedsAnInstalledServiceAndWithdrawsHandover(t *testing.T) {
+	r := newRig(t)
+	r.b.Ops.Platform = service.Linux
+	fr := &service.FakeRunner{}
+	r.b.Ops.Runner = fr
+	var asked, cancels int
+	r.b.RequestHandover = func(context.Context) error { asked++; return nil }
+	r.b.CancelHandover = func() { cancels++ }
+	h := NewHealthService(r.b)
+	// Not installed: the start fails and the handover is withdrawn.
+	if _, err := h.StartService(); err == nil || cancels != 1 {
+		t.Fatalf("not installed: err=%v cancels=%d", err, cancels)
+	}
+	if _, err := h.InstallService(); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	cancels = 0
+	res, err := h.StartService()
+	if err != nil || len(res.Actions) != 1 || cancels != 0 || asked != 3 {
+		t.Fatalf("start: %+v %v cancels=%d asked=%d", res, err, cancels, asked)
+	}
+	if got := strings.Join(fr.Commands(), "|"); got != "systemctl --user start e5extend.service" {
+		t.Fatalf("commands = %s", got)
+	}
+}

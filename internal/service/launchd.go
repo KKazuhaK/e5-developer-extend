@@ -178,3 +178,24 @@ func (m *launchd) Status() (Status, error) {
 	st.Details = append(st.Details, "loaded in "+m.domain())
 	return st, nil
 }
+
+// Start starts the loaded job, or loads it first when it is not loaded.
+func (m *launchd) Start() (Result, error) {
+	var res Result
+	if !fileExists(m.plistPath()) {
+		return res, ErrNotInstalled
+	}
+	ctx := context.Background()
+	if _, err := m.env.Runner.Run(ctx, "launchctl", "kickstart", m.target()); err == nil {
+		res.Actions = append(res.Actions, "ran launchctl kickstart "+m.target())
+		return res, nil
+	}
+	if _, err := m.env.Runner.Run(ctx, "launchctl", "enable", m.target()); err != nil {
+		return res, fmt.Errorf("enable %s: %w", Label, err)
+	}
+	if _, err := m.env.Runner.Run(ctx, "launchctl", "bootstrap", m.domain(), m.plistPath()); err != nil {
+		return res, fmt.Errorf("load %s: %w", Label, err)
+	}
+	res.Actions = append(res.Actions, "ran launchctl enable "+m.target(), "ran launchctl bootstrap "+m.domain()+" "+m.plistPath())
+	return res, nil
+}

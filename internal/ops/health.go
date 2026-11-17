@@ -251,6 +251,15 @@ func (o *Ops) ServiceUninstall() (service.Result, error) {
 	return m.Uninstall()
 }
 
+// ServiceStart starts the installed background service without rewriting it.
+func (o *Ops) ServiceStart() (service.Result, error) {
+	m, err := o.ServiceManager()
+	if err != nil {
+		return service.Result{}, err
+	}
+	return m.Start()
+}
+
 // ServiceStatus asks the platform about the background job.
 func (o *Ops) ServiceStatus() (service.Status, error) {
 	m, err := o.ServiceManager()

@@ -3,10 +3,12 @@ import type { Settings } from "@/api";
 import { useI18n, type DictKey } from "@/i18n";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RadioCards } from "@/components/ui/radio-cards";
-import { PACES, PACE_IDS, applyDays, applyPace, detectDays, detectPace, type DaysChoice, type PaceId } from "@/lib/pace";
+import { DAYS_FIELDS, PACES, PACE_FIELDS, PACE_IDS, applyDays, applyPace, detectDays, detectPace, type DaysChoice, type PaceId } from "@/lib/pace";
 
 /** Call pace presets and the every-day / weekdays choice. Edits only the draft. */
-export function PaceCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Settings) => void) => void }) {
+export function PaceCard({
+  draft, upd, clearRemote,
+}: { draft: Settings; upd: (fn: (d: Settings) => void) => void; clearRemote: (field: string) => void }) {
   const { t } = useI18n();
   const pace = detectPace(draft.schedule);
   const days = detectDays(draft.schedule.workDays);
@@ -22,7 +24,7 @@ export function PaceCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Settin
             labelledBy="pace-l"
             className="sm:grid-cols-3"
             value={pace === "custom" ? null : pace}
-            onChange={(id) => upd((d) => applyPace(d.schedule, id))}
+            onChange={(id) => { PACE_FIELDS.forEach(clearRemote); upd((d) => applyPace(d.schedule, id)); }}
             options={PACE_IDS.map((id) => ({
               value: id,
               label: t(`settings.pace${id[0].toUpperCase()}${id.slice(1)}` as DictKey),
@@ -44,7 +46,7 @@ export function PaceCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Settin
             labelledBy="days-l"
             className="sm:grid-cols-2"
             value={days === "custom" ? null : days}
-            onChange={(c) => upd((d) => applyDays(d.schedule, c))}
+            onChange={(c) => { DAYS_FIELDS.forEach(clearRemote); upd((d) => applyDays(d.schedule, c)); }}
             options={[
               { value: "every", label: t("settings.daysEvery") },
               { value: "weekdays", label: t("settings.daysWeekdays") },

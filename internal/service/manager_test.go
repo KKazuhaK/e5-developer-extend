@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -461,3 +462,55 @@ func TestNewRejectsUnknownPlatform(t *testing.T) {
 }
 
 func runtimeIsUnix() bool { return filepath.Separator == '/' }
+
+func TestStartPerPlatform(t *testing.T) {
+	// Systemd: refuses when not installed, then only runs systemctl start.
+	o, env, fr := testOpts(t, Linux)
+	m, _ := New(env)
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) || len(fr.Commands()) != 0 {
+		t.Fatalf("systemd not installed: %v %v", err, fr.Commands())
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "systemctl --user start e5extend.service" {
+		t.Fatalf("systemd start: %v %v", err, fr.Commands())
+	}
+	fr.FailOn = []string{"systemctl --user start"}
+	if _, err := m.Start(); err == nil {
+		t.Fatal("systemd start failure swallowed")
+	}
+
+	// Launchd: kickstart, falling back to enable + bootstrap when not loaded.
+	o, env, fr = testOpts(t, Darwin)
+	m, _ = New(env)
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("launchd not installed: %v", err)
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "launchctl kickstart gui/501/io.github.kkazuhak.e5extend" {
+		t.Fatalf("launchd start: %v %v", err, fr.Commands())
+	}
+	fr.Calls = nil
+	fr.FailOn = []string{"launchctl kickstart"}
+	if _, err := m.Start(); err != nil || len(fr.Commands()) != 3 || !strings.HasPrefix(fr.Commands()[2], "launchctl bootstrap") {
+		t.Fatalf("launchd fallback: %v %v", err, fr.Commands())
+	}
+
+	// Task Scheduler: a missing task is "not installed".
+	_, env, fr = testOpts(t, Windows)
+	m, _ = New(env)
+	fr.Replies = map[string]Output{"schtasks /Query": {ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified."}}
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("schtasks not installed: %v", err)
+	}
+	fr.Replies = nil
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "schtasks /Query /TN "+TaskName+"|schtasks /Run /TN "+TaskName {
+		t.Fatalf("schtasks start: %v %v", err, fr.Commands())
+	}
+}

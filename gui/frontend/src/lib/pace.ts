@@ -38,8 +38,17 @@ export function detectPace(s: Schedule): PaceChoice {
   return "custom";
 }
 
-/** Writes a preset into the schedule; touches only the interval and APIs-per-round fields. */
+/** Fields applyPace and applyDays may overwrite, as the validators name them. */
+export const PACE_FIELDS = ["schedule.intervalMin", "schedule.intervalMax", "schedule.apisPerRoundMin", "schedule.apisPerRoundMax"];
+export const DAYS_FIELDS = ["schedule.workDays"];
+
+/**
+ * Writes a preset into the schedule; touches only the interval and
+ * APIs-per-round fields. Choosing the preset that already matches changes
+ * nothing, so "2h" is not rewritten as "120m" or the other way round.
+ */
 export function applyPace(s: Schedule, id: PaceId): void {
+  if (detectPace(s) === id) return;
   Object.assign(s, PACES[id]);
 }
 
@@ -54,5 +63,6 @@ export function detectDays(days: readonly string[]): DaysChoice {
 }
 
 export function applyDays(s: Schedule, c: Exclude<DaysChoice, "custom">): void {
+  if (detectDays(s.workDays) === c) return;
   s.workDays = c === "every" ? [...WEEKDAYS] : [...WORKDAYS];
 }

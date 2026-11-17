@@ -64,17 +64,22 @@ export function SettingsPage() {
     setAdvOpen(open);
     writeAdvancedOpen(open);
   };
-  // Opens Advanced settings and brings the first field with an error into view.
+  // Save asks for the first bad field to be shown; the effect below opens Advanced
+  // settings, then scrolls to it and focuses it once it is visible.
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
   const revealFirstError = (keys: Set<string>) => {
     const hit = ADVANCED_FIELDS.find(([k]) => keys.has(k));
     if (!hit) return;
     setAdvOpen(true); // not remembered: it is only there to show the error
-    window.setTimeout(() => {
-      const el = document.getElementById(hit[1]);
-      el?.scrollIntoView({ block: "center", behavior: "smooth" });
-      if (el && el.tagName !== "P") el.focus({ preventScroll: true });
-    }, 0);
+    setReveal((r) => ({ id: hit[1], n: (r?.n ?? 0) + 1 }));
   };
+  useEffect(() => {
+    if (!reveal || !advOpen) return;
+    const el = document.getElementById(reveal.id);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (el && el.tagName !== "P") el.focus({ preventScroll: true });
+    setReveal(null);
+  }, [reveal, advOpen]);
 
   const load = useCallback(async () => {
     try {
@@ -178,7 +183,7 @@ export function SettingsPage() {
           onStartAtLogin={(on) => { setSaved((x) => x && { ...x, ui: { ...x.ui, startAtLogin: on } }); setDraft((d) => d && { ...d, ui: { ...d.ui, startAtLogin: on } }); }}
         />
 
-        <PaceCard draft={draft} upd={upd} />
+        <PaceCard draft={draft} upd={upd} clearRemote={clearRemote} />
 
         <Card>
           <CardHeader>
@@ -224,13 +229,13 @@ export function SettingsPage() {
               <span className="min-w-0 flex-1">
                 {t("settings.advanced")}
                 <span className="block text-xs font-normal text-muted-foreground">{t("settings.advancedDesc")}</span>
-                {!advOpen && ADVANCED_FIELDS.some(([k]) => fieldErr(k)) && (
-                  <span role="alert" className="block text-xs font-normal text-danger">{t("settings.advancedHasError")}</span>
-                )}
               </span>
               <ChevronDown className={cn("size-4 shrink-0 transition-transform", advOpen && "rotate-180")} aria-hidden />
             </button>
           </h2>
+          <p aria-live="polite" className="px-4 pb-3 text-xs text-danger empty:hidden empty:p-0">
+            {!advOpen && ADVANCED_FIELDS.some(([k]) => fieldErr(k)) ? t("settings.advancedHasError") : null}
+          </p>
           <div id="adv-panel" role="region" aria-labelledby="adv-btn" hidden={!advOpen} className="grid gap-4 border-t p-4">
           <Card>
             <CardHeader>

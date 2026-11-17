@@ -76,6 +76,30 @@ func (s *HealthService) undoHandover() {
 	}
 }
 
+// StartService starts the installed background service when it is stopped.
+// Like an install it first asks the tray to hand the engine over, so the two
+// do not run it at once; if the start fails the handover is withdrawn.
+func (s *HealthService) StartService() (ServiceResult, error) {
+	b := s.b
+	defer b.begin()()
+	handed := false
+	if b.RequestHandover != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		err := b.RequestHandover(ctx)
+		handed = true
+		if err != nil {
+			s.undoHandover()
+			return ServiceResult{}, err
+		}
+	}
+	res, err := b.Ops.ServiceStart()
+	if err != nil && handed {
+		s.undoHandover()
+	}
+	return toResult(res), err
+}
+
 // UninstallService stops and removes the background service.
 func (s *HealthService) UninstallService() (ServiceResult, error) {
 	defer s.b.begin()()

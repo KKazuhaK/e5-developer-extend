@@ -55,6 +55,8 @@ export interface Api {
     doctor(offline: boolean): Promise<DoctorCheck[]>;
     serviceInfo(): Promise<ServiceInfo>;
     installService(): Promise<ServiceResult>;
+    /** Starts the installed service when it is stopped; does not rewrite it. */
+    startService(): Promise<ServiceResult>;
     uninstallService(): Promise<ServiceResult>;
   };
   catalog: {
