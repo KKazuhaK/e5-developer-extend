@@ -4,6 +4,10 @@
 
 ## 未发布
 
+## [0.3.0] - 2026-11-17
+
+账号可以改名，新增检查更新和一键升级（带发布签名验证），调用节奏新增“密集（同原版强度）”和“急救”预设，API 目录扩充并按 API 统计调用，引擎在限流、接口不可用和自动暂停后的恢复上更稳健，并新增每日摘要和自动暂停开关。
+
 ### 新增
 
 - 账号可以改名：`e5extend account rename <旧名称> <新名称>`，桌面版的编辑页里直接改“账号名称”。改名保留历史和密钥：Secret、已保存的登录、统计、告警记录、订阅信息和调用日志都留在账号上，不需要重新登录，也不会触发告警；按新名称查看日志时，改名前写入的条目也会显示。做法是给账号一个固定的 ID（配置里的 `id`，新添加的账号一开始就有；没有 ID 的老账号第一次改名时以旧名称作为 ID），所有按账号保存的数据都以 ID 为键，改名只改 `config.toml`。名称规则不变（小写字母、数字、`-`、`_`，1-64 个字符）。带 `id` 的配置不能被旧版本（v0.2.0 及以前）读取：旧版后台服务会记一条 `config_error` 并继续用旧配置，重启到新版本后才生效。详见 [docs/design/account-rename.md](docs/design/account-rename.md)。
@@ -87,5 +91,6 @@
 - 桌面版 E5 Renew：托盘图标和主窗口（React），中英文界面。
 - 发布包：Windows 安装包、macOS dmg、Linux deb/rpm、命令行压缩包、Docker 镜像（暂未代码签名）。
 
+[0.3.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.0
 [0.2.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.2.0
 [0.1.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.1.0
