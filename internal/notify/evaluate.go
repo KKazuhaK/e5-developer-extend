@@ -204,7 +204,7 @@ func (s scope) retry() {
 	ev, now := s.ev, s.ev.in.Now
 	for _, kind := range sortedKinds(*s.notified) {
 		n := (*s.notified)[kind]
-		if !ev.allowed(kind) {
+		if !ev.allowed(kind) || kind == DailySummary { // the summary has its own schedule
 			continue
 		}
 		if n.Cooled {
@@ -418,6 +418,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	g.retry()
 
 	ev.evalSubscriptions()
+	ev.evalDailySummary()
 
 	// What was held during the quiet hours goes out as one message.
 	switch len(ev.held) {

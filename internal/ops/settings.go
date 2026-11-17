@@ -41,9 +41,10 @@ proxy = ""                  # empty uses HTTPS_PROXY and friends
 webhook_url = ""            # legacy plaintext address; set-webhook moves it into the vault
 stale_after = "72h"         # alert when an account has had no successful call for this long
 events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended, failure_spike, all_failing,
-                            # subscription_expiring, subscription_status, subscription_renewed
+                            # subscription_expiring, subscription_status, subscription_renewed, daily_summary
 cooldown = "6h"             # the same alert for the same account is not repeated within this time (critical: half); empty means the default, only "0" turns it off
 quiet_hours = ""            # for example "23:00-08:00": only critical alerts, the rest is sent as one summary afterwards
+daily_summary_at = ""       # for example "21:00": send one message a day with the calls of each account; empty turns it off (inside the quiet hours: sent when they end)
 spike_rounds = 3            # failure_spike: look at this many recent rounds ...
 spike_rate = 0.5            # ... alert when this share of the calls failed ...
 spike_min_failures = 5      # ... and at least this many calls failed (calls that found nothing do not count)
@@ -166,8 +167,10 @@ type NotifySettings struct {
 	Channels          int  `json:"channels"`
 	// Cooldown is a duration ("6h"; "0" turns it off), QuietHours a window such as
 	// "23:00-08:00" (empty turns it off); the spike values define failure_spike.
-	Cooldown         string  `json:"cooldown"`
-	QuietHours       string  `json:"quietHours"`
+	Cooldown   string `json:"cooldown"`
+	QuietHours string `json:"quietHours"`
+	// DailySummaryAt is the local time (HH:MM) of the daily summary message; empty turns it off.
+	DailySummaryAt   string  `json:"dailySummaryAt"`
 	SpikeRounds      int     `json:"spikeRounds"`
 	SpikeRate        float64 `json:"spikeRate"`
 	SpikeMinFailures int     `json:"spikeMinFailures"`
@@ -223,7 +226,8 @@ func (o *Ops) notifySettings(cfg *config.Config, path string) NotifySettings {
 	n := NotifySettings{
 		StaleAfter: cfg.Notify.StaleAfter, Events: nonNil(cfg.Notify.Events),
 		Cooldown: orDefault(cfg.Notify.Cooldown, config.DefaultCooldown), QuietHours: cfg.Notify.QuietHours,
-		SpikeRounds: rounds, SpikeRate: rate, SpikeMinFailures: minFailures,
+		DailySummaryAt: cfg.Notify.DailySummaryAt,
+		SpikeRounds:    rounds, SpikeRate: rate, SpikeMinFailures: minFailures,
 	}
 	src := o.channelSource(cfg, path)
 	src.mu.Lock()
@@ -296,6 +300,7 @@ func (o *Ops) SaveSettings(ctx context.Context, s Settings) ([]ValidationError, 
 	cfg.Notify.Events = nonNil(s.Notify.Events)
 	cfg.Notify.Cooldown = strings.TrimSpace(orDefault(s.Notify.Cooldown, config.DefaultCooldown))
 	cfg.Notify.QuietHours = strings.TrimSpace(s.Notify.QuietHours)
+	cfg.Notify.DailySummaryAt = strings.TrimSpace(s.Notify.DailySummaryAt)
 	cfg.Notify.SpikeRounds, cfg.Notify.SpikeRate, cfg.Notify.SpikeMinFailures = s.Notify.SpikeRounds, s.Notify.SpikeRate, s.Notify.SpikeMinFailures
 	if cfg.Notify.SpikeRounds == 0 {
 		cfg.Notify.SpikeRounds = config.DefaultSpikeRounds
