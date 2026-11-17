@@ -34,7 +34,7 @@
 | Docker 镜像 | `ghcr.io/kkazuhak/e5-renew` | `ghcr.io/kkazuhak/e5-developer-extend`（跟仓库名一致；旧镜像保留不删，不再更新） |
 | 发布文件名 | `e5renew_*`、`E5-Renew_*` | `e5extend_*`（命令行）、`E5-Developer-Extend_*`（桌面版） |
 | 备份文件 | `.e5backup`，头部 `E5RNWBAK` | 扩展名不变（不含产品名）；头部改为 `E5XTDBAK`。备份功能还没发布，**不需要兼容旧头部** |
-| Entra 应用注册（自动创建功能，未发布） | `E5 Renew`，标签 `e5renew` | `E5 Developer Extend`，标签 `e5extend`；自动创建时**也识别**旧名字 `e5renew` / `E5 Renew` 的应用并提供“采用并改名” |
+| Entra 应用注册（自动创建功能，未发布） | `E5 Renew`，标签 `e5renew` | `E5 Developer Extend`，标签 `e5extend`；不识别旧名字（没有迁移，见 §4） |
 
 **不改的**：调用记录、配置文件的格式和字段；`config.toml` 里的 `version = 1`；Graph 调用本身。
 
