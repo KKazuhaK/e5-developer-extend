@@ -256,16 +256,24 @@ func TestNothingSecretLeavesTheServices(t *testing.T) {
 		t.Fatalf("settings: %+v %v", s, err)
 	}
 	r.keep(s)
-	s.UI.Language, s.UI.Theme, s.UI.StartAtLogin = "zh", "dark", true
+	s.UI.Language, s.UI.Theme = "zh", "dark"
 	s.Schedule.IntervalMin = "45m"
 	if bad, err := set.Save(s); err != nil || len(bad) != 0 {
 		t.Fatalf("save: %v %v", bad, err)
 	}
-	if !r.auto.on {
-		t.Fatal("start at login not applied")
-	}
-	if got, _ := set.Get(); got.UI.Language != "zh" || got.Schedule.IntervalMin != "45m" || !got.UI.StartAtLogin {
+	if got, _ := set.Get(); got.UI.Language != "zh" || got.Schedule.IntervalMin != "45m" {
 		t.Fatalf("after save: %+v", got)
+	}
+	if err := set.SetStartAtLogin(true); err != nil || !r.auto.on {
+		t.Fatalf("start at login not applied: %v", err)
+	}
+	if got, _ := set.Get(); !got.UI.StartAtLogin {
+		t.Fatalf("after set: %+v", got)
+	}
+	// Save must not undo it, even with a stale value in the form.
+	s.UI.StartAtLogin = false
+	if bad, err := set.Save(s); err != nil || len(bad) != 0 || !r.auto.on {
+		t.Fatalf("save touched start at login: %v %v", bad, err)
 	}
 	s.UI.Language = "klingon"
 	s.Schedule.IntervalMax = "soon"
@@ -542,11 +550,8 @@ func TestAutostartFailureIsAnError(t *testing.T) {
 	r := newRig(t)
 	r.b.Autostart = brokenAutostart{}
 	set := NewSettingsService(r.b)
-	s, _ := set.Get()
-	s.UI.StartAtLogin = true
-	bad, err := set.Save(s)
-	if err == nil || len(bad) != 0 {
-		t.Fatalf("bad=%+v err=%v", bad, err)
+	if err := set.SetStartAtLogin(true); err == nil {
+		t.Fatal("want the failure back")
 	}
 }
 

@@ -58,6 +58,7 @@ export const wailsApi: Api = {
       };
     },
     save: async (s) => arr(await SettingsService.Save(cast(s))),
+    setStartAtLogin: (on) => SettingsService.SetStartAtLogin(on),
     setWebhook: (u) => SettingsService.SetWebhook(u),
     clearWebhook: () => SettingsService.ClearWebhook(),
     testWebhook: () => SettingsService.TestWebhook(),

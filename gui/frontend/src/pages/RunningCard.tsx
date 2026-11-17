@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useState } from "react";
 import { AlertTriangle, Power } from "lucide-react";
 import { api } from "@/api";
-import type { ServiceInfo, ServiceResult, Settings } from "@/api";
+import type { ServiceInfo, ServiceResult } from "@/api";
 import { useApp } from "@/state/app";
 import { useI18n } from "@/i18n";
 import { useToast } from "@/components/toast";
@@ -18,12 +18,13 @@ import { errMsg } from "@/lib/utils";
 const TONE: Record<ServiceState, "success" | "warning" | "muted"> = { running: "success", stopped: "warning", notInstalled: "muted", unsupported: "muted" };
 
 /**
- * "Start at login" edits the settings draft (saved with the page's Save
- * button). "Keep running in the background" acts at once: it installs or
- * removes the background service through HealthService, the same calls the
- * Health page uses.
+ * Both switches act at once and neither goes through the page's Save button.
+ * "Start at login" calls SettingsService.SetStartAtLogin; if that fails the
+ * switch stays where it was and a toast says why. "Keep running in the
+ * background" installs or removes the background service through
+ * HealthService, the same calls the Health page uses.
  */
-export function RunningCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Settings) => void) => void }) {
+export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: boolean; onStartAtLogin: (on: boolean) => void }) {
   const { t } = useI18n();
   const toast = useToast();
   const { snapshot } = useApp();
@@ -31,6 +32,7 @@ export function RunningCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Set
   const [svcError, setSvcError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmOff, setConfirmOff] = useState(false);
+  const [autoBusy, setAutoBusy] = useState(false);
   const [result, setResult] = useState<ServiceResult | null>(null);
   const hintId = useId();
 
@@ -45,6 +47,18 @@ export function RunningCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Set
   useEffect(() => {
     void load();
   }, [load]);
+
+  const changeAuto = async (on: boolean) => {
+    setAutoBusy(true);
+    try {
+      await api.settings.setStartAtLogin(on);
+      onStartAtLogin(on);
+    } catch (e) {
+      toast.error(errMsg(e)); // the switch is controlled: it keeps showing the old value
+    } finally {
+      setAutoBusy(false);
+    }
+  };
 
   const change = async (on: boolean) => {
     setBusy(true);
@@ -77,7 +91,7 @@ export function RunningCard({ draft, upd }: { draft: Settings; upd: (fn: (d: Set
       </CardHeader>
       <CardContent className="grid gap-4">
         <label className="flex cursor-pointer items-start gap-2.5 text-[13px]">
-          <Switch className="mt-0.5" checked={draft.ui.startAtLogin} onCheckedChange={(v) => upd((d) => void (d.ui.startAtLogin = v))} />
+          <Switch className="mt-0.5" checked={startAtLogin} disabled={autoBusy} onCheckedChange={(v) => void changeAuto(v)} />
           <span>
             {t("settings.startAtLogin")}
             <span className="block text-xs text-muted-foreground">{t("settings.startAtLoginHint")}</span>

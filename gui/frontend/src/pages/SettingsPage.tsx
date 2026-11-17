@@ -172,7 +172,11 @@ export function SettingsPage() {
       />
 
       <div className="grid gap-4">
-        <RunningCard draft={draft} upd={upd} />
+        <RunningCard
+          startAtLogin={draft.ui.startAtLogin}
+          // Applied by the backend already: record it as saved too, so it never makes the page dirty.
+          onStartAtLogin={(on) => { setSaved((x) => x && { ...x, ui: { ...x.ui, startAtLogin: on } }); setDraft((d) => d && { ...d, ui: { ...d.ui, startAtLogin: on } }); }}
+        />
 
         <PaceCard draft={draft} upd={upd} />
 

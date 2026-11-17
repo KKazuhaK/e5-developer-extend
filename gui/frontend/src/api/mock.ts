@@ -417,13 +417,19 @@ export const mockApi: Api = {
       await wait(300);
       const errs = validateSettings(s);
       if (errs.length) return errs;
-      settings = { ...structuredClone(s), notify: { ...s.notify, webhookConfigured: settings.notify.webhookConfigured } };
+      // start at login is applied by setStartAtLogin, never by save
+      settings = { ...structuredClone(s), notify: { ...s.notify, webhookConfigured: settings.notify.webhookConfigured }, ui: { ...s.ui, startAtLogin: settings.ui.startAtLogin } };
       return [];
     },
     async setWebhook(url) {
       await wait(300);
       if (!/^https:\/\//.test(url)) throw new Error("Webhook 地址必须以 https:// 开头");
       settings.notify.webhookConfigured = true;
+    },
+    async setStartAtLogin(on) {
+      await lag();
+      if (q.get("autostart") === "fail") throw new Error("start at login: permission denied");
+      settings.ui.startAtLogin = on;
     },
     async clearWebhook() {
       await lag();

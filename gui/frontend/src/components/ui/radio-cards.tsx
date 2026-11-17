@@ -1,4 +1,5 @@
 import { useRef, type KeyboardEvent, type ReactNode } from "react";
+import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export interface RadioCardOption<V extends string> {
@@ -42,11 +43,16 @@ export function RadioCards<V extends string>({
             onClick={() => onChange(o.value)}
             onKeyDown={(e) => onKey(e, i)}
             className={cn(
-              "cursor-pointer rounded-md border px-3 py-2 text-left text-[13px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring",
-              on ? "border-primary bg-primary/5 ring-1 ring-primary" : "bg-card hover:bg-accent",
+              "relative cursor-pointer rounded-md border px-3 py-2 text-left text-[13px] outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+              on ? "border-2 border-primary bg-primary/10 px-[11px] py-[7px]" : "bg-card hover:bg-accent",
             )}
           >
-            <span className="block font-medium">{o.label}</span>
+            {on && (
+              <span aria-hidden className="absolute top-1.5 right-1.5 flex size-4 items-center justify-center rounded-full bg-primary text-primary-foreground">
+                <Check className="size-3" strokeWidth={3} />
+              </span>
+            )}
+            <span className={cn("block font-medium", on && "pr-5")}>{o.label}</span>
             {o.description && <span className="mt-0.5 block text-xs text-muted-foreground">{o.description}</span>}
           </button>
         );
