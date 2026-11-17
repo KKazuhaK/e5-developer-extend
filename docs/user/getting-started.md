@@ -49,6 +49,23 @@ e5extend doctor                      # 体检
 `account add` 的 `--auth` 可以是 `device_code`、`browser`、`client_secret`、`password`。
 `client_secret` 和 `password` 会提示输入密钥（不回显），存进加密的 vault，配置文件里没有任何密钥。
 
+## 选对 API 分类
+
+不是每个账号都有邮箱、OneDrive 或 Teams：没有 Exchange 邮箱的账号调邮件、日历、联系人、待办只会得到 404 / 400，每一轮都白白失败。
+登录之后让 e5extend 查一下这个账号实际能用什么：
+
+```bash
+e5extend account test main --recommend            # 列出每个分类：recommended / unavailable / maybe，以及原因，并给出建议的 categories
+e5extend account test main --recommend --apply    # 把推荐的分类写进账号（会先问你；--yes 跳过确认）
+```
+
+检查只发几个只读请求（邮箱设置、OneDrive、Teams、SharePoint 根站点），不会写入任何东西。
+`maybe` 表示暂时确认不了（网络错误、需要管理员角色的报告），不会被自动选上。
+
+桌面版的添加账号向导把“API 分类”放在登录之后：每个分类带“推荐 / 不可用 / 可能可用”的标记，并默认勾选推荐的；
+编辑已有账号时也一样（还没登录就只列出分类并提示先登录）。
+运行一段时间后，如果某个分类连续 3 轮都是 404，`e5extend doctor` 会提醒你再检查一次。
+
 ## 之后怎么看它在不在工作
 
 ```bash

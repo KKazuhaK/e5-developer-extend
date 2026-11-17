@@ -105,7 +105,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 | 服务 | 方法 |
 |---|---|
 | `StatusService` | `Snapshot()`、`RunNow(names: string[])` |
-| `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
+| `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Recommend(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
 | `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Preview(id, choice)`（列出所选选项的具体事项，不写任何东西）、`Apply(id, choice)`、`Finish(id)`（向导已保存账号，结束会话）、`Cancel(id): { secretRemoved, error }`；`id` 由前端生成，好在调用前先订阅事件 |
 | `LogService` | `Read(account, sinceHours, limit)` |
 | `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
@@ -132,9 +132,9 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
        管理员的登录方式，并说明登录页会显示“Microsoft Graph Command Line Tools”（微软的官方工具，只用这一次）；
     2. 填租户、Client ID，需要时填 Secret 或密码；选“自动”时这一步是“创建应用”：管理员登录（设备码或浏览器）→ 显示计划（应用名、权限列表、“不会删除任何已有内容”、将要执行的事项；
        发现手工建的同名应用时给“采用 X（客户端 ID）/ 新建”单选，采用时有“改为规范名称”复选框，默认勾选；没有要做的事就说一切已就绪）→ 确认 → 进度（含“等待微软同步…”）→ 把租户 ID、客户端 ID 填进账号；
-    3. 选 API 分类；
-    4. 登录：设备码模式显示代码和链接，带“复制”和“打开浏览器”按钮；浏览器模式显示“请在浏览器中完成登录”；
+    3. 登录（账号在第 2 步结束时保存）：设备码模式显示代码和链接，带“复制”和“打开浏览器”按钮；浏览器模式显示“请在浏览器中完成登录”；
        自动创建之后用 `LoginAfterSetup`，新应用还没同步时显示“等待微软同步…”并自动重试；管理员同意没成功时账号照常保存，这一步显示管理员同意链接（打开、复制）并说明同意之后再登录；
+    4. 选 API 分类：调 `AccountService.Recommend`，每个分类带“推荐 / 不可用（原因）/ 可能可用”徽标并默认勾选推荐的；没登录时不带徽标并提示先登录（见 [api-recommend.md](api-recommend.md)）；
     5. 测试：显示已授予的权限和可用的 API 数量；
     6. 完成。
   - 删除账号要二次确认。“更换 Secret” 是单独的对话框。
@@ -215,6 +215,7 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
   `run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。
   `browser_opened` 的 `message` 是固定文字，登录地址不放进事件（里面带请求状态）；`device_code` 事件的 `userCode`、`verificationUri` 是从微软给的提示文字里解析出来的，解析不到就为空，`message` 总是完整文字。
 - `AccountService.Test(name)` 返回 `{ scopes, usableApis, totalApis, expiresOn }`，不含登录名。
+- `AccountService.Recommend(name)` 返回 `{ needsLogin, categories: [{ category, status, reason }], recommended }`（见 [api-recommend.md](api-recommend.md)）；没登录时 `needsLogin` 为真、没有建议，不算错误；其他失败（网络等）是错误。不含登录名和令牌。
 - `HealthService.InstallService()` / `UninstallService()` 返回 `{ actions, warnings, manual }`（`manual` 是要用户自己执行的命令）。
 - `LogService.Read` 按时间**从新到旧**返回；`sinceHours`、`limit` 为 0 表示不限。
 - `SettingsService.Save` 返回的 `ValidationError.field` 是驼峰路径：`schedule.intervalMin`、`schedule.workDays`、`schedule.periodStart`、`network.proxy`、`notify.staleAfter`、`notify.events`、`ui.language`、`ui.theme`、`ui.startAtLogin`。
