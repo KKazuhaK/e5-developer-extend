@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"errors"
+	"maps"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
@@ -39,15 +40,16 @@ func probeDelay(done int) time.Duration {
 
 // probeAPI picks the cheapest call that needs no {user}: the signed-in user
 // for a delegated account, else the organization, else the first API the
-// token allows. ok is false when none fits; the token alone then decides.
-func (e *Engine) probeAPI(acct config.Account, scopes []string) (a catalog.API, path string, ok bool) {
+// token allows, leaving out the APIs that answered 403/404 within the last 24
+// hours. ok is false when none is left: the account then stays paused.
+func (e *Engine) probeAPI(acct config.Account, scopes []string, skipUntil map[string]time.Time, now time.Time) (a catalog.API, path string, ok bool) {
 	kind := catalog.Delegated
 	if !acct.Delegated() {
 		kind = catalog.App
 	}
 	var plain []catalog.API
 	for _, c := range catalog.Available(e.apis, kind, scopes, acct.Categories) {
-		if !c.UsesUser(kind) {
+		if !c.UsesUser(kind) && !skipUntil[c.ID].After(now) {
 			plain = append(plain, c)
 		}
 	}
@@ -114,10 +116,21 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 	}
 
 	class, api := graph.OK, "token"
-	if a, path, ok := e.probeAPI(acct, tok.Scopes); ok {
-		api = a.ID
-		class = e.o.Graph.Call(ctx, tok.AccessToken, path, e.pickQuery(a)).Class
+	var skipUntil map[string]time.Time
+	e.withLock(func() {
+		if as := e.state.Accounts[acct.Name]; as != nil {
+			skipUntil = maps.Clone(as.APISkipUntil)
+		}
+	})
+	a, path, ok := e.probeAPI(acct, tok.Scopes, skipUntil, e.clock.Now())
+	if !ok {
+		// No call to judge by, and a token alone proves nothing: the round
+		// that paused the account would only pause it again.
+		e.afterProbe(acct, "no api", probeFailed)
+		return
 	}
+	api = a.ID
+	class = e.o.Graph.Call(ctx, tok.AccessToken, path, e.pickQuery(a)).Class
 	if ctx.Err() != nil {
 		return
 	}

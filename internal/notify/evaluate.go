@@ -335,7 +335,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 				calls = slices.DeleteFunc(slices.Clone(calls), func(c store.Entry) bool { return !c.TS.After(as.ResumedAt) })
 			}
 			sp := callstat.SpikeOf(calls, in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
-			_, had := get(FailureSpike)
+			spikeN, had := get(FailureSpike)
 			switch {
 			case sp.Active:
 				spiking = true
@@ -346,7 +346,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 				}
 			case !sp.Enough:
 				spiking = had
-				if had && as.LastSuccess.After(as.ResumedAt) && !as.ResumedAt.IsZero() {
+				if had && !as.ResumedAt.IsZero() && as.ResumedAt.After(spikeN.At) && as.LastSuccess.After(as.ResumedAt) {
 					// The pause ended and the account has succeeded since: the
 					// spike announced before it is over, no full window needed.
 					spiking = false

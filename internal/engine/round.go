@@ -116,9 +116,8 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 	case out.skipped == "network":
 		e.setNextLocked(as, now.Add(e.rnd(5*time.Minute, 15*time.Minute)))
 	default:
-		// Only a round that made progress ends an attention state: one that
-		// only met throttling or refusals (403/404) proves nothing.
-		refused := out.unavailable > 0 || out.allSkipped
+		// Only a round that succeeded ends an attention state: one that only
+		// met throttling or refusals (403/404) proves nothing.
 		if as.Status == store.StatusNeedsAttention && out.ok > 0 {
 			as.Status, as.Reason = store.StatusOK, ""
 			follow = append(follow, "recovered")
@@ -128,9 +127,12 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 			as.LastSuccess, as.ConsecutiveFailedRound = now, 0
 		case as.Status == store.StatusNeedsAttention:
 			e.setNextLocked(as, now.Add(attentionRetry))
-		case out.failed > 0 || refused:
-			// A round in which every call was refused is no success: an
-			// account that lost its license or mailbox ends up paused (and probed).
+		case out.failed > 0 || out.allSkipped:
+			// Real failures count. So does a round without success in which
+			// every API the account may call is refused (paused): an account
+			// that lost its license or mailbox ends up paused (and probed).
+			// A round that only met some refusals or throttling is neutral:
+			// with few APIs per round, picking unavailable ones is normal.
 			as.ConsecutiveFailedRound++
 			if as.ConsecutiveFailedRound >= AutoPauseRounds {
 				as.Status = store.StatusPaused
@@ -343,6 +345,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			out.calls++
 			out.unavailable++
 			out.lastFail = res.Class
+			skip[id] = true
 			e.updateAccount(acct.Name, func(as *store.AccountState) {
 				if as.APISkipUntil == nil {
 					as.APISkipUntil = map[string]time.Time{}
@@ -380,6 +383,16 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 		res := e.callOne(ctx, acct.Name, roundID, api.ID, tok.AccessToken, path, e.pickQuery(api))
 		if handle(api.ID, res) {
 			break
+		}
+	}
+	if out.ok == 0 && out.unavailable > 0 && ctx.Err() == nil {
+		// Nothing worked and every API the account may call is now refused.
+		out.allSkipped = true
+		for _, a := range allowed {
+			if !skip[a.ID] {
+				out.allSkipped = false
+				break
+			}
 		}
 	}
 	return finishCalls(ctx, out)

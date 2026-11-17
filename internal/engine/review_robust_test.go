@@ -17,9 +17,10 @@ func TestAccountRefusedEverywhereEndsUpPausedWithoutRecovered(t *testing.T) {
 	f.opts.Notifier = n
 	f.h.setStatus(func(string) (int, map[string]string) { return 403, nil })
 	f.start()
-	for i := 0; i < AutoPauseRounds; i++ {
+	// The refused APIs are used up over a few rounds; then each round counts.
+	for i := 0; i < 12 && f.acct("main").Status == store.StatusOK; i++ {
 		f.round("main")
-		if k := n.kinds("main"); i < AutoPauseRounds-1 && len(k) != 0 {
+		if k := n.kinds("main"); f.acct("main").Status == store.StatusOK && len(k) != 0 {
 			t.Fatalf("round %d alerted: %v", i+1, k)
 		}
 	}
