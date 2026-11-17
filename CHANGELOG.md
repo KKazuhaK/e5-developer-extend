@@ -4,7 +4,16 @@
 
 ## 未发布
 
+### 新增
+
+- 调用节奏新增两档预设：**密集（类似 Renew Plus）**（8 到 17 分钟一轮，每轮 15 到 25 个 API）和**急救（临时）**（5 到 10 分钟一轮，每轮 20 到 30 个 API，只用于订阅到期前的几天，界面上有提示，过后请手动改回“标准”）。某一轮要的 API 数比账号能用的多时，调用能用的全部。
+- API 目录新增只读接口：洞察（热门、使用过、共享的文档）、相关人员、在线状态（presence）、直属下级、用户设置、OneDrive 驱动器列表、日历组、OneNote 分区，以及 Bookings（业务和货币，默认关闭）。新增三个只读权限，自动创建应用会一并申请：委托身份 `People.Read`、`Presence.Read`、`Bookings.Read.All`，应用身份 `Presence.Read.All`、`Bookings.Read.All`。已有的应用注册没有这些权限时，对应接口只是不会被选中，其他不受影响；要补权限可以重新运行 `e5extend app setup`。没有收 `/me/manager`（没有上级的账号会返回 404）、`/me/drive/recent` 和 `sharedWithMe`（微软已停止返回数据）、`/me/settings/regionalAndLanguageSettings`（只在 beta 里）。详见 [docs/graph-api-catalog.md](docs/graph-api-catalog.md)。
+- 按 API 统计调用次数：引擎为每个账号记录每个 API 的成功、失败、总次数和最近一次的结果（存在 state.json 里，每个 API 一条）。命令行 `e5extend stats [账号]`；桌面版“日志”页新增“按 API 统计”，可按列排序。
+- 桌面版概览页新增红色描边的“续期失败？”按钮，打开检查清单（旧版沙盒订阅退役、开发者控制面板、订阅卡片、健康检查、没有保证），清单也写进了 [常见问题](docs/user/faq.md)。
+
 ### 变更
+
+- 默认全天调用（`work_start` 和 `work_end` 都是 `"00:00"`，两者相等表示全天）；以前是 08:00 到 22:00。已有的配置不变。
 
 - 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
 
