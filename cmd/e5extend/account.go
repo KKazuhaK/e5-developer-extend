@@ -3,6 +3,8 @@ package main
 import (
 	"errors"
 	"fmt"
+	"slices"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -12,6 +14,7 @@ import (
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/recommend"
 )
 
 func (a *app) newAccountCmd() *cobra.Command {
@@ -196,21 +199,144 @@ func printTokenInfo(cmd *cobra.Command, tok ops.TokenInfo) {
 }
 
 func (a *app) newAccountTestCmd() *cobra.Command {
-	return &cobra.Command{
+	var recommendFlag, apply, yes bool
+	cmd := &cobra.Command{
 		Use:   "test <name>",
 		Short: "Get a token silently and show who it is for and what it grants",
-		Args:  cobra.ExactArgs(1),
+		Long: "Get a token silently and show who it is for and what it grants.\n\n" +
+			"With --recommend it also probes, with a few read-only requests, which API categories the account can\n" +
+			"really use (an account without a mailbox gets 404 from mail, calendar, contacts and To Do) and prints\n" +
+			"a table plus the suggested categories. With --apply it saves the recommended categories to the account.",
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			name := args[0]
+			if (apply || yes) && !recommendFlag {
+				return errors.New("--apply and --yes only work together with --recommend")
+			}
+			if yes && !apply {
+				return errors.New("--yes only works together with --apply")
+			}
 			tok, err := a.ops().TestAccount(contextOrBackground(cmd), name)
 			if err != nil {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "account: %s (%s)\n", tok.Account, name)
 			printTokenInfo(cmd, tok)
-			return nil
+			if !recommendFlag {
+				return nil
+			}
+			return a.accountRecommend(cmd, name, apply, yes)
 		},
 	}
+	f := cmd.Flags()
+	f.BoolVar(&recommendFlag, "recommend", false, "probe which API categories this account can use and suggest the categories setting")
+	f.BoolVar(&apply, "apply", false, "with --recommend: save the recommended categories to the account")
+	f.BoolVar(&yes, "yes", false, "with --apply: do not ask for confirmation")
+	return cmd
+}
+
+// reasonText turns a recommendation reason code into words.
+func reasonText(code string) string {
+	switch head, rest, _ := strings.Cut(code, ":"); head {
+	case "":
+		return ""
+	case recommend.ReasonMissingPermission:
+		return "missing permission " + strings.ReplaceAll(rest, ",", " or ")
+	case recommend.ReasonNoMailbox:
+		return "no Exchange mailbox (mail, calendar, contacts and To Do answer 404)"
+	case recommend.ReasonNoOneDrive:
+		return "no OneDrive for this account"
+	case recommend.ReasonNoTeams:
+		return "no Teams license"
+	case recommend.ReasonNoSharePoint:
+		return "no SharePoint site"
+	case recommend.ReasonNeedsAdminRole:
+		return "needs an administrator role (not probed)"
+	case recommend.ReasonNotSupported:
+		return "not available for this sign-in type"
+	case recommend.ReasonProbeFailed:
+		return "could not be checked (try again later)"
+	}
+	return code
+}
+
+func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes bool) error {
+	out := cmd.OutOrStdout()
+	ctx := contextOrBackground(cmd)
+	rec, err := a.ops().RecommendCategories(ctx, name)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(out)
+	tw := tabwriter.NewWriter(out, 0, 4, 2, ' ', 0)
+	fmt.Fprintln(tw, "CATEGORY\tSTATUS\tREASON")
+	for _, c := range rec.Categories {
+		fmt.Fprintf(tw, "%s\t%s\t%s\n", c.Category, c.Status, reasonText(c.Reason))
+	}
+	if err := tw.Flush(); err != nil {
+		return err
+	}
+	cats := rec.Recommended()
+	quoted := make([]string, len(cats))
+	for i, c := range cats {
+		quoted[i] = strconv.Quote(c)
+	}
+	fmt.Fprintf(out, "\nsuggested: categories = [%s]\n", strings.Join(quoted, ", "))
+	var maybe []string
+	for _, c := range rec.Categories {
+		if c.Status == recommend.Maybe {
+			maybe = append(maybe, c.Category)
+		}
+	}
+	if len(maybe) > 0 {
+		fmt.Fprintf(out, "not included, may still work: %s\n", strings.Join(maybe, ", "))
+	}
+	if !apply {
+		fmt.Fprintf(out, "to save it: e5extend account test %s --recommend --apply\n", name)
+		return nil
+	}
+
+	if len(cats) == 0 {
+		return errors.New("no category is recommended; nothing saved (check the granted permissions above)")
+	}
+	cur, err := a.ops().GetAccount(name)
+	if err != nil {
+		return err
+	}
+	if slices.Equal(sortedCopy(cur.Categories), sortedCopy(cats)) {
+		fmt.Fprintln(out, "the account already uses these categories; nothing to change")
+		return nil
+	}
+	was := "(default selection)"
+	if len(cur.Categories) > 0 {
+		was = strings.Join(cur.Categories, ", ")
+	}
+	fmt.Fprintf(out, "categories of %s: %s -> %s\n", name, was, strings.Join(cats, ", "))
+	if !yes {
+		fmt.Fprintf(cmd.ErrOrStderr(), "Save these categories? [y/N] ")
+		ans, err := readLineCtx(ctx, cmd.InOrStdin())
+		if errors.Is(err, errInterrupted) {
+			return err
+		}
+		if err != nil {
+			return errors.New("no confirmation received; pass --yes to save without asking")
+		}
+		if v := strings.ToLower(strings.TrimSpace(ans)); v != "y" && v != "yes" {
+			return errors.New("aborted")
+		}
+	}
+	if err := a.ops().SetCategories(ctx, name, cats); err != nil {
+		return err
+	}
+	a.ops().ReloadEngine()
+	fmt.Fprintf(out, "saved the categories of account %q\n", name)
+	return nil
+}
+
+func sortedCopy(in []string) []string {
+	out := slices.Clone(in)
+	slices.Sort(out)
+	return out
 }
 
 func (a *app) newAccountRemoveCmd() *cobra.Command {
