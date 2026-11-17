@@ -231,6 +231,9 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
       - uses: actions/download-artifact@v8
         with:
           path: dist/release
@@ -240,6 +243,19 @@ jobs:
         run: |
           sha256sum -- * >SHA256SUMS
           cat SHA256SUMS
+      - name: Sign the checksums
+        # The app only installs an upgrade whose SHA256SUMS carries this
+        # signature (docs/design/update.md). Without the secret the release
+        # is still created, just unsigned: the app then offers only the
+        # release page. The key reaches this one step through the environment.
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::warning::RELEASE_SIGNING_KEY is not set: SHA256SUMS is not signed, so the app cannot upgrade itself to this release"
+          else
+            go run scripts/release/sign-sums.go dist/release/SHA256SUMS
+          fi
       - name: Create the draft release
         env:
           GH_TOKEN: ${{ github.token }}
