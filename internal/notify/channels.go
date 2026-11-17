@@ -14,9 +14,11 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
@@ -40,15 +42,6 @@ const (
 	DefaultBarkServer   = "https://api.day.app"
 	DefaultNtfyServer   = "https://ntfy.sh"
 	serverChanBase      = "https://sctapi.ftqq.com"
-)
-
-// Message size limits of the services, in the unit each one counts.
-const (
-	telegramLimit = 4000 // characters (the API allows 4096)
-	wecomLimit    = 4000 // bytes (the API allows 4096)
-	discordLimit  = 1900 // characters (the API allows 2000)
-	dingtalkLimit = 18000
-	barkLimit     = 2000
 )
 
 // Deliverer renders an event for a channel and sends it.
@@ -87,29 +80,145 @@ func (d *Deliverer) host() string {
 	return h
 }
 
+// sizeLimit is how much body a service accepts; bytes says what max counts.
+type sizeLimit struct {
+	max   int
+	bytes bool
+}
+
+// limits are kept a little under what each service documents.
+var limits = map[string]sizeLimit{
+	config.ChannelTelegram:   {4096, false},
+	config.ChannelWeCom:      {4096, true},
+	config.ChannelDingTalk:   {20000, true},
+	config.ChannelDiscord:    {2000, false},
+	config.ChannelSlack:      {35000, false},
+	config.ChannelBark:       {4000, false},
+	config.ChannelServerChan: {30000, true},
+	config.ChannelNtfy:       {4000, true},
+	config.ChannelFeishu:     {20000, true},
+}
+
+func (l sizeLimit) fits(body string) bool {
+	if l.max == 0 {
+		return true
+	}
+	if l.bytes {
+		return len(body) <= l.max
+	}
+	return utf8.RuneCountInString(body) <= l.max
+}
+
 // Deliver sends ev through the channel, retrying temporary failures with
-// backoff. It does not apply the channel's level and event filters.
+// backoff. It does not apply the channel's level and event filters. A message
+// that is too long for the service is split (a digest at item boundaries) or
+// shortened before it is rendered, so what is sent is always well-formed.
 func (d *Deliverer) Deliver(ctx context.Context, t Target, ev Event) error {
 	c := t.Channel
 	if t.Err != nil {
 		return fmt.Errorf("channel %s: %w", c.ID, t.Err)
 	}
 	lang := Language(c.Language, d.DefaultLanguage)
-	var rendered Rendered
-	if c.Type != config.ChannelWebhook || c.Format == config.FormatTemplate {
-		var err error
-		if rendered, err = Render(c.Type, lang, c.Template, NewData(ev, lang, d.host(), d.Location)); err != nil {
-			return fmt.Errorf("render for channel %s: %w", c.ID, err)
+	render := func(e Event) (Rendered, error) {
+		if c.Type == config.ChannelWebhook && c.Format != config.FormatTemplate {
+			return Rendered{}, nil
 		}
+		r, err := Render(c.Type, lang, c.Template, NewData(e, lang, d.host(), d.Location))
+		if err != nil {
+			return r, fmt.Errorf("render for channel %s: %w", c.ID, err)
+		}
+		return r, nil
+	}
+	parts, err := fitEvent(ev, limits[c.Type], render)
+	if err != nil {
+		return err
 	}
 	backoff := d.Backoff
 	if backoff == nil {
 		backoff = DefaultBackoff
 	}
 	label := c.Type + " channel " + c.ID
-	return withRetry(ctx, backoff, d.Log, label, ev.Event, func() error {
-		return d.send(ctx, t, ev, lang, rendered)
-	})
+	for _, p := range parts {
+		rendered, err := render(p)
+		if err != nil {
+			return err
+		}
+		err = withRetry(ctx, backoff, d.Log, label, p.Event, func() error {
+			return d.send(ctx, t, p, lang, rendered)
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// fitEvent returns the events to send so that each renders within limit. A
+// digest is split at item boundaries; an event whose own text is too long gets
+// its message cut (the raw text, before any escaping, so no tag or entity is
+// ever cut in half).
+func fitEvent(ev Event, limit sizeLimit, render func(Event) (Rendered, error)) ([]Event, error) {
+	fits := func(e Event) (bool, error) {
+		r, err := render(e)
+		return limit.fits(r.Body), err
+	}
+	if ok, err := fits(ev); err != nil || ok {
+		return []Event{ev}, err
+	}
+	shrink := func(e Event) (Event, error) {
+		m := []rune(e.Message)
+		for len(m) > 16 {
+			m = m[:len(m)*3/4]
+			e.Message = string(m) + "…"
+			if ok, err := fits(e); err != nil || ok {
+				return e, err
+			}
+		}
+		return e, nil
+	}
+	if ev.Event != Digest {
+		e, err := shrink(ev)
+		return []Event{e}, err
+	}
+	chunk := func(items []Event) Event {
+		if len(items) == 1 {
+			return items[0]
+		}
+		c := ev
+		c.Items = items
+		c.Message = fmt.Sprintf("%d alerts were held during the quiet hours", len(items))
+		return c
+	}
+	var out []Event
+	var cur []Event
+	flush := func() error {
+		if len(cur) == 0 {
+			return nil
+		}
+		e := chunk(cur)
+		if len(cur) == 1 {
+			var err error
+			if e, err = shrink(e); err != nil {
+				return err
+			}
+		}
+		out = append(out, e)
+		cur = nil
+		return nil
+	}
+	for _, it := range ev.Items {
+		ok, err := fits(chunk(append(slices.Clone(cur), it)))
+		if err != nil {
+			return nil, err
+		}
+		if !ok && len(cur) > 0 {
+			if err := flush(); err != nil {
+				return nil, err
+			}
+		}
+		cur = append(cur, it)
+	}
+	return out, flush()
 }
 
 // send makes one attempt.
@@ -151,7 +260,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 			return request{}, err
 		}
 		return request{method: http.MethodPost, url: base + "/bot" + token + "/sendMessage", header: jsonHeader,
-			body: jsonBody(map[string]any{"chat_id": c.ChatID, "text": truncRunes(r.Body, telegramLimit),
+			body: jsonBody(map[string]any{"chat_id": c.ChatID, "text": r.Body,
 				"parse_mode": "HTML", "disable_web_page_preview": true}),
 			secret: []string{token, base + "/bot" + token}, check: checkTelegram}, nil
 
@@ -164,7 +273,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 			return request{}, err
 		}
 		return request{method: http.MethodPost, url: u, header: jsonHeader,
-			body:   jsonBody(map[string]any{"msgtype": "markdown", "markdown": map[string]string{"content": truncBytes(r.Body, wecomLimit)}}),
+			body:   jsonBody(map[string]any{"msgtype": "markdown", "markdown": map[string]string{"content": r.Body}}),
 			secret: []string{u}, check: checkErrCode("errcode", "errmsg", 45009)}, nil
 
 	case config.ChannelFeishu:
@@ -219,7 +328,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		}
 		return request{method: http.MethodPost, url: u, header: jsonHeader,
 			body: jsonBody(map[string]any{"msgtype": "markdown",
-				"markdown": map[string]string{"title": r.Title, "text": truncRunes(r.Body, dingtalkLimit)}}),
+				"markdown": map[string]string{"title": r.Title, "text": r.Body}}),
 			secret: secrets, check: checkErrCode("errcode", "errmsg", 130101, 660026)}, nil
 
 	case config.ChannelDiscord:
@@ -232,7 +341,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		}
 		// allowed_mentions: an alert text must never ping @everyone.
 		return request{method: http.MethodPost, url: u, header: jsonHeader,
-			body: jsonBody(map[string]any{"content": truncRunes(r.Body, discordLimit),
+			body: jsonBody(map[string]any{"content": r.Body,
 				"allowed_mentions": map[string]any{"parse": []string{}}}), secret: []string{u}}, nil
 
 	case config.ChannelSlack:
@@ -261,7 +370,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		}
 		return request{method: http.MethodPost, url: server + "/push", header: jsonHeader,
 			body: jsonBody(map[string]string{"device_key": key, "title": r.Title,
-				"body": truncRunes(r.Body, barkLimit), "level": level, "group": "e5extend"}),
+				"body": r.Body, "level": level, "group": "e5extend"}),
 			secret: []string{key}, check: checkErrCode("code", "message", -1)}, nil
 
 	case config.ChannelNtfy:
@@ -419,19 +528,6 @@ func truncRunes(s string, n int) string {
 	}
 	return string(r[:n-1]) + "…"
 }
-
-func truncBytes(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	cut := n - len("…")
-	for cut > 0 && !isRuneStart(s[cut]) {
-		cut--
-	}
-	return s[:cut] + "…"
-}
-
-func isRuneStart(b byte) bool { return b&0xC0 != 0x80 }
 
 // headerText makes s fit an HTTP header value: no line breaks, and non-ASCII
 // text as an RFC 2047 encoded word (ntfy decodes it).

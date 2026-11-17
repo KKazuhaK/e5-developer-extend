@@ -53,6 +53,9 @@ type Notice struct {
 	// Held means the alert is waiting for the quiet hours to end; it is sent
 	// then, together with the others that were held.
 	Held bool `json:"held,omitempty"`
+	// Cooled means the cooldown kept the alert back while its condition still
+	// holds; it is sent (Msg) once the cooldown ends. Nothing was announced yet.
+	Cooled bool `json:"cooled,omitempty"`
 }
 
 // AccountState is the persisted state of one account.

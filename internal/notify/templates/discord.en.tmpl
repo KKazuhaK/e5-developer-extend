@@ -1,9 +1,9 @@
 {{define "title"}}{{if .Digest}}{{.App}} · {{.EventLabel}} ({{len .Digest}}){{else}}{{.App}} · {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}{{end}}{{end}}
-{{define "body"}}{{if .Digest}}**{{.EventLabel}} · {{len .Digest}} alerts**{{range .Digest}}
-[{{.LevelLabel}}] **{{.EventLabel}}**{{if .Account}} · {{.Account}}{{end}} — {{.Message}}{{end}}
-{{.Time}} · {{.Host}}{{else}}**[{{.LevelLabel}}] {{.EventLabel}}**{{if .Account}} · `{{.Account}}`{{end}}
-{{.Message}}{{if .Rounds}}
+{{define "body"}}{{if .Digest}}**{{.EventLabel | md}} · {{len .Digest}} alerts**{{range .Digest}}
+[{{.LevelLabel}}] **{{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}} — {{.Message | md}}{{end}}
+{{.Time | md}} · {{.Host | md}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}}
+{{.Message | md}}{{if .Rounds}}
 Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds{{end}}{{if .Origin}}
-Resolved: {{.OriginLabel}}{{end}}{{if .Hint}}
-Next step: {{.Hint}}{{end}}
-{{.Time}} · {{.Host}}{{end}}{{end}}
+Resolved: {{.OriginLabel | md}}{{end}}{{if .Hint}}
+Next step: {{.Hint | md}}{{end}}
+{{.Time | md}} · {{.Host | md}}{{end}}{{end}}

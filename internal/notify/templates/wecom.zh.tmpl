@@ -1,16 +1,16 @@
 {{define "title"}}{{if .Digest}}{{.App}} · {{.EventLabel}}（{{len .Digest}}）{{else}}{{.App}} · {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}{{end}}{{end}}
-{{define "body"}}{{if .Digest}}**{{.EventLabel}} · 共 {{len .Digest}} 条**{{range .Digest}}
+{{define "body"}}{{if .Digest}}**{{.EventLabel | md}} · 共 {{len .Digest}} 条**{{range .Digest}}
 
-[{{.LevelLabel}}] **{{.EventLabel}}**{{if .Account}} · {{.Account}}{{end}} — {{.Message}}{{end}}
+[{{.LevelLabel}}] **{{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}} — {{.Message | md}}{{end}}
 
-{{.Time}} · {{.Host}}{{else}}**[{{.LevelLabel}}] {{.EventLabel}}**{{if .Account}} · `{{.Account}}`{{end}}
+{{.Time | md}} · {{.Host | md}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}}
 
-{{.Message}}{{if .Rounds}}
+{{.Message | md}}{{if .Rounds}}
 
 失败率 {{.FailRate}}，近 {{.Rounds}} 轮共失败 {{.Failures}} 次{{end}}{{if .Origin}}
 
-已恢复：{{.OriginLabel}}{{end}}{{if .Hint}}
+已恢复：{{.OriginLabel | md}}{{end}}{{if .Hint}}
 
-建议：{{.Hint}}{{end}}
+建议：{{.Hint | md}}{{end}}
 
-{{.Time}} · {{.Host}}{{end}}{{end}}
+{{.Time | md}} · {{.Host | md}}{{end}}{{end}}

@@ -165,7 +165,20 @@ func NewData(ev Event, lang, host string, loc *time.Location) Data {
 	return d
 }
 
+// mdEscaper backslash-escapes what Markdown (WeCom, DingTalk, Discord, Server
+// Chan) would read as formatting or markup, so untrusted text stays text.
+var mdEscaper = strings.NewReplacer(
+	"\\", `\\`, "`", "\\`", "*", `\*`, "_", `\_`, "[", `\[`, "]", `\]`, "(", `\(`, ")", `\)`,
+	"#", `\#`, ">", `\>`, "<", `\<`, "~", `\~`, "|", `\|`, "!", `\!`, "&", `\&`,
+)
+
+// slackEscaper is what Slack asks for in text: & < > only (they start links and mentions).
+var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
+
 var funcs = template.FuncMap{
+	// md escapes text for Markdown; slack escapes it for Slack mrkdwn.
+	"md":    func(s string) string { return mdEscaper.Replace(s) },
+	"slack": func(s string) string { return slackEscaper.Replace(s) },
 	// json encodes a value as a JSON literal, for bodies written by hand.
 	"json": func(v any) (string, error) { b, err := json.Marshal(v); return string(b), err },
 	// trunc cuts s to at most n characters.

@@ -93,7 +93,12 @@ func (s scope) put(kind string, n store.Notice) {
 	s.ev.changed = true
 }
 func (s scope) del(kind string) {
-	if _, ok := (*s.notified)[kind]; ok {
+	if n, ok := (*s.notified)[kind]; ok {
+		// A problem that was only ever held (never sent) and has cleared leaves
+		// nothing to recover from: no "recovered" for something nobody heard of.
+		if u, has := (*s.notified)[recordUnhealthy]; has && n.Held && u.Held && u.Key == kind {
+			delete(*s.notified, recordUnhealthy)
+		}
 		delete(*s.notified, kind)
 		s.ev.changed = true
 	}
@@ -101,8 +106,8 @@ func (s scope) del(kind string) {
 
 // event rebuilds the event of a notice. key carries what the decision was
 // based on: the numbers of a failure_spike, the origin of a recovery.
-func (s scope) event(kind, key, msg string, at time.Time) Event {
-	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at}
+func (s scope) event(kind, key, msg string, at, attempt time.Time) Event {
+	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at, Attempt: attempt}
 	switch kind {
 	case FailureSpike:
 		parts := strings.Split(key, "/")
@@ -116,42 +121,71 @@ func (s scope) event(kind, key, msg string, at time.Time) Event {
 	return e
 }
 
-// announce records an alert and hands it out. cooled is true when the cooldown
-// swallowed it: it is then remembered as announced without ever being sent.
-func (s scope) announce(kind, key, msg string) (cooled bool) {
+// announce records an alert and hands it out. cooled is true when the
+// cooldown kept it back: it stays in the state, not announced, and goes out
+// once the cooldown ends if its condition still holds. held is true when the
+// quiet hours keep it back until they end.
+func (s scope) announce(kind, key, msg string) (cooled, held bool) {
 	ev, now := s.ev, s.ev.in.Now
 	n := store.Notice{At: now, Key: key}
 	if kind == Recovered && !ev.allowed(kind) {
-		return false // one-shot and filtered out: nothing to remember
+		return false, false // one-shot and filtered out: nothing to remember
 	}
 	if ev.allowed(kind) {
+		n.Msg = msg
 		if last, ok := (*s.sent)[kind]; ok && cooldownApplies(kind) && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind) {
+			n.Cooled = true
 			s.put(kind, n)
-			return true
+			return true, false
 		}
-		n.Pending, n.Msg = true, msg
-		if ev.quiet && LevelOf(kind) != config.LevelCritical {
-			n.Held = true
-		} else {
-			n.Tried = now
-			ev.events = append(ev.events, s.event(kind, key, msg, now))
-		}
-		if *s.sent == nil {
-			*s.sent = map[string]time.Time{}
-		}
-		(*s.sent)[kind] = now
+		s.handOut(kind, &n)
 	}
 	s.put(kind, n)
-	return false
+	return false, n.Held
 }
 
-// retry hands out again what was not confirmed, and releases what was held.
-// Each alert is handed out at most once per RetryAfter.
+// handOut marks n as pending and either sends it now or holds it for the end
+// of the quiet hours.
+func (s scope) handOut(kind string, n *store.Notice) {
+	ev, now := s.ev, s.ev.in.Now
+	n.Cooled, n.Pending = false, true
+	if ev.quiet && LevelOf(kind) != config.LevelCritical {
+		n.Held = true
+	} else {
+		n.Tried = now
+		ev.events = append(ev.events, s.event(kind, n.Key, n.Msg, n.At, now))
+	}
+	if *s.sent == nil {
+		*s.sent = map[string]time.Time{}
+	}
+	(*s.sent)[kind] = now
+}
+
+// retry hands out again what was not confirmed, releases what the cooldown
+// or the quiet hours held back. Each alert is handed out at most once per RetryAfter.
 func (s scope) retry() {
 	ev, now := s.ev, s.ev.in.Now
 	for _, kind := range sortedKinds(*s.notified) {
 		n := (*s.notified)[kind]
-		if !n.Pending || !ev.allowed(kind) {
+		if !ev.allowed(kind) {
+			continue
+		}
+		if n.Cooled {
+			if last, ok := (*s.sent)[kind]; ok && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind) {
+				continue
+			}
+			// The cooldown is over and the condition still holds: announce it now.
+			s.handOut(kind, &n)
+			s.put(kind, n)
+			if s.account != "" {
+				if _, ok := (*s.notified)[recordUnhealthy]; !ok {
+					s.put(recordUnhealthy, store.Notice{At: now, Key: kind, Held: n.Held})
+				}
+				s.del(Recovered)
+			}
+			continue
+		}
+		if !n.Pending {
 			continue
 		}
 		heldBack := ev.quiet && LevelOf(kind) != config.LevelCritical
@@ -161,7 +195,11 @@ func (s scope) retry() {
 			}
 			n.Held, n.Tried = false, now
 			s.put(kind, n)
-			ev.held = append(ev.held, s.event(kind, n.Key, n.Msg, now))
+			if u, ok := (*s.notified)[recordUnhealthy]; ok && u.Key == kind && u.Held {
+				u.Held = false
+				s.put(recordUnhealthy, u)
+			}
+			ev.held = append(ev.held, s.event(kind, n.Key, n.Msg, n.At, now))
 			continue
 		}
 		if now.Sub(n.Tried) < RetryAfter {
@@ -177,7 +215,7 @@ func (s scope) retry() {
 		}
 		n.Tried = now
 		s.put(kind, n)
-		ev.events = append(ev.events, s.event(kind, n.Key, n.Msg, now))
+		ev.events = append(ev.events, s.event(kind, n.Key, n.Msg, n.At, now))
 	}
 }
 
@@ -212,9 +250,9 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		get, put, del := s.get, s.put, s.del
 		raise := func(kind, key, msg string) { // an announced problem starts or continues an episode
 			del(Recovered)
-			cooled := s.announce(kind, key, msg)
+			cooled, held := s.announce(kind, key, msg)
 			if _, ok := get(recordUnhealthy); !ok && !cooled {
-				put(recordUnhealthy, store.Notice{At: in.Now, Key: kind})
+				put(recordUnhealthy, store.Notice{At: in.Now, Key: kind, Held: held})
 			}
 		}
 
@@ -288,13 +326,13 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		if as.Status == store.StatusOK && !stale && !acct.Paused && !spiking {
 			if n, ok := get(recordUnhealthy); ok {
 				del(recordUnhealthy)
-				s.announce(Recovered, n.Key, "is working again")
+				_, _ = s.announce(Recovered, n.Key, "is working again")
 			}
 		}
 
 		if as.Status == store.StatusPeriodEnded {
 			if _, ok := get(PeriodEnded); !ok {
-				s.announce(PeriodEnded, "", "the run period has ended; no more rounds will run")
+				_, _ = s.announce(PeriodEnded, "", "the run period has ended; no more rounds will run")
 			}
 		} else {
 			del(PeriodEnded)
@@ -315,9 +353,9 @@ func Evaluate(in Input) (events []Event, changed bool) {
 				case had && prevDate != acct.SecretExpires:
 					// The expiry date changed: the secret was renewed. Start over.
 					del(SecretExpiring)
-					s.announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
+					_, _ = s.announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
 				case !had || level < prevLevel:
-					s.announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
+					_, _ = s.announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
 				}
 			}
 		}
@@ -330,7 +368,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	g := scope{ev: ev, notified: &in.State.Notified, sent: &in.State.LastSent}
 	if running >= 2 && failing == running {
 		if _, ok := g.get(AllFailing); !ok {
-			g.announce(AllFailing, "", fmt.Sprintf("all %d accounts that are running are failing; check the network, the proxy and the Microsoft 365 service status first", running))
+			_, _ = g.announce(AllFailing, "", fmt.Sprintf("all %d accounts that are running are failing; check the network, the proxy and the Microsoft 365 service status first", running))
 		}
 	} else {
 		g.del(AllFailing)
@@ -390,12 +428,18 @@ func MarkDelivered(st *store.State, account, kind string, tried time.Time) bool 
 // MarkEvent is MarkDelivered for a whole event: a digest settles every
 // alert it carried.
 func MarkEvent(st *store.State, ev Event) bool {
+	attempt := func(e Event) time.Time {
+		if e.Attempt.IsZero() {
+			return e.Time
+		}
+		return e.Attempt
+	}
 	if ev.Event != Digest {
-		return MarkDelivered(st, ev.Account, ev.Event, ev.Time)
+		return MarkDelivered(st, ev.Account, ev.Event, attempt(ev))
 	}
 	changed := false
 	for _, it := range ev.Items {
-		if MarkDelivered(st, it.Account, it.Event, it.Time) {
+		if MarkDelivered(st, it.Account, it.Event, attempt(it)) {
 			changed = true
 		}
 	}

@@ -48,7 +48,7 @@ func (r *rig) evalNoAck() []Event {
 func (r *rig) eval() []Event {
 	evs := r.evalNoAck()
 	for _, e := range evs {
-		MarkDelivered(r.st, e.Account, e.Event, e.Time)
+		MarkEvent(r.st, e)
 	}
 	return evs
 }

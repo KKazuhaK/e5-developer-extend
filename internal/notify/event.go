@@ -45,6 +45,9 @@ type Event struct {
 	Message string    // what happened and what to do, without secrets
 	Time    time.Time // when the condition was detected
 
+	// Attempt identifies this hand-out of the alert, for MarkEvent; Time stays
+	// the moment the condition was first detected. Zero means Time.
+	Attempt time.Time
 	// Tenant is the tenant ID of the account; only custom templates can show it.
 	Tenant string
 	// Origin is, for Recovered, the event that ended (failure_spike, ...).

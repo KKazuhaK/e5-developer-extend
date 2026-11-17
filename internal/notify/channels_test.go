@@ -160,7 +160,7 @@ func TestWeCom(t *testing.T) {
 	if b["msgtype"] != "markdown" {
 		t.Errorf("body: %v", b)
 	}
-	mustContain(t, "markdown", md, "**[严重] 需要处理**", "`demo`")
+	mustContain(t, "markdown", md, "**[严重] 需要处理**", " · demo")
 	mustNotContain(t, "body", string(r.Body), "QUERYSECRET")
 }
 
@@ -290,7 +290,7 @@ func TestDiscordAndSlack(t *testing.T) {
 		t.Fatal(err)
 	}
 	b = decode(t, f2.only(t).Body)
-	mustContain(t, "text", b["text"].(string), "*[Info] Run period ended*", "`demo`")
+	mustContain(t, "text", b["text"].(string), "*[Info] Run period ended*", " · demo")
 	if b["mrkdwn"] != true {
 		t.Errorf("mrkdwn: %v", b)
 	}
