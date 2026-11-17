@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
@@ -708,10 +709,7 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 		c.Level, c.Detail = Warn, "the API catalog could not be read"
 		return c
 	}
-	category := make(map[string]string, len(apis))
-	for _, a := range apis {
-		category[a.ID] = a.Category
-	}
+	category := callstat.CategoryIndex(apis)
 	entries, err := store.New(d.DataDir).Read(store.Filter{Account: acct.Name, Since: d.now().Add(-failingWindow)})
 	if err != nil {
 		c.Level, c.Detail = OK, "the call log could not be read"
@@ -727,10 +725,10 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 	var order []string
 	for _, e := range entries {
 		cat, known := category[e.API]
-		if e.Event != "" || e.Round == "" || !known {
+		if !callstat.IsCall(e) || !known {
 			continue
 		}
-		missing := e.Class == string(graph.NotFound) || (e.Class == string(graph.ClientError) && e.Status == 400)
+		missing := callstat.IsMissing(e.Class, e.Status)
 		rs := rounds[cat]
 		if len(rs) == 0 {
 			order = append(order, cat)
@@ -744,10 +742,7 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 	}
 	// Only categories the account currently runs count: one switched off
 	// (for example by --apply) has old failures in the log but no problem.
-	enabled := map[string]bool{}
-	for _, c := range catalog.EffectiveCategories(apis, acct.Categories) {
-		enabled[strings.ToLower(c)] = true
-	}
+	enabled := callstat.EnabledCategories(apis, acct.Categories)
 	var parts []string
 	for _, cat := range order {
 		if !enabled[strings.ToLower(cat)] {
