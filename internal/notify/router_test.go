@@ -2,11 +2,17 @@ package notify
 
 import (
 	"context"
+	"errors"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 func slackTarget(id, url string, c config.Channel) Target {
@@ -141,5 +147,59 @@ func TestRouterRecordsEachResult(t *testing.T) {
 	defer mu.Unlock()
 	if len(got) != 2 || got["good"] != nil || got["bad"] == nil {
 		t.Errorf("recorded: %v", got)
+	}
+}
+
+func TestSplitDigestSettlesTheItemsOfThePartsThatArrived(t *testing.T) {
+	var mu sync.Mutex
+	n := 0
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		n++
+		fail := n == 2
+		mu.Unlock()
+		if fail {
+			w.WriteHeader(500)
+			return
+		}
+		_, _ = io.WriteString(w, `{"errcode":0}`)
+	}))
+	defer srv.Close()
+	r := &Router{Targets: func() ([]Target, error) {
+		return []Target{{Channel: config.Channel{ID: "wc", Type: config.ChannelWeCom}, Secrets: map[string]string{"url": srv.URL + "/send"}}}, nil
+	}, Configured: func() bool { return true }, Deliverer: testDeliverer(nil)}
+	r.Deliverer.HTTP = srv.Client()
+
+	ev := bigDigest(40)
+	for i := range ev.Items {
+		ev.Items[i].Attempt = fixedNow.Add(time.Duration(i) * time.Second)
+	}
+	err := r.Send(context.Background(), ev)
+	var pe *PartialError
+	if !errors.As(err, &pe) {
+		t.Fatalf("got %v, want a PartialError", err)
+	}
+	// Part 1 arrived, part 2 failed and nothing after it was tried.
+	if len(pe.Delivered) == 0 || len(pe.Delivered) >= 40 {
+		t.Fatalf("%d of 40 delivered", len(pe.Delivered))
+	}
+	for i, it := range pe.Delivered {
+		if it.Account != ev.Items[i].Account {
+			t.Errorf("delivered item %d is %s", i, it.Account)
+		}
+	}
+	if mu.Lock(); n != 2 {
+		t.Errorf("requests: %d", n)
+	}
+	mu.Unlock()
+
+	// Settling a digest of just those items touches only them.
+	st := store.NewState()
+	as := &store.AccountState{Notified: map[string]store.Notice{}}
+	st.Accounts[ev.Items[0].Account] = as
+	ok := ev.Items[0]
+	as.Notified[ok.Event] = store.Notice{Pending: true, Tried: ok.Attempt, Msg: "m"}
+	if !MarkEvent(st, Event{Event: Digest, Items: pe.Delivered[:1]}) || as.Notified[ok.Event].Pending {
+		t.Error("the delivered item was not settled")
 	}
 }

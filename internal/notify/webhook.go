@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -132,12 +133,7 @@ func doRequest(ctx context.Context, hc *http.Client, timeout time.Duration, r re
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	clean := func(s string) string {
-		for _, raw := range r.secret {
-			s = redact(s, raw)
-		}
-		return s
-	}
+	clean := func(s string) string { return redactSecrets(s, r.secret) }
 	req, err := http.NewRequestWithContext(ctx, r.method, r.url, bytes.NewReader(r.body))
 	if err != nil {
 		return &DeliveryError{msg: "invalid " + r.label + " address: " + clean(err.Error())}
@@ -180,8 +176,8 @@ func doRequest(ctx context.Context, hc *http.Client, timeout time.Duration, r re
 		// The reason the service gives (Telegram's "description", ...) is what
 		// tells a wrong chat id from a wrong token. It is redacted like any error.
 		msg := fmt.Sprintf("%s answered HTTP %d", r.label, s)
-		if snip := snippet(answer); snip != "" {
-			msg += ": " + clean(snip)
+		if snip := snippet(answer, clean); snip != "" {
+			msg += ": " + snip
 		}
 		return &DeliveryError{Status: s, msg: msg}
 	}
@@ -189,7 +185,7 @@ func doRequest(ctx context.Context, hc *http.Client, timeout time.Duration, r re
 
 // snippet is a short one-line excerpt of an error answer: the text of a JSON
 // description/message/error field when there is one, else the start of the body.
-func snippet(body []byte) string {
+func snippet(body []byte, clean func(string) string) string {
 	var m map[string]any
 	text := strings.TrimSpace(string(body))
 	if json.Unmarshal(body, &m) == nil {
@@ -203,7 +199,8 @@ func snippet(body []byte) string {
 	if strings.HasPrefix(text, "<") { // an HTML error page says nothing useful
 		return ""
 	}
-	return shorten(text)
+	// Redact first, then cut: a secret that straddles the cut must not survive as a fragment.
+	return shorten(clean(text))
 }
 
 // transportReason strips the request URL that net/http puts into its errors.
@@ -218,21 +215,46 @@ func transportReason(err error) string {
 	return err.Error()
 }
 
-// redact removes every part of the address from s: the whole address, its
-// host and its path and query, any of which may identify or authorize it.
-func redact(s, raw string) string {
-	parts := []string{raw}
-	if u, err := url.Parse(raw); err == nil {
-		parts = append(parts, u.Host, u.Hostname(), u.RawQuery, u.RawPath, u.Path, u.User.String())
-		// Tokens sit in single path segments and query values; they may be echoed alone.
-		parts = append(parts, strings.Split(u.Path, "/")...)
-		for _, vs := range u.Query() {
-			parts = append(parts, vs...)
+// minURLPart is the shortest path segment or query value that is redacted on
+// its own just because it is part of an address: shorter ones would also
+// match ordinary words ("bad" must not become "b<webhook>d"). A value that is
+// itself a configured secret is always redacted, whatever its length.
+const minURLPart = 8
+
+// redactSecrets removes every secret from s. Each entry of secrets is either a
+// plain secret value (token, password, sign secret), always redacted, or an
+// address (scheme://host/...), of which the whole text, the host, the path,
+// the query and any longer path segment or query value are redacted.
+// Longer parts go first, so a part never breaks a longer one in half.
+func redactSecrets(s string, secrets []string) string {
+	var parts []string
+	for _, raw := range secrets {
+		if raw == "" {
+			continue
 		}
-		if pw, ok := u.User.Password(); ok {
+		parts = append(parts, raw)
+		u, err := url.Parse(raw)
+		if err != nil || u.Scheme == "" || u.Host == "" {
+			continue
+		}
+		parts = append(parts, u.Host, u.Hostname(), u.RawQuery, u.RawPath, u.Path, u.User.String())
+		for _, seg := range strings.Split(u.Path, "/") {
+			if len(seg) >= minURLPart {
+				parts = append(parts, seg)
+			}
+		}
+		for _, vs := range u.Query() {
+			for _, v := range vs {
+				if len(v) >= minURLPart {
+					parts = append(parts, v)
+				}
+			}
+		}
+		if pw, ok := u.User.Password(); ok && len(pw) >= minURLPart {
 			parts = append(parts, pw)
 		}
 	}
+	slices.SortFunc(parts, func(a, b string) int { return len(b) - len(a) })
 	for _, p := range parts {
 		if p != "" && p != "/" {
 			s = strings.ReplaceAll(s, p, "<webhook>")

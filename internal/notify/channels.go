@@ -115,9 +115,25 @@ func (l sizeLimit) fits(body string) bool {
 // that is too long for the service is split (a digest at item boundaries) or
 // shortened before it is rendered, so what is sent is always well-formed.
 func (d *Deliverer) Deliver(ctx context.Context, t Target, ev Event) error {
+	_, err := d.DeliverParts(ctx, t, ev)
+	return err
+}
+
+// leaves are the single alerts an event stands for: the items of a digest, or the event itself.
+func leaves(ev Event) []Event {
+	if ev.Event == Digest {
+		return ev.Items
+	}
+	return []Event{ev}
+}
+
+// DeliverParts is Deliver that also reports which alerts reached the
+// channel: when a split digest fails midway, the parts sent before the
+// failure are not lost.
+func (d *Deliverer) DeliverParts(ctx context.Context, t Target, ev Event) (sent []Event, err error) {
 	c := t.Channel
 	if t.Err != nil {
-		return fmt.Errorf("channel %s: %w", c.ID, t.Err)
+		return nil, fmt.Errorf("channel %s: %w", c.ID, t.Err)
 	}
 	lang := Language(c.Language, d.DefaultLanguage)
 	render := func(e Event) (Rendered, error) {
@@ -132,7 +148,7 @@ func (d *Deliverer) Deliver(ctx context.Context, t Target, ev Event) error {
 	}
 	parts, err := fitEvent(ev, limits[c.Type], render)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	backoff := d.Backoff
 	if backoff == nil {
@@ -142,16 +158,17 @@ func (d *Deliverer) Deliver(ctx context.Context, t Target, ev Event) error {
 	for _, p := range parts {
 		rendered, err := render(p)
 		if err != nil {
-			return err
+			return sent, err
 		}
 		err = withRetry(ctx, backoff, d.Log, label, p.Event, func() error {
 			return d.send(ctx, t, p, lang, rendered)
 		})
 		if err != nil {
-			return err
+			return sent, err
 		}
+		sent = append(sent, leaves(p)...)
 	}
-	return nil
+	return sent, nil
 }
 
 // fitEvent returns the events to send so that each renders within limit. A

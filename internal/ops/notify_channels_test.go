@@ -492,3 +492,44 @@ func TestMigratedHTTPWebhookKeepsWorkingAfterEdits(t *testing.T) {
 		t.Error("allow_http set for an https webhook")
 	}
 }
+
+func TestAllowHTTPCanBeClearedAndEndsWithAnHTTPSAddress(t *testing.T) {
+	setup := func() *testEnv {
+		e := newTestEnv(t)
+		cfg := config.Default()
+		cfg.Notify.WebhookURL = "http://nas.lan/hook/PLAINTOKEN"
+		_ = cfg.Save(filepath.Join(e.cfgDir, "config.toml"))
+		in, _ := e.GetChannel("webhook")
+		mustSave(t, e, in, false)
+		return e
+	}
+	flag := func(e *testEnv) bool {
+		c, _, _ := e.LoadConfigOrDefault()
+		return c.Notify.Channels[0].AllowHTTP
+	}
+	// Cleared explicitly.
+	e := setup()
+	if !flag(e) {
+		t.Fatal("not set by the migration")
+	}
+	in, _ := e.GetChannel("webhook")
+	in.AllowHTTP = false
+	mustSave(t, e, in, false)
+	if flag(e) {
+		t.Error("not cleared")
+	}
+	// Cleared by setting an https address.
+	e = setup()
+	in, _ = e.GetChannel("webhook")
+	in.Secrets = map[string]string{"url": "https://h.example/new"}
+	mustSave(t, e, in, false)
+	if flag(e) {
+		t.Error("an https address did not clear allow_http")
+	}
+	// A new http address is still refused once the flag is gone.
+	in, _ = e.GetChannel("webhook")
+	in.Secrets = map[string]string{"url": "http://nas.lan/x"}
+	if bad, _ := e.SaveChannel(context.Background(), in, false); len(bad) == 0 {
+		t.Error("http accepted without the exception")
+	}
+}

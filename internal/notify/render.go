@@ -176,6 +176,14 @@ var mdEscaper = strings.NewReplacer(
 	"#", `\#`, ">", `\>`, "<", `\<`, "~", `\~`, "|", `\|`, "!", `\!`, "&", `\&`,
 )
 
+// mdSafeReplacer is for WeCom and DingTalk, whose Markdown does not honour
+// backslash escapes reliably: instead of escaping, whatever could start a
+// link, formatting, a heading or a mention is replaced by a look-alike.
+var mdSafeReplacer = strings.NewReplacer(
+	"<", "\u2039", ">", "\u203a", "[", "\uff3b", "]", "\uff3d", "*", "\uff0a", "_", "\uff3f", "`", "'",
+	"#", "\uff03", "~", "\uff5e", "|", "\u00a6", "@", "\uff20",
+)
+
 // slackEscaper is what Slack asks for in text: & < > only (they start links and mentions).
 var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
 
@@ -183,6 +191,8 @@ var funcs = template.FuncMap{
 	// md escapes text for Markdown; slack escapes it for Slack mrkdwn.
 	"md":    func(s string) string { return mdEscaper.Replace(s) },
 	"slack": func(s string) string { return slackEscaper.Replace(s) },
+	// mdsafe neutralises Markdown by look-alike substitution (WeCom, DingTalk).
+	"mdsafe": func(s string) string { return mdSafeReplacer.Replace(s) },
 	// json encodes a value as a JSON literal, for bodies written by hand.
 	"json": func(v any) (string, error) { b, err := json.Marshal(v); return string(b), err },
 	// trunc cuts s to at most n characters.

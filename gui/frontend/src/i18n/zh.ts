@@ -643,6 +643,8 @@ export const zh = {
   "alerts.warn.email_plain": "邮件连接没有加密",
   "alerts.warn.legacy": "这是旧版的 Webhook；保存一次即可迁移到新格式",
   "alerts.warn.allow_http": "这个 Webhook 允许使用 http（旧设置保留的例外），令牌会明文传输",
+  "alerts.allowHttp": "允许 http 地址（旧设置保留的例外）",
+  "alerts.allowHttpHint": "关掉后地址必须是 https；也可以直接换成 https 地址，这个例外会自动取消。",
   "alerts.err.id": "只能用小写字母、数字和 -，最长 32 位",
   "alerts.err.idTaken": "已有同名渠道",
   "alerts.err.required": "必填",

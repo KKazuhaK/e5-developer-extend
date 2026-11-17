@@ -94,12 +94,14 @@ func (s scope) put(kind string, n store.Notice) {
 }
 func (s scope) del(kind string) {
 	if n, ok := (*s.notified)[kind]; ok {
+		delete(*s.notified, kind)
 		// A problem that was only ever held (never sent) and has cleared leaves
 		// nothing to recover from: no "recovered" for something nobody heard of.
-		if u, has := (*s.notified)[recordUnhealthy]; has && n.Held && u.Held && u.Key == kind {
+		// The record says (Held) that nothing of this episode was announced yet;
+		// a held problem that is still waiting will start the episode again when it is sent.
+		if u, has := (*s.notified)[recordUnhealthy]; has && n.Held && u.Held {
 			delete(*s.notified, recordUnhealthy)
 		}
-		delete(*s.notified, kind)
 		s.ev.changed = true
 	}
 }
@@ -161,6 +163,21 @@ func (s scope) handOut(kind string, n *store.Notice) {
 	(*s.sent)[kind] = now
 }
 
+// beginEpisode records a problem so that its end is announced too. held says
+// the problem is only waiting for the quiet hours to end; the record keeps
+// Held until a problem of the episode is really announced.
+func (s scope) beginEpisode(kind string, held bool) {
+	u, ok := (*s.notified)[recordUnhealthy]
+	switch {
+	case !ok:
+		s.put(recordUnhealthy, store.Notice{At: s.ev.in.Now, Key: kind, Held: held})
+	case u.Held && !held:
+		u.Held = false
+		s.put(recordUnhealthy, u)
+	}
+	s.del(Recovered)
+}
+
 // retry hands out again what was not confirmed, releases what the cooldown
 // or the quiet hours held back. Each alert is handed out at most once per RetryAfter.
 func (s scope) retry() {
@@ -178,10 +195,7 @@ func (s scope) retry() {
 			s.handOut(kind, &n)
 			s.put(kind, n)
 			if s.account != "" {
-				if _, ok := (*s.notified)[recordUnhealthy]; !ok {
-					s.put(recordUnhealthy, store.Notice{At: now, Key: kind, Held: n.Held})
-				}
-				s.del(Recovered)
+				s.beginEpisode(kind, n.Held)
 			}
 			continue
 		}
@@ -195,9 +209,8 @@ func (s scope) retry() {
 			}
 			n.Held, n.Tried = false, now
 			s.put(kind, n)
-			if u, ok := (*s.notified)[recordUnhealthy]; ok && u.Key == kind && u.Held {
-				u.Held = false
-				s.put(recordUnhealthy, u)
+			if slices.Contains(problemKinds, kind) {
+				s.beginEpisode(kind, false) // it may have been dropped while this was the only held problem
 			}
 			ev.held = append(ev.held, s.event(kind, n.Key, n.Msg, n.At, now))
 			continue
@@ -247,12 +260,12 @@ func Evaluate(in Input) (events []Event, changed bool) {
 			continue
 		}
 		s := scope{ev: ev, account: acct.Name, tenant: acct.Tenant, notified: &as.Notified, sent: &as.LastSent}
-		get, put, del := s.get, s.put, s.del
+		get, del := s.get, s.del
 		raise := func(kind, key, msg string) { // an announced problem starts or continues an episode
 			del(Recovered)
 			cooled, held := s.announce(kind, key, msg)
-			if _, ok := get(recordUnhealthy); !ok && !cooled {
-				put(recordUnhealthy, store.Notice{At: in.Now, Key: kind, Held: held})
+			if !cooled {
+				s.beginEpisode(kind, held)
 			}
 		}
 
@@ -386,6 +399,9 @@ func Evaluate(in Input) (events []Event, changed bool) {
 	}
 	return ev.events, ev.changed
 }
+
+// problemKinds are the events that start an episode ended by "recovered".
+var problemKinds = []string{NeedsAttention, AutoPaused, Stale, FailureSpike}
 
 func sortedKinds(m map[string]store.Notice) []string {
 	k := make([]string, 0, len(m))

@@ -165,7 +165,7 @@ export interface ChannelInput {
   server: string;
   topic: string;
   format: "" | "json" | "template";
-  /** Explicit exceptions kept from earlier setups (webhook over http, mail password without encryption); shown, not offered. */
+  /** Exceptions kept from earlier setups: a webhook that may use http (the app can switch it off, never on) and a mail password sent without encryption (config.toml only). */
   allowHttp: boolean;
   allowPlainAuth: boolean;
   /** New secret values by field; a missing or empty one keeps what is stored. */

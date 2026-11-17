@@ -426,11 +426,18 @@ func (e *Engine) evalNotify() {
 	})
 	for _, ev := range evs {
 		n.Send(ev, func(err error) {
-			if err != nil {
+			settle := ev
+			var pe *notify.PartialError
+			switch {
+			case err == nil:
+			case errors.As(err, &pe) && len(pe.Delivered) > 0:
+				// Some alerts of a split digest arrived: settle those, retry the rest.
+				settle = notify.Event{Event: notify.Digest, Items: pe.Delivered}
+			default:
 				return
 			}
 			e.withLock(func() {
-				if e.state != nil && notify.MarkEvent(e.state, ev) {
+				if e.state != nil && notify.MarkEvent(e.state, settle) {
 					e.saveLocked()
 				}
 			})

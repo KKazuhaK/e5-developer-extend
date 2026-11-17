@@ -452,6 +452,10 @@ func validateChannel(in ChannelInput) []ValidationError {
 // problems with the values, nothing being written then.
 func (o *Ops) SaveChannel(ctx context.Context, in ChannelInput, create bool) ([]ValidationError, error) {
 	in.ID = strings.TrimSpace(in.ID)
+	// Giving the webhook an https address ends the need for the http exception.
+	if u := strings.TrimSpace(in.Secrets["url"]); u != "" && strings.HasPrefix(strings.ToLower(u), "https://") {
+		in.AllowHTTP = false
+	}
 	if bad := validateChannel(in); len(bad) > 0 {
 		return bad, nil
 	}
@@ -870,8 +874,8 @@ func firstLine(s string) string {
 	if i := strings.IndexByte(s, '\n'); i >= 0 {
 		s = s[:i]
 	}
-	if len(s) > 300 {
-		s = s[:300]
+	if r := []rune(s); len(r) > 300 {
+		s = string(r[:300])
 	}
 	return s
 }

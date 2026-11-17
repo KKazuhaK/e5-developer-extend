@@ -121,6 +121,7 @@ type channelFlags struct {
 	server, topic, format, preset         string
 	secrets, clearSecrets                 []string
 	clearTemplate                         bool
+	allowHTTP                             bool
 }
 
 func (f *channelFlags) bind(cmd *cobra.Command, adding bool) {
@@ -147,6 +148,7 @@ func (f *channelFlags) bind(cmd *cobra.Command, adding bool) {
 	fl.StringVar(&f.format, "format", "", "webhook: json (default) or template")
 	if !adding {
 		fl.StringSliceVar(&f.secrets, "secret", nil, "enter this secret field again (read without echo); repeatable")
+		fl.BoolVar(&f.allowHTTP, "allow-http", true, "webhook: --allow-http=false removes the exception that lets its address be http")
 		fl.StringSliceVar(&f.clearSecrets, "clear-secret", nil, "remove this optional secret field; repeatable")
 	}
 }
@@ -193,6 +195,12 @@ func (f *channelFlags) apply(cmd *cobra.Command, in *ops.ChannelInput) error {
 	}
 	if changed("to") {
 		in.To = f.to
+	}
+	if changed("allow-http") {
+		if f.allowHTTP {
+			return errors.New("--allow-http can only be turned off (--allow-http=false); use an https address instead")
+		}
+		in.AllowHTTP = false
 	}
 	if f.clearTemplate {
 		in.Template = ""

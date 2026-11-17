@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Field, Spinner, fieldAria } from "@/components/common";
 import { formatRelative } from "@/lib/time";
@@ -426,6 +427,16 @@ function ChannelDialog({
                 );
               })}
             </div>
+
+            {type === "webhook" && view?.allowHttp && (
+              <label className="flex cursor-pointer items-start gap-2.5 text-[13px]">
+                <Switch checked={c.allowHttp} onCheckedChange={(v) => upd({ allowHttp: v })} />
+                <span>
+                  {t("alerts.allowHttp")}
+                  <span className="block text-xs text-muted-foreground">{t("alerts.allowHttpHint")}</span>
+                </span>
+              </label>
+            )}
 
             <div className="grid gap-4">
               {SECRET_FIELDS[type].map((f) => {

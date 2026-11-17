@@ -298,3 +298,69 @@ func TestRetriedAndHeldAlertsKeepTheirDetectionTime(t *testing.T) {
 		t.Error("retry not settled")
 	}
 }
+
+func TestHeldSpikeThenAnnouncedProblemThenFixedGivesOneRecovered(t *testing.T) {
+	r := newSpikeRig()
+	r.cfg.QuietHours = "23:00-08:00"
+	r.now = time.Date(2026, 11, 17, 23, 30, 0, 0, time.UTC)
+	r.as.LastSuccess = r.now
+	r.calls["main"] = callRounds("main", "user.me", "server_error", 500, 3)
+	if evs := r.eval(); len(evs) != 0 { // the spike (a warning) is held
+		t.Fatalf("night: %v", kinds(evs))
+	}
+	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "login required"
+	if k := kinds(r.eval()); k != "needs_attention" { // critical: sent; the held spike is dropped as the status changes
+		t.Fatalf("needs_attention: %q", k)
+	}
+	r.now = r.now.Add(time.Hour)
+	r.as.Status, r.as.Reason = store.StatusOK, ""
+	r.calls["main"] = callRounds("main", "user.me", "ok", 200, 3)
+	r.as.LastSuccess = r.now
+	total := 0
+	for i := 0; i < 12; i++ { // through the night and into the day
+		for _, e := range r.eval() {
+			if e.Event == Recovered {
+				total++
+			}
+		}
+		r.now = r.now.Add(time.Hour)
+		r.as.LastSuccess = r.now
+	}
+	if total != 1 {
+		t.Fatalf("recovered %d times, want exactly one", total)
+	}
+}
+
+func TestTwoHeldProblemsOneClearsTheOtherIsReleasedAndRecovers(t *testing.T) {
+	r := newSpikeRig()
+	r.cfg.QuietHours = "23:00-08:00"
+	r.now = time.Date(2026, 11, 17, 23, 30, 0, 0, time.UTC)
+	r.as.LastSuccess = r.now.Add(-100 * time.Hour)                          // A: stale
+	r.calls["main"] = callRounds("main", "user.me", "server_error", 500, 3) // B: failure_spike
+	if evs := r.eval(); len(evs) != 0 {
+		t.Fatalf("night: %v", kinds(evs))
+	}
+	if !r.as.Notified[Stale].Held || !r.as.Notified[FailureSpike].Held {
+		t.Fatalf("not both held: %+v", r.as.Notified)
+	}
+	// A clears during the night.
+	r.now = time.Date(2026, 11, 18, 1, 0, 0, 0, time.UTC)
+	r.as.LastSuccess = r.now
+	if evs := r.eval(); len(evs) != 0 {
+		t.Fatalf("A cleared: %v", kinds(evs))
+	}
+	// Morning: B is released.
+	r.now = time.Date(2026, 11, 18, 8, 0, 0, 0, time.UTC)
+	r.as.LastSuccess = r.now
+	if k := kinds(r.eval()); k != "failure_spike" {
+		t.Fatalf("morning: %q", k)
+	}
+	// B ends: its recovery is announced.
+	r.calls["main"] = callRounds("main", "user.me", "ok", 200, 3)
+	r.now = r.now.Add(time.Hour)
+	r.as.LastSuccess = r.now
+	evs := r.eval()
+	if kinds(evs) != "recovered" || evs[0].Origin != FailureSpike {
+		t.Fatalf("recovery of B: %+v", evs)
+	}
+}

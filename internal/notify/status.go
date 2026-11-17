@@ -91,8 +91,8 @@ func RecordStatus(dir, id string, err error) {
 			if i := strings.IndexByte(e, '\n'); i >= 0 {
 				e = e[:i]
 			}
-			if len(e) > 300 {
-				e = e[:300]
+			if r := []rune(e); len(r) > 300 { // cut by characters, never in the middle of one
+				e = string(r[:300])
 			}
 			r.Error = e
 		}

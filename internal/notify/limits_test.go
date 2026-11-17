@@ -127,7 +127,7 @@ func TestOneVeryLongMessageIsShortenedBeforeEscaping(t *testing.T) {
 func TestUntrustedTextIsEscapedPerFormat(t *testing.T) {
 	nasty := SampleEvent(NeedsAttention, fixedNow)
 	nasty.Account = "<!channel>"
-	nasty.Message = "<url|x> *bold* &amp; _it_ `c` [l](u)"
+	nasty.Message = "<url|x> *bold* &amp; _it_ `c` [l](u) @all"
 	d := NewData(nasty, "en", "<!here>", nil)
 	d.Time = "<!everyone>"
 	d.Hint = "<!here> *h*"
@@ -150,7 +150,14 @@ func TestUntrustedTextIsEscapedPerFormat(t *testing.T) {
 	if err := wellFormedHTML(tgr.Body); err != nil {
 		t.Errorf("telegram: %v\n%s", err, tgr.Body)
 	}
-	for _, typ := range []string{"wecom", "dingtalk", "discord", "serverchan"} {
+	for _, typ := range []string{"wecom", "dingtalk"} {
+		r := check(typ, "<!channel>", "<url|x>", "*bold*", "[l](u)", "`c`", "<!here>", "@all", `\`)
+		if strings.Contains(r.Body, "<") || strings.Contains(r.Body, "[l]") || strings.Contains(r.Body, "**bold") {
+			t.Errorf("%s: markup survives:\n%s", typ, r.Body)
+		}
+		mustContain(t, typ, r.Body, "\u2039!channel\u203a", "\uff0abold\uff0a", "\uff20")
+	}
+	for _, typ := range []string{"discord", "serverchan"} {
 		r := check(typ, "<!channel>", "<url|x>", "*bold*", "[l](u)", "`c`", "<!here>")
 		mustContain(t, typ, r.Body, `\*bold\*`, `\<url\|x\>`, `\&amp;`)
 	}

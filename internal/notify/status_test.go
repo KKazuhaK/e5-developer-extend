@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
@@ -65,5 +67,14 @@ func TestStatusWaitsForAnotherProcessHoldingTheLock(t *testing.T) {
 	}
 	if _, ok := ReadStatus(dir)["a"]; !ok {
 		t.Error("lost")
+	}
+}
+
+func TestStatusErrorIsCutByCharacters(t *testing.T) {
+	dir := t.TempDir()
+	RecordStatus(dir, "c", errors.New(strings.Repeat("错", 400)))
+	e := ReadStatus(dir)["c"].Error
+	if !utf8.ValidString(e) || utf8.RuneCountInString(e) != 300 {
+		t.Errorf("%d runes, valid=%v", utf8.RuneCountInString(e), utf8.ValidString(e))
 	}
 }

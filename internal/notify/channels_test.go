@@ -570,17 +570,33 @@ func TestClientErrorsShowTheServicesReasonWithoutSecrets(t *testing.T) {
 		t.Fatalf("got %v", err)
 	}
 	assertNoSecret(t, err.Error(), f.URL)
-	// A body that echoes the secret is redacted, even a very short one.
+	// A configured secret is redacted whatever its length ...
 	f2 := newFake(t, 401, `{"message":"bad key zq in request"}`)
-	tg2 := Target{Channel: config.Channel{ID: "sl", Type: config.ChannelSlack}, Secrets: map[string]string{"url": f2.URL + "/zq"}}
+	tg2 := Target{Channel: config.Channel{ID: "tg", Type: config.ChannelTelegram, ChatID: "1", APIBase: f2.URL}, Secrets: map[string]string{"bot_token": "zq"}}
 	err = testDeliverer(f2).Deliver(context.Background(), tg2, sampleEv(Test))
 	if err == nil || strings.Contains(err.Error(), "zq") {
 		t.Fatalf("short secret leaked: %v", err)
 	}
+	// ... but a short path segment of an address is not, so ordinary words survive.
+	f4 := newFake(t, 401, `{"message":"bad request"}`)
+	tg4 := Target{Channel: config.Channel{ID: "sl", Type: config.ChannelSlack}, Secrets: map[string]string{"url": f4.URL + "/ad"}}
+	err = testDeliverer(f4).Deliver(context.Background(), tg4, sampleEv(Test))
+	if err == nil || !strings.Contains(err.Error(), "bad request") {
+		t.Fatalf("a word was mangled: %v", err)
+	}
+	// A secret that straddles the cut of the snippet does not leave a fragment behind.
+	token := "SUPERSECRETTOKEN-0123456789"
+	long := strings.Repeat("x", 100) + token + strings.Repeat("y", 50)
+	f5 := newFake(t, 400, `{"description":"`+long+`"}`)
+	tg5 := Target{Channel: config.Channel{ID: "tg", Type: config.ChannelTelegram, ChatID: "1", APIBase: f5.URL}, Secrets: map[string]string{"bot_token": token}}
+	err = testDeliverer(f5).Deliver(context.Background(), tg5, sampleEv(Test))
+	if err == nil || strings.Contains(err.Error(), "SUPERSECRET") || strings.Contains(err.Error(), "0123456789") {
+		t.Fatalf("a fragment of the secret leaked: %v", err)
+	}
 	// An HTML error page is not echoed.
 	f3 := newFake(t, 403, `<html><body>Forbidden</body></html>`)
-	tg2.Secrets["url"] = f3.URL + "/x"
-	if err = testDeliverer(f3).Deliver(context.Background(), tg2, sampleEv(Test)); err == nil || strings.Contains(err.Error(), "<") {
+	tg4.Secrets["url"] = f3.URL + "/x"
+	if err = testDeliverer(f3).Deliver(context.Background(), tg4, sampleEv(Test)); err == nil || strings.Contains(err.Error(), "<") {
 		t.Fatalf("got %v", err)
 	}
 }

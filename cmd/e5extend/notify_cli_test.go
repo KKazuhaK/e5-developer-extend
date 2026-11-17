@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
@@ -358,7 +359,7 @@ func TestNotifyTestEventAndDigest(t *testing.T) {
 		t.Errorf("output: %s", out)
 	}
 	mu.Lock()
-	if len(bodies) != 1 || !strings.Contains(bodies[0], `Test\\] High failure rate`) || !strings.Contains(bodies[0], "75%") {
+	if len(bodies) != 1 || !strings.Contains(bodies[0], "［Test］ High failure rate") || !strings.Contains(bodies[0], "75%") {
 		t.Errorf("event sample: %v", bodies)
 	}
 	bodies = nil
@@ -397,5 +398,26 @@ func TestNotifyTestEventAndDigest(t *testing.T) {
 		if _, _, err := e.run("", append([]string{"notify", "test"}, args...)...); err == nil {
 			t.Errorf("%v accepted", args)
 		}
+	}
+}
+
+func TestChannelEditCanClearAllowHTTP(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv(vault.EnvMasterKey, vault.EncodeKey(make([]byte, 32)))
+	cfg := config.Default()
+	cfg.Notify.WebhookURL = "http://nas.lan/hook"
+	if err := cfg.Save(filepath.Join(e.cfgDir, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	e.mustRun("", "notify", "channel", "edit", "webhook", "--min-level", "warning")
+	if c, _ := e.loadCfg().Notify.FindChannel("webhook"); !c.AllowHTTP {
+		t.Fatal("migration did not keep the exception")
+	}
+	if _, _, err := e.run("", "notify", "channel", "edit", "webhook", "--allow-http=true"); err == nil {
+		t.Error("the exception can be turned on")
+	}
+	e.mustRun("", "notify", "channel", "edit", "webhook", "--allow-http=false")
+	if c, _ := e.loadCfg().Notify.FindChannel("webhook"); c.AllowHTTP {
+		t.Error("not cleared")
 	}
 }

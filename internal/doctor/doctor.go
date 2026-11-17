@@ -720,7 +720,7 @@ func checkNotify(d Deps, cfg *config.Config) Check {
 			add(name+": the mail connection is not encrypted", "set security to starttls or tls")
 		}
 		if ch.AllowHTTP {
-			add(name+": allow_http is set, so its address may be http and travel unencrypted", "use an https address and remove allow_http")
+			add(name+": allow_http is set, so its address may be http and travel unencrypted", "set an https address (that clears allow_http), or run: e5extend notify channel edit "+ch.ID+" --allow-http=false")
 		}
 		if ch.AllowPlainAuth {
 			add(name+": allow_plain_auth is set, so the password is sent without encryption", "set security to starttls or tls")
