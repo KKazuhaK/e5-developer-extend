@@ -505,6 +505,47 @@ func TestAccountChangesAskARunningEngineToReload(t *testing.T) {
 	expectReload("account add (client secret)")
 	e.mustRun("n3w-s3cr3t\n", "account", "set-secret", "svc")
 	expectReload("account set-secret")
-	e.mustRun("", "account", "remove", "svc", "--yes")
+	e.mustRun("", "account", "rename", "svc", "svc2")
+	expectReload("account rename")
+	e.mustRun("", "account", "remove", "svc2", "--yes")
 	expectReload("account remove")
+}
+
+func TestAccountRename(t *testing.T) {
+	e := newEnv(t)
+	e.mustRun("s3cr3t-value\n", "account", "add", "svc", "--auth", "client_secret",
+		"--tenant", "contoso.onmicrosoft.com", "--client-id", testGUID)
+	e.mustRun("", "account", "add", "other", "--auth", "device_code", "--tenant", "t", "--client-id", testGUID)
+
+	out := e.mustRun("", "account", "rename", "svc", "work")
+	if !strings.Contains(out, `renamed account "svc" to "work"`) {
+		t.Errorf("output: %s", out)
+	}
+	if _, ok := e.loadCfg().Find("svc"); ok {
+		t.Error("svc is still configured")
+	}
+	if _, ok := e.loadCfg().Find("work"); !ok {
+		t.Error("work is not configured")
+	}
+	key, _, err := vault.ResolveMasterKey("auto", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	v := vault.New(filepath.Join(e.dataDir, "vault"), func() ([]byte, error) { return key, nil })
+	if got, err := v.Get("secret/work"); err != nil || string(got) != "s3cr3t-value" {
+		t.Errorf("secret/work = %q, %v", got, err)
+	}
+	if _, err := v.Get("secret/svc"); !errors.Is(err, vault.ErrNotFound) {
+		t.Errorf("secret/svc: %v", err)
+	}
+	for _, args := range [][]string{
+		{"account", "rename", "work", "other"},
+		{"account", "rename", "work", "Bad Name"},
+		{"account", "rename", "ghost", "x"},
+		{"account", "rename", "work"},
+	} {
+		if _, _, err := e.run("", args...); err == nil {
+			t.Errorf("%v should fail", args)
+		}
+	}
 }

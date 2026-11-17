@@ -118,9 +118,10 @@ func (a *AccountState) hasActivity() bool {
 func (s *State) ApplyRenames(rs []Rename, configured func(string) bool) (applied, later []Rename) {
 	for _, r := range rs {
 		switch {
-		case r.From == r.To || configured(r.From):
+		case r.From == r.To:
 		case !configured(r.To):
 			later = append(later, r)
+		case configured(r.From):
 		default:
 			if have := s.Accounts[r.To]; have != nil && have.hasActivity() {
 				continue
