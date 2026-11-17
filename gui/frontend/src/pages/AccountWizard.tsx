@@ -12,7 +12,7 @@ import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, fieldAria } from "@/components/common";
-import { AUTH_KINDS, isInteractive, needsSecret, needsUsername, secretRequired, summarizeByCategory, validateAccountInput } from "@/lib/account";
+import { AUTH_KINDS, appIdentityName, isInteractive, needsSecret, needsUsername, secretRequired, summarizeByCategory, validateAccountInput } from "@/lib/account";
 import type { AccountErrorCode } from "@/lib/account";
 import { cn, errMsg } from "@/lib/utils";
 import { BrowserPrompt, DevicePrompt } from "@/components/signin";
@@ -25,12 +25,16 @@ const STEPS: DictKey[] = ["wizard.step1", "wizard.step2", "wizard.step3", "wizar
 
 const EMPTY: AccountInput = { name: "", auth: "device_code", tenant: "", clientId: "", username: "", categories: [], secretExpires: "" };
 
-export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; name?: string; startStep?: number; onClose: () => void }) {
+/**
+ * `from` (add only) starts the automatic setup with the app identity for the same user as the named account,
+ * which a Conditional Access sign-in frequency policy does not cut off.
+ */
+export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: Mode; name?: string; startStep?: number; from?: string; onClose: () => void }) {
   const { t } = useI18n();
   const { snapshot } = useApp();
   const [step, setStep] = useState(startStep ?? 1);
   const [input, setInput] = useState<AccountInput>(EMPTY);
-  const [loaded, setLoaded] = useState(mode === "add");
+  const [loaded, setLoaded] = useState(mode === "add" && !from);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [errors, setErrors] = useState<Partial<Record<string, AccountErrorCode>>>({});
   const [saving, setSaving] = useState(false);
@@ -110,6 +114,17 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
       })
       .catch((e) => setLoadError(errMsg(e)));
   }, [mode, name]);
+
+  useEffect(() => {
+    if (mode !== "add" || !from) return;
+    api.accounts
+      .get(from)
+      .then((a) => {
+        setInput((i) => ({ ...i, name: appIdentityName(from), auth: "client_secret", username: a.username }));
+        setLoaded(true);
+      })
+      .catch((e) => setLoadError(errMsg(e)));
+  }, [mode, from]);
 
   useEffect(() => {
     api.catalog

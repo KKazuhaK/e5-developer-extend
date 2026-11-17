@@ -15,7 +15,7 @@ export interface Route {
   /** account list filter to preselect */
   filter?: AccountFilter;
   /** open the wizard (add) or edit the named account */
-  wizard?: { mode: "add" } | { mode: "edit"; name: string; step?: number };
+  wizard?: { mode: "add"; from?: string } | { mode: "edit"; name: string; step?: number };
   /** bumps on every navigate so the same target can be opened twice */
   nonce: number;
 }

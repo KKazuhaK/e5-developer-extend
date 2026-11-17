@@ -63,3 +63,11 @@ export function summarizeByCategory(entries: { category: string; usable: boolean
   }
   return [...m].map(([category, v]) => ({ category, ...v }));
 }
+
+/** The engine's fixed wording for a refresh token ended by a Conditional Access sign-in frequency policy carries this code. */
+export const SIGN_IN_FREQUENCY_CODE = "AADSTS70043";
+export const isSignInFrequency = (reason: string | null | undefined): boolean => !!reason && reason.includes(SIGN_IN_FREQUENCY_CODE);
+/** The reason without the long command-line hint that follows its first "; ". */
+export const reasonHead = (reason: string): string => reason.split("; ")[0];
+/** Name suggested for the app identity that replaces `name`. */
+export const appIdentityName = (name: string): string => `${name}-app`.slice(0, 32);
