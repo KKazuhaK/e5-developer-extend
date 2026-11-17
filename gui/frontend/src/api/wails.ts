@@ -1,9 +1,9 @@
 import { Browser, Events } from "@wailsio/runtime";
 import {
-  AccountService, AppSetupService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService, SubscriptionService,
+  AccountService, AppSetupService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService, SubscriptionService, UpdateService,
 } from "../../bindings/github.com/KKazuhaK/e5-developer-extend/gui/services";
 import type { Api } from "./interface";
-import type { AppSetupEvent, AppSetupPlan, LoginEvent, RunDone, Snapshot, TenantSubscriptions } from "./types";
+import type { AppSetupEvent, AppSetupPlan, LoginEvent, RunDone, Snapshot, TenantSubscriptions, UpdateInfo, UpdateProgress, UpdateResult } from "./types";
 
 // The bindings are generated (gitignored); see README. Generated models are
 // classes whose structure matches ./types.ts, so results are cast. Go nil
@@ -137,6 +137,13 @@ export const wailsApi: Api = {
     },
     setExpires: (a, d) => SubscriptionService.SetExpires(a, d),
   },
+  update: {
+    info: async () => cast<UpdateInfo>(await UpdateService.Info()),
+    check: async (force) => cast<UpdateInfo>(await UpdateService.Check(force)),
+    install: () => UpdateService.Install(),
+    restart: () => UpdateService.Restart(),
+    onProgress: (cb) => Events.On("update:progress", (ev) => cb(normProgress(payload<UpdateProgress>(ev)))),
+  },
   catalog: {
     list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes) })),
     categories: async () => arr(await CatalogService.Categories()),
@@ -149,6 +156,9 @@ export const wailsApi: Api = {
     onNavigate: (cb) => Events.On("navigate", (ev) => cb(payload<{ page?: unknown }>(ev)?.page)),
   },
 };
+
+const normResult = (r: UpdateResult): UpdateResult => ({ ...r, steps: arr(r.steps), manual: arr(r.manual) });
+const normProgress = (p: UpdateProgress): UpdateProgress => ({ ...p, result: p.result ? normResult(p.result) : null });
 
 const planOf = (p: AppSetupPlan): AppSetupPlan => ({
   ...p, tags: arr(p.tags), permissions: arr(p.permissions), missing: arr(p.missing), candidates: arr(p.candidates), actions: arr(p.actions),

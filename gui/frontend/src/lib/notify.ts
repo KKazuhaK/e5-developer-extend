@@ -15,7 +15,7 @@ export const LEVELS: AlertLevel[] = ["info", "warning", "critical"];
 /** Events a channel can be limited to, in the order the UI lists them. */
 export const CHANNEL_EVENTS = [
   "needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
-  "subscription_expiring", "subscription_status", "subscription_renewed",
+  "subscription_expiring", "subscription_status", "subscription_renewed", "update_available",
 ] as const;
 /** What the preview can show: every event plus the test message and the quiet-hours summary. */
 export const PREVIEW_EVENTS = [...CHANNEL_EVENTS, "test", "digest"] as const;

@@ -38,6 +38,7 @@ export default function MockPanel() {
             </select>
           </label>
           <p className="text-muted-foreground">No accounts: reload with ?empty=1</p>
+          <p className="text-muted-foreground">Update banner: reload with ?update=available, downloading, error, manual or restart</p>
           <p className="text-muted-foreground">App setup: reload with ?appsetup=candidates, existing, noconsent, forbidden or blocked</p>
         </div>
       ) : (

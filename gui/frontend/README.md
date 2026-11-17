@@ -23,7 +23,8 @@ npm run build:mock                                 # same with the fake backend
 not-signed-in accounts, a log stream, doctor checks, a device-code login that emits `login:<name>` style
 events over time. A small flask button at the bottom left opens a panel to switch the engine host
 (`gui` / `service` / `none`) and slow down responses. URL switches: `?empty=1` (no accounts),
-`?host=none|service|gui`, `?slow=1`, `?recommend=full|nomailbox|noonedrive|error` (what the API step of the account wizard is told).
+`?host=none|service|gui`, `?slow=1`, `?recommend=full|nomailbox|noonedrive|error` (what the API step of the account wizard is told),
+`?update=none|available|downloading|error|manual|restart` (the update banner on the Overview and About pages: a new version, an upgrade stuck at 42%, a failed checksum, a Docker image that can only open the release page, an upgrade that asks for a restart).
 
 Without `VITE_MOCK` the mock code is not part of the bundle (the choice is made with a build-time constant).
 
