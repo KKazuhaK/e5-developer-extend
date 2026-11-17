@@ -4,7 +4,7 @@ import { validateSettings } from "./settings";
 import { PACES, PACE_IDS, type PaceId, applyDays, applyPace, detectDays, detectPace } from "./pace";
 
 const sched = (): Settings["schedule"] => ({
-  intervalMin: "40m", intervalMax: "2h", apisPerRoundMin: 3, apisPerRoundMax: 8, randomOrder: false,
+  intervalMin: "40m", intervalMax: "2h", apisPerRoundMin: 3, apisPerRoundMax: 8, randomOrder: false, autoPause: true,
   workDays: ["mon", "tue", "wed", "thu", "fri"], workStart: "09:00", workEnd: "18:00", periodStart: "2026-01-01", periodEnd: "2026-12-31",
 });
 

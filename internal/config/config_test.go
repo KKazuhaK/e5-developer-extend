@@ -21,7 +21,7 @@ func TestDefaultIsValid(t *testing.T) {
 		t.Fatalf("default config invalid: %v", err)
 	}
 	d := Default()
-	if len(d.Accounts) != 0 || d.Vault.Backend != "auto" || !d.Schedule.RandomOrder {
+	if len(d.Accounts) != 0 || d.Vault.Backend != "auto" || !d.Schedule.RandomOrder || !d.Schedule.AutoPause {
 		t.Errorf("unexpected defaults: %+v", d)
 	}
 }
@@ -34,6 +34,7 @@ func TestRoundTrip(t *testing.T) {
 		{Name: "app", Auth: AuthClientSecret, Tenant: "t.example", ClientID: guid, Username: "u@t.example", SecretExpires: "2027-01-02", Categories: []string{"mail"}},
 	}
 	cfg.Network.Proxy = "http://127.0.0.1:8080"
+	cfg.Schedule.AutoPause = false
 	if err := cfg.Save(path); err != nil {
 		t.Fatal(err)
 	}
@@ -61,6 +62,23 @@ func TestLoadNotFound(t *testing.T) {
 	_, err := Load(filepath.Join(t.TempDir(), "nope.toml"))
 	if !errors.Is(err, ErrNotFound) {
 		t.Fatalf("got %v, want ErrNotFound", err)
+	}
+}
+
+func TestAutoPauseDefaultsToTrueWhenAbsent(t *testing.T) {
+	cfg, err := Parse([]byte("version = 1\n[schedule]\ninterval_min = \"10m\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.Schedule.AutoPause {
+		t.Error("auto_pause should default to true for a config without the key")
+	}
+	cfg, err = Parse([]byte("version = 1\n[schedule]\nauto_pause = false\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Schedule.AutoPause {
+		t.Error("auto_pause = false not honoured")
 	}
 }
 

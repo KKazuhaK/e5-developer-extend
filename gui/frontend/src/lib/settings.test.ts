@@ -6,7 +6,7 @@ import {
 
 const base = (): Settings => ({
   schedule: {
-    intervalMin: "20m", intervalMax: "45m", apisPerRoundMin: 3, apisPerRoundMax: 6, randomOrder: true,
+    intervalMin: "20m", intervalMax: "45m", apisPerRoundMin: 3, apisPerRoundMax: 6, randomOrder: true, autoPause: true,
     workDays: ["mon", "tue"], workStart: "09:00", workEnd: "18:00", periodStart: "", periodEnd: "",
   },
   network: { proxy: "" },

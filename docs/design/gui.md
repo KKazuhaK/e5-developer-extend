@@ -88,7 +88,7 @@ interface LoginEvent {          // 通过 Wails 事件 "login:<name>" 推送
 interface LogEntry { ts: string; account: string; api: string; status: number; class: string; latencyMs: number; event?: string; detail?: string; }
 interface Settings {
   schedule: { intervalMin: string; intervalMax: string; apisPerRoundMin: number; apisPerRoundMax: number;
-              randomOrder: boolean; workDays: string[]; workStart: string; workEnd: string;
+              randomOrder: boolean; autoPause: boolean; workDays: string[]; workStart: string; workEnd: string;
               periodStart: string; periodEnd: string; };
   network: { proxy: string };
   notify: { staleAfter: string; events: string[]; webhookConfigured: boolean };
@@ -149,7 +149,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
   - 界面：语言、主题。
   - 备份与迁移。
   - 高级设置（可折叠，默认收起，展开状态按浏览器记在 localStorage，读写出错就不记）：
-    - 调度：间隔、每轮 API 数、工作日（多选）、工作时段、运行期限、随机顺序；
+    - 调度：间隔、每轮 API 数、工作日（多选）、工作时段、运行期限、随机顺序、连续失败时自动暂停；
     - 网络：代理；
     - 告警：设置 Webhook（输入框保存后清空，只显示“已设置”）、发送测试、清除。
   - 草稿、校验和保存的做法不变：保存时有错误，就在对应字段下面显示 `ValidationError`；错误在收起的高级设置里时，自动展开并滚动、聚焦到第一个出错的字段（这次展开不写入 localStorage）。

@@ -750,7 +750,7 @@ func (e *Engine) tick(ctx context.Context) {
 	e.forceSub = map[string]bool{}
 	manual := e.processTriggers(now)
 
-	var fixed []string
+	var fixed, autoResumed []string
 	e.withLock(func() {
 		fixed = e.fixFarFutureLocked(now)
 		changed := len(fixed) > 0
@@ -776,6 +776,16 @@ func (e *Engine) tick(ctx context.Context) {
 					e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 					changed = true
 				}
+				continue
+			}
+			if as.Status == store.StatusPaused && !e.cfg.Schedule.AutoPause && !rt.running {
+				// auto_pause was turned off: end the automatic pause and its probes.
+				as.Status, as.Reason, as.ConsecutiveFailedRound = store.StatusOK, "", 0
+				as.NextProbe, as.Probes, as.ResumedAt = time.Time{}, 0, now
+				as.APISkipUntil = nil
+				e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
+				changed = true
+				autoResumed = append(autoResumed, acct.Key())
 				continue
 			}
 			if as.Status == store.StatusPaused {
@@ -811,6 +821,9 @@ func (e *Engine) tick(ctx context.Context) {
 		}
 	})
 	e.reportClockFix(fixed)
+	for _, n := range autoResumed {
+		e.event(n, "account_resume", "auto_pause is off")
+	}
 
 	e.subscriptionTick(ctx, now, e.forceSub)
 	e.updateTick(ctx, now)
@@ -882,7 +895,18 @@ func (e *Engine) resumeAccount(name string, now time.Time) {
 	resumed := false
 	e.withLock(func() {
 		as := e.state.Accounts[name]
-		if as == nil || as.Status == store.StatusOK {
+		if as == nil {
+			return
+		}
+		if as.Status == store.StatusOK {
+			// Nothing to resume, but the 24 h API pauses may be cleared: after the
+			// first sign-in at office.com the refused APIs work again.
+			if callstat.PausedAPIs(as.APISkipUntil, now) == 0 {
+				return
+			}
+			as.APISkipUntil = nil
+			e.saveLocked()
+			resumed = true
 			return
 		}
 		as.Status, as.Reason, as.ConsecutiveFailedRound = store.StatusOK, "", 0

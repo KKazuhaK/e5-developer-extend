@@ -315,6 +315,13 @@ export function SettingsPage() {
                   <span className="block text-xs text-muted-foreground">{t("settings.randomOrderHint")}</span>
                 </span>
               </label>
+              <label className="flex cursor-pointer items-center gap-2.5 text-[13px] sm:col-span-2">
+                <Switch checked={sc.autoPause} onCheckedChange={(v) => upd((d) => void (d.schedule.autoPause = v))} />
+                <span>
+                  {t("settings.autoPause")}
+                  <span className="block text-xs text-muted-foreground">{t("settings.autoPauseHint")}</span>
+                </span>
+              </label>
             </CardContent>
           </Card>
 

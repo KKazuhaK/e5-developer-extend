@@ -278,6 +278,15 @@
     app: [Sites.Read.All]
   default: true
 
+# No application path: followed sites belong to a signed-in user (backed by OneDrive for Business).
+- id: sites.followed
+  category: sites
+  name: Followed sites
+  delegated: /me/followedSites
+  scopes:
+    delegated: [Sites.Read.All]
+  default: true
+
 # No application path: OneNote app-only access was retired on 2025-03-31.
 - id: onenote.notebooks
   category: notes
@@ -315,6 +324,15 @@
   scopes:
     delegated: [Tasks.Read, Group.Read.All]
     app: [Tasks.Read.All]
+  default: true
+
+# No application path: listing a user's plans is not supported with app-only access.
+- id: planner.plans
+  category: tasks
+  name: Planner plans
+  delegated: /me/planner/plans
+  scopes:
+    delegated: [Tasks.Read, Group.Read.All]
   default: true
 
 - id: teams.joined

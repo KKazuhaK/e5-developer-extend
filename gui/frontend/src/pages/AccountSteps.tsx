@@ -281,6 +281,7 @@ export function TestStep({ name }: { name: string }) {
           <p className="text-[13px] text-muted-foreground">{t("wizard.noScopes")}</p>
         )}
       </div>
+      <p className="rounded-md border bg-muted/50 p-2.5 text-[13px] text-muted-foreground">{t("wizard.firstSignInHint")}</p>
       {cats.length > 0 && (
         <div>
           <p className="mb-1.5 text-[13px] font-medium">{t("wizard.byCategory")}</p>

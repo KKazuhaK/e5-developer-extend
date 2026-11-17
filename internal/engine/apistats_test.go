@@ -110,7 +110,7 @@ func TestAPIStatsAreCounted(t *testing.T) {
 func TestAPIStatsDoNotCountThrottling(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
 	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 30, 30
-	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks
+	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks, planner.plans
 	f.h.setStatus(func(p string) (int, map[string]string) {
 		if strings.Contains(p, "contacts") {
 			return http.StatusTooManyRequests, map[string]string{"Retry-After": "1"}

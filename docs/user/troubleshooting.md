@@ -61,13 +61,14 @@
 
 ## account.<名称>.state
 
-显示账号的状态和原因：`needs_attention`（需要你处理，原因里有命令）、`paused`（连续 3 轮失败后自动暂停；会在 6 小时、再过 12 小时、之后每 24 小时自动探测一次，成功就自动恢复，详情里写着下次探测的时间）、
+显示账号的状态和原因：`needs_attention`（需要你处理，原因里有命令）、`paused`（连续 3 轮失败后自动暂停，`[schedule] auto_pause = false` 可关闭；会在 6 小时、再过 12 小时、之后每 24 小时自动探测一次，成功就自动恢复，详情里写着下次探测的时间）、
 配置里手动暂停（不会自动恢复）、运行期限已结束。处理后 `e5extend account resume <名称>` 可以立刻恢复。
 
 ## account.<名称>.apis
 
 某个分类最近 3 轮的调用全部是 404（或 400）：通常是这个账号没有对应的服务（没有邮箱、没有 OneDrive、没有 Teams 许可）。
 返回 403 或 404 的接口会对这个账号暂停 24 小时，这一项的详情里会写“N 个 API 暂停 24 小时”。
+如果邮件或 OneDrive 的调用一直被拒绝、从没成功过，详情里还会提示：新账号要先在 https://www.office.com 登录一次（并打开 Outlook 和 OneDrive），微软才会开通邮箱和 OneDrive，最长可能要 24 小时（见 [常见问题](faq.md#新账号的邮件onedrive-一开始就-403--404)）。
 `e5extend account test <名称> --recommend` 看哪些分类可用，`--apply` 写进账号。这一项只读本地调用日志，`--offline` 时也会运行。
 
 ## account.<名称>.secret
