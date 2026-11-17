@@ -208,7 +208,7 @@ func (o *Ops) LoadSettings() (Settings, error) {
 			PeriodStart: dateString(cfg.Schedule.PeriodStart), PeriodEnd: dateString(cfg.Schedule.PeriodEnd),
 		},
 		Network: NetworkSettings{Proxy: cfg.Network.Proxy},
-		Notify: o.notifySettings(cfg, path),
+		Notify:  o.notifySettings(cfg, path),
 	}, nil
 }
 
