@@ -4,6 +4,10 @@
 
 ## 未发布
 
+## [0.2.0] - 2026-11-16
+
+产品改名为 **E5 Developer Extend**（命令行 `e5extend`），并新增自动创建应用注册、API 推荐、订阅到期检测、异常通知等功能。
+
 ### 新增
 
 - 桌面版的健康检查页按界面语言显示每一项的说明和修复建议（之前中文界面里这些仍是英文）。命令行输出不变；`e5extend doctor --json` 的每一项新增 `code`、`params`、`parts`、`fixCode`、`fixParams`、`fixParts` 字段（只增不改）。
@@ -42,4 +46,5 @@
 - 桌面版 E5 Renew：托盘图标和主窗口（React），中英文界面。
 - 发布包：Windows 安装包、macOS dmg、Linux deb/rpm、命令行压缩包、Docker 镜像（暂未代码签名）。
 
+[0.2.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.2.0
 [0.1.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.1.0
