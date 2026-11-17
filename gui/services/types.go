@@ -213,6 +213,20 @@ type TestResult struct {
 	ExpiresOn  string   `json:"expiresOn"`
 }
 
+// CategoryAdvice is the verdict on one API category: Status is "recommended",
+// "unavailable" or "maybe"; Reason is a code (no_mailbox, no_onedrive,
+// no_teams_license, no_sharepoint, needs_admin_role, not_supported,
+// probe_failed, or missing_permission:<scopes>) or "".
+type CategoryAdvice = ops.CategoryAdvice
+
+// RecommendResult is what probing an account says about its API categories.
+// NeedsLogin is true when the account is not signed in; there is no advice then.
+type RecommendResult struct {
+	NeedsLogin  bool             `json:"needsLogin"`
+	Categories  []CategoryAdvice `json:"categories"`
+	Recommended []string         `json:"recommended"`
+}
+
 // BackupSummary and ImportSummary say what an export or import did; they hold
 // account names and counts, never a secret or the webhook address.
 type (
