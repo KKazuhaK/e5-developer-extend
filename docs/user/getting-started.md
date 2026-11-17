@@ -11,7 +11,7 @@ e5extend 在后台定时、随机地调用 Microsoft Graph 的**只读**接口�
 
 ## 你需要准备
 
-1. 一个 E5 开发者租户，以及租户里的一个应用注册（Client ID）。步骤见 [app-registration.md](app-registration.md)。
+1. 一个 E5 开发者租户，以及租户里的一个应用注册（Client ID）。可以让 e5extend 自动创建（用租户管理员账号登录一次），也可以自己手动注册；步骤见 [app-registration.md](app-registration.md)。
 2. 安装好的 e5extend，见 [install.md](install.md)。桌面版的安装包已经把命令行程序一起装好了；
    只用命令行时，把 `e5extend`（Windows 上还有不弹控制台窗口的 `e5extend-bg.exe`，两者放同一目录）放在一个固定的位置，
    例如 `~/.local/bin/` 或 `C:\Users\你\bin\`。**不要放在临时目录或“下载”文件夹**，后台服务会拒绝安装。
