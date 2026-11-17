@@ -29,8 +29,8 @@ apis_per_round_min = 3
 apis_per_round_max = 8
 random_order = true
 work_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]   # 默认每天；只在工作日调用写 ["mon", "tue", "wed", "thu", "fri"]
-work_start = "08:00"             # 本地时间；work_start == work_end 表示全天
-work_end = "22:00"
+work_start = "00:00"             # 本地时间；work_start == work_end 表示全天（默认）
+work_end = "00:00"
 # period_start = 2026-12-01      # 可选，运行期限
 # period_end = 2027-12-01
 

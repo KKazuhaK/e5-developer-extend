@@ -73,7 +73,10 @@ export const wailsApi: Api = {
         cb(e.plan ? { ...e, plan: planOf(e.plan) } : e);
       }),
   },
-  logs: { read: async (a, h, l) => arr(cast<import("./types").LogEntry[]>(await LogService.Read(a, h, l))) },
+  logs: {
+    read: async (a, h, l) => arr(cast<import("./types").LogEntry[]>(await LogService.Read(a, h, l))),
+    apiStats: async (a) => arr(cast<import("./types").APIStat[]>(await LogService.APIStats(a))),
+  },
   settings: {
     get: async () => {
       const s = cast<import("./types").Settings>(await SettingsService.Get());

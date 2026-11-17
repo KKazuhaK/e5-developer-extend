@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { AccountCard } from "@/components/AccountCard";
 import { UpdateBanner } from "@/components/UpdateBanner";
 import { SubscriptionCard } from "@/pages/SubscriptionCard";
+import { RenewalHelp } from "@/pages/RenewalHelp";
 import { EmptyBlock, ErrorBlock, LoadingBlock, PageHeader, Spinner, ToneIcon } from "@/components/common";
 import { engineState, engineTone, compareStatus, isHealthy, needsAction } from "@/lib/status";
 import { formatRelative, formatWhen } from "@/lib/time";
@@ -45,11 +46,14 @@ export function Overview() {
       <PageHeader
         title={t("nav.overview")}
         actions={
-          accounts.length > 0 && (
-            <Button onClick={() => void act.runNow([])} disabled={runningAll || accounts.every((a) => a.status !== "ok")}>
-              {runningAll ? <Spinner /> : <Play />} {t("overview.runAll")}
-            </Button>
-          )
+          <>
+            <RenewalHelp />
+            {accounts.length > 0 && (
+              <Button onClick={() => void act.runNow([])} disabled={runningAll || accounts.every((a) => a.status !== "ok")}>
+                {runningAll ? <Spinner /> : <Play />} {t("overview.runAll")}
+              </Button>
+            )}
+          </>
         }
       />
 

@@ -11,9 +11,14 @@
 - 按安装方式升级：Windows 安装包（静默运行新安装包）、Windows 命令行 zip（改名替换，正在运行的文件先改名为 `.old`）、macOS 应用（挂载 dmg 替换 `.app`）、macOS / Linux 的 tar 包（原子替换）、Linux deb / rpm（命令行包和桌面包一起装；桌面版用 `pkexec`，命令行不是 root 时给出确切的 `sudo` 命令）；Docker 只通知。升级后自动重启后台服务（服务管理器新增 `Restart`），先验证签名和 SHA-256，任何一步失败都不会改动现有程序。详见 [docs/design/update.md](docs/design/update.md) 和 [安装 → 升级](docs/user/install.md#升级)。
 - 桌面版：概览页新版本横幅（版本号、发布说明、“立即升级”带进度、“稍后”按版本隐藏）、“关于”页的当前/最新版本和“立即检查”、托盘菜单“升级到 x.y.z”；Mock 变体 `?update=available|downloading|error|manual|restart|none`。
 - Windows：`e5extend service install --headless` 让后台任务无人登录也运行（Windows Server / Server Core 开机后不用登录，用户注销后也不停）。任务的登录类型改为 S4U（不保存 Windows 密码），在登录触发器和重复触发器之外增加开机触发器（延迟 30 秒），失败重启等设置不变。因为 S4U 会话读不到用户的凭据管理器，主密钥会复制成配置目录里的 `master.key.dpapi`：用 DPAPI 本机范围加密，ACL 只授予当前用户、SYSTEM 和 Administrators。需要“作为批处理作业登录”权限（管理员默认有），注册任务通常要在管理员命令行里执行；权限不够时会打印完整的命令。`service status` 显示 `headless:`，`doctor` 新增 `headless` 项（密钥文件缺失、读不了、ACL 过宽）。卸载只在任务是 headless 时删除这个文件。其他平台上 `--headless` 会报错并指向 Linux 的 `--key-file` / `--enable-linger`。默认安装（登录时运行）不变。详见 [docs/user/background.md](docs/user/background.md) 和 [docs/design/service-doctor-notify.md](docs/design/service-doctor-notify.md)。
+- 调用节奏新增两档预设：**密集（同原版强度）**（8 到 17 分钟一轮，每轮 15 到 25 个 API）和**急救（临时）**（5 到 10 分钟一轮，每轮 20 到 30 个 API，只用于订阅到期前的几天，界面上有提示，过后请手动改回“标准”）。某一轮要的 API 数比账号能用的多时，调用能用的全部。
+- API 目录新增只读接口：洞察（热门文档）、相关人员、在线状态（presence）、直属下级、用户设置、OneDrive 驱动器列表、日历组、OneNote 分区，以及 Bookings（业务和货币，默认关闭；货币只有委托身份）。新增三个只读权限，自动创建应用会一并申请：委托身份 `People.Read`、`Presence.Read`、`Bookings.Read.All`，应用身份 `Presence.Read.All`、`Bookings.Read.All`。已有的应用注册没有这些权限时，对应接口只是不会被选中，其他不受影响；要补权限可以重新运行 `e5extend app setup`。没有收 `/me/insights/used` 和 `shared`、`/me/manager`（没有上级的账号会返回 404）、`/me/drive/recent` 和 `sharedWithMe`（微软已停止返回数据）、`/me/settings/regionalAndLanguageSettings`（只在 beta 里）。详见 [docs/graph-api-catalog.md](docs/graph-api-catalog.md)。
+- 按 API 统计调用次数：引擎为每个账号记录每个 API 的成功、失败、总次数和最近一次的结果（存在 state.json 里，每个 API 一条）。命令行 `e5extend stats [账号]`；桌面版“日志”页新增“按 API 统计”，可按列排序。
+- 桌面版概览页新增红色描边的“续期失败？”按钮，打开检查清单（旧版沙盒订阅退役、开发者控制面板、订阅卡片、健康检查、没有保证），清单也写进了 [常见问题](docs/user/faq.md)。
 
 ### 变更
 
+- 默认全天调用（`work_start` 和 `work_end` 都是 `"00:00"`，两者相等表示全天）；以前是 08:00 到 22:00。已有的配置不变。
 - 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
 
 ## [0.2.0] - 2026-11-16

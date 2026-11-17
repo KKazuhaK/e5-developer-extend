@@ -1,11 +1,22 @@
 import { describe, expect, it } from "vitest";
 import type { Settings } from "@/api/types";
-import { PACES, PACE_IDS, applyDays, applyPace, detectDays, detectPace } from "./pace";
+import { validateSettings } from "./settings";
+import { PACES, PACE_IDS, type PaceId, applyDays, applyPace, detectDays, detectPace } from "./pace";
 
 const sched = (): Settings["schedule"] => ({
   intervalMin: "40m", intervalMax: "2h", apisPerRoundMin: 3, apisPerRoundMax: 8, randomOrder: false,
   workDays: ["mon", "tue", "wed", "thu", "fri"], workStart: "09:00", workEnd: "18:00", periodStart: "2026-01-01", periodEnd: "2026-12-31",
 });
+
+const withPace = (id: PaceId): Settings => {
+  const sc = sched();
+  applyPace(sc, id);
+  return {
+    schedule: sc, network: { proxy: "" },
+    notify: { staleAfter: "72h", events: [], webhookConfigured: false, channels: 0, cooldown: "6h", quietHours: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5 },
+    ui: { language: "auto", theme: "system", startAtLogin: false },
+  };
+};
 
 describe("detectPace", () => {
   it("recognises every preset after applying it", () => {
@@ -33,7 +44,16 @@ describe("detectPace", () => {
     expect(detectPace(u)).toBe("custom");
   });
   it("presets are distinct and ordered", () => {
-    expect(new Set(PACE_IDS.map((i) => JSON.stringify(PACES[i]))).size).toBe(3);
+    expect(new Set(PACE_IDS.map((i) => JSON.stringify(PACES[i]))).size).toBe(PACE_IDS.length);
+    expect(PACE_IDS).toEqual(["light", "standard", "frequent", "intensive", "rescue"]);
+  });
+});
+
+describe("the strong presets", () => {
+  it("match the documented values and stay within the engine limits (interval of at least 5 minutes)", () => {
+    expect(PACES.intensive).toEqual({ intervalMin: "8m", intervalMax: "17m", apisPerRoundMin: 15, apisPerRoundMax: 25 });
+    expect(PACES.rescue).toEqual({ intervalMin: "5m", intervalMax: "10m", apisPerRoundMin: 20, apisPerRoundMax: 30 });
+    for (const id of PACE_IDS) expect(validateSettings(withPace(id))).toEqual({});
   });
 });
 

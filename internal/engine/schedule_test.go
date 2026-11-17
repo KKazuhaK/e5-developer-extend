@@ -19,6 +19,7 @@ func mustSched(t *testing.T, mod func(*config.Schedule)) *schedule {
 	// These tests were written for working days only (the default before 0.2.1),
 	// which exercises skipping weekends; the every-day default has its own test.
 	c.WorkDays = []string{"mon", "tue", "wed", "thu", "fri"}
+	c.WorkStart, c.WorkEnd = "08:00", "22:00" // the default is all day; these tests exercise the window
 	if mod != nil {
 		mod(&c)
 	}

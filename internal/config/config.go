@@ -215,8 +215,8 @@ func Default() *Config {
 			APIsPerRoundMax: 8,
 			RandomOrder:     true,
 			WorkDays:        []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"},
-			WorkStart:       "08:00",
-			WorkEnd:         "22:00",
+			WorkStart:       "00:00",
+			WorkEnd:         "00:00", // equal to WorkStart: all day
 		},
 		Notify: Notify{
 			StaleAfter: DefaultStaleAfter, Events: []string{}, Cooldown: DefaultCooldown,

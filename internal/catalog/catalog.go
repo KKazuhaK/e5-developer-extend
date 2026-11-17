@@ -20,10 +20,15 @@ const (
 	App       = "app"
 )
 
-// Scopes lists the any-of permissions per identity kind.
+// Scopes lists the permissions per identity kind. Any one of Delegated (or App)
+// is enough. DelegatedAll (or AppAll) is one more way in: a combination that
+// must all be granted together, for the calls whose documentation names more
+// than one permission as the least privileged ("A and B").
 type Scopes struct {
-	Delegated []string `yaml:"delegated"`
-	App       []string `yaml:"app"`
+	Delegated    []string `yaml:"delegated"`
+	DelegatedAll []string `yaml:"delegated_all"`
+	App          []string `yaml:"app"`
+	AppAll       []string `yaml:"app_all"`
 }
 
 // API is one read-only Graph call.
@@ -52,6 +57,36 @@ func (a API) ScopesFor(kind string) []string {
 		return a.Scopes.App
 	}
 	return a.Scopes.Delegated
+}
+
+// AllScopesFor returns the combination of permissions that must all be granted
+// to call the API as kind; nil when there is none.
+func (a API) AllScopesFor(kind string) []string {
+	if kind == App {
+		return a.Scopes.AppAll
+	}
+	return a.Scopes.DelegatedAll
+}
+
+// Allows reports whether the granted permissions (lower-cased set) let an
+// identity of kind call the API: one of the any-of list, or the whole
+// all-of combination.
+func (a API) Allows(kind string, have map[string]bool) bool {
+	for _, s := range a.ScopesFor(kind) {
+		if have[strings.ToLower(s)] {
+			return true
+		}
+	}
+	all := a.AllScopesFor(kind)
+	if len(all) == 0 {
+		return false
+	}
+	for _, s := range all {
+		if !have[strings.ToLower(s)] {
+			return false
+		}
+	}
+	return true
 }
 
 // UsesUser reports whether the path for kind needs a {user} value.
@@ -83,7 +118,7 @@ func Parse(b []byte) ([]API, error) {
 		for _, k := range []string{Delegated, App} {
 			p := a.Path(k)
 			if p == "" {
-				if len(a.ScopesFor(k)) > 0 {
+				if len(a.ScopesFor(k)) > 0 || len(a.AllScopesFor(k)) > 0 {
 					return nil, fmt.Errorf("%s: %s scopes without a %s path", where, k, k)
 				}
 				continue
@@ -91,7 +126,7 @@ func Parse(b []byte) ([]API, error) {
 			if !strings.HasPrefix(p, "/") {
 				return nil, fmt.Errorf("%s: %s path must start with /", where, k)
 			}
-			if len(a.ScopesFor(k)) == 0 {
+			if len(a.ScopesFor(k)) == 0 && len(a.AllScopesFor(k)) == 0 {
 				return nil, fmt.Errorf("%s: %s scopes must not be empty", where, k)
 			}
 		}
@@ -123,11 +158,8 @@ func Available(apis []API, kind string, granted, categories []string) []API {
 		} else if !cats[strings.ToLower(a.Category)] {
 			continue
 		}
-		for _, s := range a.ScopesFor(kind) {
-			if have[strings.ToLower(s)] {
-				out = append(out, a)
-				break
-			}
+		if a.Allows(kind, have) {
+			out = append(out, a)
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })

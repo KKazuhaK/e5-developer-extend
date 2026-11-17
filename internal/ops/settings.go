@@ -27,8 +27,8 @@ apis_per_round_min = 3
 apis_per_round_max = 8
 random_order = true
 work_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]   # every day; e.g. ["mon", "tue", "wed", "thu", "fri"] for weekdays only
-work_start = "08:00"        # local time; start == end means all day
-work_end = "22:00"
+work_start = "00:00"        # local time; start == end means all day (the default), e.g. "08:00" and "22:00" for 08:00-22:00
+work_end = "00:00"
 # period_start = 2026-12-01 # optional run period
 # period_end = 2027-12-01
 
