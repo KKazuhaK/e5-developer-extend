@@ -34,7 +34,7 @@ Then open **E5 Developer Extend** from the Start menu, Applications or the app m
 ## 2. Add your first account (automatic app registration)
 
 Choose **Accounts**, then **Add account**. Keep **Create the app registration automatically** (recommended) and give the
-account a name (letters, digits, `-` and `_`; it cannot be changed later).
+account a name (lowercase letters, digits, `-` and `_`; you can rename it later).
 
 ![Add account, step 1: Method](../images/en/wizard-method.webp)
 
@@ -100,8 +100,23 @@ category. Choose **Next**, then **Finish**.
 ## 4. Check that it is working
 
 The **Overview** page shows the engine state, the next run, today's calls and one card per account. **Run now** runs a
-round immediately. The **Accounts** page lists the accounts (pause, edit, sign in again, delete) and **Logs** shows
+round immediately. The **Accounts** page lists the accounts (pause, sign in, test, edit, delete) and **Logs** shows
 every call.
+
+### Editing and renaming an account
+
+**Edit** on an account opens one form with everything you can change: the account name, tenant, client ID, user name,
+the client secret or password (leave it empty to keep the stored one; the old value is never shown), the secret
+expiry date, the API categories and whether the account is paused. Change what you need and press **Save changes**
+once; there is no second trip through the add wizard. The sign-in method cannot be changed; to use another one,
+remove the account and add it again.
+
+- **Renaming**: change the account name and save. The secret, the saved sign-in and the statistics move to the new
+  name, nothing needs to sign in again, and the rename raises no alert. Log entries already written keep the old
+  name; `e5extend logs <new name>` and the Logs page filtered by the new name show them too. On the command line:
+  `e5extend account rename <old> <new>`.
+- Changing the tenant, client ID or user name discards the saved sign-in; after saving you are offered **Sign in now**.
+- **Sign in** and **Test** are separate actions on the account list, not steps of editing.
 
 ![Overview](../images/en/overview.webp)
 
