@@ -44,6 +44,8 @@ type Event struct {
 	Message string    // what happened and what to do, without secrets
 	Time    time.Time // when the condition was detected
 
+	// Tenant is the tenant ID of the account; only custom templates can show it.
+	Tenant string
 	// Origin is, for Recovered, the event that ended (failure_spike, ...).
 	Origin string
 	// Failures, Rounds and FailRate describe a failure_spike.

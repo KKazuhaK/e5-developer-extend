@@ -79,6 +79,7 @@ func (ev *evaluator) cooldownFor(kind string) time.Duration {
 type scope struct {
 	ev       *evaluator
 	account  string // empty for global alerts
+	tenant   string
 	notified *map[string]store.Notice
 	sent     *map[string]time.Time
 }
@@ -101,7 +102,7 @@ func (s scope) del(kind string) {
 // event rebuilds the event of a notice. key carries what the decision was
 // based on: the numbers of a failure_spike, the origin of a recovery.
 func (s scope) event(kind, key, msg string, at time.Time) Event {
-	e := Event{Event: kind, Account: s.account, Message: msg, Time: at}
+	e := Event{Event: kind, Account: s.account, Tenant: s.tenant, Message: msg, Time: at}
 	switch kind {
 	case FailureSpike:
 		parts := strings.Split(key, "/")
@@ -207,7 +208,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		if as == nil {
 			continue
 		}
-		s := scope{ev: ev, account: acct.Name, notified: &as.Notified, sent: &as.LastSent}
+		s := scope{ev: ev, account: acct.Name, tenant: acct.Tenant, notified: &as.Notified, sent: &as.LastSent}
 		get, put, del := s.get, s.put, s.del
 		raise := func(kind, key, msg string) { // an announced problem starts or continues an episode
 			del(Recovered)
