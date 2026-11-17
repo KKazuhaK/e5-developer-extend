@@ -62,6 +62,7 @@ func runWindow(page string) error {
 	defer backend.Close()
 	app.RegisterService(application.NewService(services.NewStatusService(backend)))
 	app.RegisterService(application.NewService(services.NewAccountService(backend)))
+	app.RegisterService(application.NewService(services.NewAppSetupService(backend)))
 	app.RegisterService(application.NewService(services.NewLogService(backend)))
 	app.RegisterService(application.NewService(services.NewSettingsService(backend)))
 	app.RegisterService(application.NewService(services.NewHealthService(backend)))

@@ -20,11 +20,101 @@ type ValidationError = ops.ValidationError
 
 // LoginEvent is pushed on the event "login:<name>".
 type LoginEvent struct {
-	// Kind is "device_code", "browser_opened", "done" or "error".
+	// Kind is "device_code", "browser_opened", "progress" (a wait the user should
+	// know about, e.g. Microsoft replicating a new app), "done" or "error".
 	Kind            string `json:"kind"`
 	Message         string `json:"message"`
 	UserCode        string `json:"userCode,omitempty"`
 	VerificationURI string `json:"verificationUri,omitempty"`
+}
+
+// AppSetupStart says which account automatic app setup is for. Nothing is
+// created for the account yet; the account is added afterwards by the wizard.
+type AppSetupStart struct {
+	// Name is the account name (for the application identity it names the vault entry of the secret).
+	Name string `json:"name"`
+	// AppOnly sets up the client-secret identity; otherwise Auth is the account's own sign-in: device_code or browser.
+	AppOnly bool   `json:"appOnly"`
+	Auth    string `json:"auth"`
+	// Username is the user an application identity reads; it is only checked here.
+	Username string `json:"username"`
+	// Method is how the administrator signs in: device_code (default) or browser.
+	Method string `json:"method"`
+}
+
+// AppSetupEvent is pushed on the event "appsetup:<id>". Kind is
+// "device_code", "browser_opened" (the administrator's sign-in), "signed_in",
+// "plan" (Plan is set), "progress" (Message), "result" (Result is set) or
+// "error". An error has a Code: "forbidden" (Roles lists the roles that would
+// have allowed it), "blocked" (the tenant refuses Microsoft Graph Command Line
+// Tools), "unknown_permission", "cancelled" or "other"; Message is English text.
+type AppSetupEvent struct {
+	Kind            string          `json:"kind"`
+	Message         string          `json:"message"`
+	UserCode        string          `json:"userCode,omitempty"`
+	VerificationURI string          `json:"verificationUri,omitempty"`
+	Plan            *AppSetupPlan   `json:"plan,omitempty"`
+	Result          *AppSetupResult `json:"result,omitempty"`
+	Code            string          `json:"code,omitempty"`
+	Roles           []string        `json:"roles,omitempty"`
+}
+
+// AppSetupApp is an app registration the plan mentions.
+type AppSetupApp struct {
+	ClientID    string `json:"clientId"`
+	DisplayName string `json:"displayName"`
+}
+
+// AppSetupAction is one thing the setup will do. Code is stable (create_app,
+// adopt_or_create, update_app, create_service_principal, grant_consent,
+// assign_roles, create_secret); Text is English.
+type AppSetupAction struct {
+	Code string `json:"code"`
+	Text string `json:"text"`
+}
+
+// AppSetupPlan is what the setup is going to do; nothing has changed yet.
+type AppSetupPlan struct {
+	Kind        string   `json:"kind"` // "delegated" or "app"
+	TenantID    string   `json:"tenantId"`
+	DisplayName string   `json:"displayName"`
+	Tags        []string `json:"tags"`
+	// Permissions is the full list the app holds afterwards; Missing is the part it does not list yet.
+	Permissions []string `json:"permissions"`
+	Missing     []string `json:"missing"`
+	// Existing is an app registration found by its tag; it is reused.
+	Existing *AppSetupApp `json:"existing"`
+	// Candidates are hand-made apps: when NeedsChoice, adopt one or create a new one.
+	Candidates  []AppSetupApp    `json:"candidates"`
+	Actions     []AppSetupAction `json:"actions"`
+	NeedsChoice bool             `json:"needsChoice"`
+}
+
+// AppSetupChoice is the user's decision about existing apps.
+type AppSetupChoice struct {
+	// Adopt is the client ID of the candidate to adopt; CreateNew creates a new app instead.
+	Adopt     string `json:"adopt"`
+	CreateNew bool   `json:"createNew"`
+	// Rename gives an adopted app the canonical name.
+	Rename bool `json:"rename"`
+}
+
+// AppSetupResult is what the setup did. It never holds a secret.
+type AppSetupResult struct {
+	Kind        string `json:"kind"`
+	TenantID    string `json:"tenantId"`
+	ClientID    string `json:"clientId"`
+	DisplayName string `json:"displayName"`
+	CreatedApp  bool   `json:"createdApp"`
+	AdoptedApp  bool   `json:"adoptedApp"`
+	Renamed     bool   `json:"renamed"`
+	// ConsentGranted is false when someone with the right role still has to
+	// open AdminConsentURL; ConsentError says why it failed.
+	ConsentGranted  bool   `json:"consentGranted"`
+	AdminConsentURL string `json:"adminConsentUrl"`
+	ConsentError    string `json:"consentError"`
+	// SecretExpires (YYYY-MM-DD) is the expiry of the client secret stored in the vault, for the application identity.
+	SecretExpires string `json:"secretExpires"`
 }
 
 // LogEntry is one line of the call log.

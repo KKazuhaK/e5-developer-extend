@@ -49,6 +49,7 @@ type Backend struct {
 
 	mu       sync.Mutex
 	logins   map[string]context.CancelFunc
+	setups   map[string]*setupSession
 	runBusy  bool
 	busy     int // install, uninstall and similar jobs in progress
 	bgCtx    context.Context
@@ -67,6 +68,7 @@ func NewBackend(b *Backend) *Backend {
 		b.OpenURL = func(string) error { return nil }
 	}
 	b.logins = map[string]context.CancelFunc{}
+	b.setups = map[string]*setupSession{}
 	b.bgCtx, b.bgCancel = context.WithCancel(context.Background())
 	return b
 }
