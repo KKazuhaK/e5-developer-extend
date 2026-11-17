@@ -9,7 +9,7 @@
 - 只有托盘、从不创建 WebView 时约 60 MB；
 - GTK4 下关窗口后 WebKit 进程不会退出，见 wailsapp/wails#6505。
 
-一个可执行文件 `e5renew-gui`，按参数分成两种模式：
+一个可执行文件 `e5extend-gui`，按参数分成两种模式：
 
 | 模式 | 启动方式 | 做什么 | 是否创建 WebView |
 |---|---|---|---|
@@ -17,7 +17,7 @@
 | 窗口（`--window`） | 托盘菜单“打开主窗口”，或再次启动程序时 | 主界面；关闭窗口时**整个进程退出** | 是 |
 
 - 单实例：
-  - 托盘模式用 Wails 的 SingleInstance（ID 为 `io.github.kkazuhak.e5renew.tray`）。重复启动时，由已运行的托盘实例打开窗口。
+  - 托盘模式用 Wails 的 SingleInstance（ID 为 `io.github.kkazuhak.e5extend.tray`）。重复启动时，由已运行的托盘实例打开窗口。
   - 窗口模式用另一个 ID（`…​.window`）。重复打开时，让已有窗口获得焦点。
 - 托盘通过 `os.Executable() --window` 启动窗口进程，并且不等待它退出。
 - 窗口进程**不运行引擎**。它读写的是同一份配置、state 和日志，向引擎发指令用已有的 trigger 文件（`run-now`、`.resume`、`.reload`）。
@@ -37,7 +37,7 @@
 
 ## 2. 共享业务层 `internal/ops`
 
-现在 CLI 的逻辑写在 `cmd/e5renew`（`main` 包）里，GUI 没法复用。把这些逻辑抽到 `internal/ops`：
+现在 CLI 的逻辑写在 `cmd/e5extend`（`main` 包）里，GUI 没法复用。把这些逻辑抽到 `internal/ops`：
 - 返回带类型的结果，不直接打印；
 - CLI 负责把结果格式化成文本；GUI 的服务直接把结果返回给前端；
 - **CLI 的行为和输出保持不变**，现有的 CLI 测试全部继续通过。
@@ -117,7 +117,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 ## 4. 界面
 
 整体：左侧导航，右侧内容；支持浅色、深色、跟随系统；语言分中文和英文，默认跟随系统，中文为主。
-窗口默认 1100×720，最小 900×600。产品显示名暂用常量 `AppName = "e5renew"`（最终名称待定，只改这一处）。
+窗口默认 1100×720，最小 900×600。产品显示名暂用常量 `AppName = "e5extend"`（最终名称待定，只改这一处）。
 
 - **概览**（首页）
   - 顶部：引擎状态（运行中 / 未运行 / 由后台服务运行），下次运行时间，以及“立即运行全部”按钮。
@@ -158,7 +158,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 ## 6. 构建与 CI
 
 - GUI 的 Go 代码放在 `gui/`（`package main`），和 CLI 用同一个 Go module。
-  CLI（`cmd/e5renew`）不导入 Wails，**继续保持无 CGO**。
+  CLI（`cmd/e5extend`）不导入 Wails，**继续保持无 CGO**。
 - 构建步骤：先 `wails3 generate bindings -d gui/frontend/bindings -ts ./gui`，再在 `gui/frontend` 里 `npm ci && npm run build`，最后 `go build -tags frontend ./gui`（Windows 上还要加 `-ldflags -H=windowsgui`；见第 8 节：不带 `frontend` 标签时只嵌入一个占位页）。
   Linux 上需要 CGO 和 GTK4、WebKitGTK 6.0 开发包。
 - CI 新增 `GUI build` 任务，在三个平台上编译。ubuntu 先用 apt 装 `libgtk-4-dev libwebkitgtk-6.0-dev`；
@@ -189,7 +189,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这个标签。
 
 **绑定**：`wails3 generate bindings -d gui/frontend/bindings -ts ./gui`。生成路径是
-`gui/frontend/bindings/github.com/KKazuhaK/e5-renew/gui/services/<服务名小写>.ts`（模型在同目录 `models.ts`，`ops` 包的模型在 `.../internal/ops/models.ts`）。
+`gui/frontend/bindings/github.com/KKazuhaK/e5-developer-extend/gui/services/<服务名小写>.ts`（模型在同目录 `models.ts`，`ops` 包的模型在 `.../internal/ops/models.ts`）。
 
 **对第 3 节契约的补充**
 - 事件：`login:<name>`（`LoginEvent`，最后一条是 `done` 或 `error`）；`run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。
@@ -205,7 +205,7 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
 
 **安装后台服务时的交接**：后台服务和托盘里的引擎抢同一把锁。窗口进程在安装前，如果引擎由托盘运行，就在数据目录写
 `gui-handover`；托盘每 3 秒查一次，看到后停掉自己的引擎并在 2 分钟内不再抢锁，窗口等锁释放（最多 60 秒）再安装。
-安装用的是和 GUI 放在同一目录的 `e5renew` 命令行程序（后台服务要运行的是 `e5renew run`），找不到就报错。
+安装用的是和 GUI 放在同一目录的 `e5extend` 命令行程序（后台服务要运行的是 `e5extend run`），找不到就报错。
 
 **配置改动后的重新加载**：窗口里改了账号或设置之后，服务会写 `.reload` trigger，引擎马上重新读配置，不用等定时检查。
 

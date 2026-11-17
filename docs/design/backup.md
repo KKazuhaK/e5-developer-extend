@@ -1,6 +1,6 @@
 # 备份与迁移（单文件）
 
-目标：把一台机器上的 e5renew 整体搬到另一台机器（可以跨平台），只用**一个文件**，
+目标：把一台机器上的 e5extend 整体搬到另一台机器（可以跨平台），只用**一个文件**，
 导入后不需要重新登录、不需要重新输入 secret。
 
 ## 1. 为什么不是把存储改成数据库
@@ -13,8 +13,8 @@
 ## 2. 命令
 
 ```
-e5renew backup export <file> [--with-logs] [--force]
-e5renew backup import <file> [--merge | --replace]
+e5extend backup export <file> [--with-logs] [--force]
+e5extend backup import <file> [--merge | --replace]
 ```
 
 - 备份密码用 `readSecret` 读取（终端不回显；非终端时读 stdin 一行，方便脚本）。导出时在终端上要求输入两次。
@@ -28,7 +28,7 @@ e5renew backup import <file> [--merge | --replace]
 ## 3. 文件格式（版本 1）
 
 ```
-magic      8 字节   "E5RNWBAK"
+magic      8 字节   "E5XTDBAK"
 version    1 字节   1
 kdf        1 字节   1 = PBKDF2-HMAC-SHA256（Go 标准库 crypto/pbkdf2）
 iterations 4 字节   大端 uint32，导出时用 600000
@@ -37,7 +37,7 @@ nonce      12 字节  随机
 ciphertext 其余     AES-256-GCM(key = PBKDF2(密码, salt, iterations, 32), nonce, payload, AAD = 前面全部头部字节)
 ```
 
-- 导入时：magic 不对 → “不是 e5renew 备份文件”；version / kdf 不认识 → “备份来自更新的版本，请先升级”；
+- 导入时：magic 不对 → “不是 e5extend 备份文件”；version / kdf 不认识 → “备份来自更新的版本，请先升级”；
   iterations 不在 [100000, 10000000] → 当作损坏（防止恶意文件让导入卡死）；文件大于 64 MiB → 拒绝。
 - **解压后的 payload 上限 96 MiB**（常量 `backup.MaxPayload`，导出和导入共用）。导入时解压最多读 96 MiB + 1 字节，
   超过就报 `ErrPayloadTooLarge`（“备份内容超过 96 MiB 上限，请不带调用记录重新导出”），所以一个很小的恶意文件不能在内存里膨胀。
@@ -91,7 +91,7 @@ ciphertext 其余     AES-256-GCM(key = PBKDF2(密码, salt, iterations, 32), no
 | `--replace` | 允许 | 目标机的账号、调度、告警设置、webhook、`[network]` 代理、state、gui 设置全部换成备份里的（`[vault]` 段除外）。目标机上有、备份里没有的账号：删除其 vault 条目。备份里有调用记录时复制过去（同名文件覆盖）。 |
 
 **`[network] proxy` 随默认和 `--replace` 导入一起走**：备份来自另一个网络环境时，新机器可能连不上那个代理，导入后要检查
-（`e5renew doctor`）。merge 不动目标机的代理。
+（`e5extend doctor`）。merge 不动目标机的代理。
 
 **本机 `config.toml` 无效时**：默认和 merge 拒绝（错误里提示用 `--replace`，什么都不写）。`--replace`（GUI 的“替换”同理）照常进行：
 本机的 `[vault]` 从无效文件里能解析就取它、否则用 `auto`；无效文件先复制成 `config.toml.broken-<时间戳>`（和原文件同目录），
@@ -111,8 +111,8 @@ ciphertext 其余     AES-256-GCM(key = PBKDF2(密码, salt, iterations, 32), no
 6. 保存 `config.toml`（`cfg.Save`，原子写入；测试里可以通过 `Ops.SaveConfig` 注入失败）。
 7. **3–6 任何一步失败 → 回滚**：把快照放回去（原来没有的键删除），撤回已写的交接文件，返回“……\nnothing was changed”（错误码 `save_failed`）。
    回滚本身失败时的建议按模式区分：
-   - 默认 / replace（`rollback_failed`，Names = 没放回去的键）：运行 `e5renew doctor`，账号有问题就再用 `--replace` 导入一次；
-   - merge（`rollback_failed_merge`，Names = 正要添加的账号）：这些账号的 vault 条目可能残留，先删掉（`e5renew account remove 名称`）再合并。
+   - 默认 / replace（`rollback_failed`，Names = 没放回去的键）：运行 `e5extend doctor`，账号有问题就再用 `--replace` 导入一次；
+   - merge（`rollback_failed_merge`，Names = 正要添加的账号）：这些账号的 vault 条目可能残留，先删掉（`e5extend account remove 名称`）再合并。
    GUI 里同样的两条是翻译过的、不带命令行参数的文字。
 8. **配置保存成功 = 导入成功。** 之后的任何失败都只是**注记**，不是错误，所有模式一样：
    删不掉的旧条目（`stale_not_removed`），写不了 `state.json` / `gui.json` / 调用记录（`stats_not_imported`，Args 列出哪几项：state、gui、logs；
@@ -149,7 +149,7 @@ ciphertext 其余     AES-256-GCM(key = PBKDF2(密码, salt, iterations, 32), no
 ### 5.4 摘要
 
 返回导入的账号名、模式、来源系统和版本、是否新建了主密钥、跳过了什么（例如 merge 模式忽略调用记录）。
-导入后，有条件访问策略把令牌绑定在设备上的租户里，账号可能显示“需要登录”，摘要里给出一行提示：运行 `e5renew doctor` 检查。
+导入后，有条件访问策略把令牌绑定在设备上的租户里，账号可能显示“需要登录”，摘要里给出一行提示：运行 `e5extend doctor` 检查。
 
 摘要的 `Notes` / `Skipped` 是给命令行看的英文，同时有 `NoteCodes` / `SkippedCodes`（`{code, args}`）给 GUI 翻译。
 拒绝和失败是 `*ops.BackupError{Code, Names, Msg, Err}`（`Error()` 是命令行用的英文，带 `--replace` 之类的参数），
@@ -163,10 +163,10 @@ ciphertext 其余     AES-256-GCM(key = PBKDF2(密码, salt, iterations, 32), no
 - `internal/vault`：新增 `List()`。
 - `internal/ops/backup.go`：`ExportBackup(ctx, path, passphrase, ExportOptions) (BackupSummary, error)`、
   `ImportBackup(ctx, path, passphrase, ImportMode) (ImportSummary, error)`。
-- `cmd/e5renew/backup.go`：命令。
+- `cmd/e5extend/backup.go`：命令。
 - GUI：`gui/services/backup.go` 提供导出 / 导入，用 Wails 的保存 / 打开文件对话框；
   设置页新增“备份与迁移”区块：密码（导出时确认一次）、导出时是否包含记录、导入模式（目标为空时不显示）；中英文文案；`api/mock.ts` 同步。
-  - 保存对话框默认文件名 `e5renew-backup-YYYYMMDD.e5backup`，过滤器 `*.e5backup`，标题用 `SaveFileDialogOptions.Title`（这个版本的保存对话框没有 `SetTitle`）。
+  - 保存对话框默认文件名 `e5extend-backup-YYYYMMDD.e5backup`，过滤器 `*.e5backup`，标题用 `SaveFileDialogOptions.Title`（这个版本的保存对话框没有 `SetTitle`）。
   - 覆盖：只有对话框原样返回的路径才用 `Force`（对话框已经问过用户）。名字里没有扩展名、由我们补上 `.e5backup` 的，
     **不**覆盖已存在的文件，返回错误码 `file_exists`，界面显示“已经有同名文件，请换一个名字”。
   - 服务把拒绝和失败放在结果的 `problem`（`{code, names, detail}`）里，而不是 Go 错误，前端按码翻译成中 / 英文，

@@ -1,6 +1,6 @@
 # 备份与迁移
 
-用**一个文件**把 e5renew 整体搬到另一台机器（可以是另一个系统）。导入之后不需要重新登录，也不需要重新输入 client secret。
+用**一个文件**把 e5extend 整体搬到另一台机器（可以是另一个系统）。导入之后不需要重新登录，也不需要重新输入 client secret。
 
 文件里有：账号配置、调度和告警设置、每个账号的 secret 和登录状态（令牌缓存）、Webhook 地址、运行状态、桌面版的界面设置；
 加上 `--with-logs` 还有调用记录。
@@ -22,8 +22,8 @@
 ## 命令
 
 ```bash
-e5renew backup export <文件> [--with-logs] [--force]
-e5renew backup import <文件> [--merge | --replace]
+e5extend backup export <文件> [--with-logs] [--force]
+e5extend backup import <文件> [--merge | --replace]
 ```
 
 建议用 `.e5backup` 作为扩展名，但不强制。
@@ -31,7 +31,7 @@ e5renew backup import <文件> [--merge | --replace]
 备份密码在终端里不回显（导出时要输两次）；在脚本里从标准输入读一行：
 
 ```bash
-printf '%s\n' "$PASSPHRASE" | e5renew backup export all.e5backup
+printf '%s\n' "$PASSPHRASE" | e5extend backup export all.e5backup
 ```
 
 **不支持**用环境变量或命令行参数给密码，那样会出现在进程列表和 shell 历史里。
@@ -56,19 +56,19 @@ printf '%s\n' "$PASSPHRASE" | e5renew backup export all.e5backup
 | `--replace` | 想让这台机器变得和备份一样 | 账号、调度、告警设置、Webhook、运行状态、界面设置全部换成备份里的；这里有、备份里没有的账号及其 vault 条目会被删除；备份里有调用记录就复制过来 |
 
 两种情况下**这台机器自己的 `[vault]` 段（主密钥放哪里）永远保留**，不会被备份覆盖；备份里的 `[vault]` 写了什么都无所谓。
-默认和 `--replace` 导入会带上备份里的 `[network]` 代理设置：新机器的网络如果不同，导入后请检查代理是否可用（`e5renew doctor`）。`--merge` 不改这台机器的代理。
+默认和 `--replace` 导入会带上备份里的 `[network]` 代理设置：新机器的网络如果不同，导入后请检查代理是否可用（`e5extend doctor`）。`--merge` 不改这台机器的代理。
 
 **这台机器的 `config.toml` 无效**（改坏了、版本不对……）：默认和 `--merge` 会拒绝，什么都不写，并提示改用 `--replace`。
 `--replace` 照常进行：无效的文件会先复制成同目录下的 `config.toml.broken-<时间戳>`，再用备份里的配置覆盖；
 这台机器的 `[vault]` 段能从无效文件里读出来就沿用，读不出来就用默认的 `auto`。输出里会告诉你副本的文件名。
 
-这台机器还没有主密钥、vault 也是空的，导入时会像 `e5renew vault init` 一样新建一个存进系统钥匙串，并在输出里告诉你。
-在 SSH 等远程会话里钥匙串可能拿不到，导入会失败并提示，不会硬建一个新的；这时请在桌面会话里运行，或先设置 `E5RENEW_MASTER_KEY`。
+这台机器还没有主密钥、vault 也是空的，导入时会像 `e5extend vault init` 一样新建一个存进系统钥匙串，并在输出里告诉你。
+在 SSH 等远程会话里钥匙串可能拿不到，导入会失败并提示，不会硬建一个新的；这时请在桌面会话里运行，或先设置 `E5EXTEND_MASTER_KEY`。
 
 写盘顺序：先写 vault 条目（旧条目的原始内容先在内存里留一份），再保存 `config.toml`。
 **保存配置失败会回滚**：旧的 vault 条目原样放回去，新增的删掉，错误里写明“什么都没有改”，旧配置的 secret 仍然能解开。
-万一连回滚也失败，错误会告诉你怎么办：默认 / `--replace` 导入——运行 `e5renew doctor`，账号有问题就再用 `--replace` 导入一次；
-`--merge`——列出正要添加的账号，先用 `e5renew account remove 名称` 删掉它们残留的条目，再合并一次。
+万一连回滚也失败，错误会告诉你怎么办：默认 / `--replace` 导入——运行 `e5extend doctor`，账号有问题就再用 `--replace` 导入一次；
+`--merge`——列出正要添加的账号，先用 `e5extend account remove 名称` 删掉它们残留的条目，再合并一次。
 **配置保存成功就算导入成功。** 之后写不进运行状态、界面设置或调用记录，只会在输出里提示“账号和 secret 已导入，统计没有导入”，不是失败，所有模式一样。
 只有配置保存成功之后，`--replace` 才会删除备份里没有的旧条目。
 
@@ -85,42 +85,42 @@ printf '%s\n' "$PASSPHRASE" | e5renew backup export all.e5backup
 
 **在旧机器上**
 
-1. 升级到最新版，确认 `e5renew doctor` 没有关于 vault 的失败。
+1. 升级到最新版，确认 `e5extend doctor` 没有关于 vault 的失败。
 2. 导出：
 
    ```bash
-   e5renew backup export ~/e5renew.e5backup
+   e5extend backup export ~/e5extend.e5backup
    ```
 
    输入并重复备份密码。想带上调用记录就加 `--with-logs`。
 3. 把文件拷到新机器（U 盘、`scp`、网盘都行，文件是加密的）。
-4. 先别急着卸载旧机器。确认新机器工作正常之后，再停掉旧机器上的服务（`e5renew service uninstall`），
+4. 先别急着卸载旧机器。确认新机器工作正常之后，再停掉旧机器上的服务（`e5extend service uninstall`），
    否则两台机器会同时以这些账号发起调用。
 
 **在新机器上**
 
-1. 安装 e5renew（桌面版或命令行版，见 [install.md](install.md)）。版本要不低于导出时的版本，
-   否则会提示 `the backup comes from a newer version of e5renew; upgrade e5renew first`。
+1. 安装 e5extend（桌面版或命令行版，见 [install.md](install.md)）。版本要不低于导出时的版本，
+   否则会提示 `the backup comes from a newer version of e5extend; upgrade e5extend first`。
 2. 在**桌面会话**里（不是 SSH 里）导入：
 
    ```powershell
-   e5renew backup import C:\Users\me\e5renew.e5backup
+   e5extend backup import C:\Users\me\e5extend.e5backup
    ```
 
    桌面版：设置页 → 备份与迁移 → 导入，选文件、输入备份密码。
 3. 检查：
 
    ```powershell
-   e5renew account list
-   e5renew doctor
+   e5extend account list
+   e5extend doctor
    ```
 
-4. 需要后台运行就安装服务：`e5renew service install`（桌面版用设置里的开机启动或“后台服务”页）。
+4. 需要后台运行就安装服务：`e5extend service install`（桌面版用设置里的开机启动或“后台服务”页）。
 
 **导入后账号显示“需要登录”怎么办**
 
 如果租户的条件访问（Conditional Access）策略把令牌绑定在设备上，换了设备令牌就不能用。
-运行 `e5renew doctor` 看哪个账号有问题，再按提示 `e5renew account login <名称>` 重新登录。client_secret 账号不受影响。
+运行 `e5extend doctor` 看哪个账号有问题，再按提示 `e5extend account login <名称>` 重新登录。client_secret 账号不受影响。
 
 ## 桌面版
 
@@ -130,7 +130,7 @@ printf '%s\n' "$PASSPHRASE" | e5renew backup export all.e5backup
 - **导入**：输入导出时的备份密码，点“选择文件并导入…”。这台机器已经有账号或 vault 数据时，会多出“合并 / 替换”的选择。
   选“替换”会先弹出确认框，列出这台机器现有的账号：备份里没有的会被删除，同名的会被覆盖。
   如果读不了这台机器的配置文件，只能选“替换”（它会留一份无法读取的文件的副本，见上）。
-- 保存对话框默认的文件名是 `e5renew-backup-日期.e5backup`。如果你输入的名字没有扩展名，会自动补上 `.e5backup`；
+- 保存对话框默认的文件名是 `e5extend-backup-日期.e5backup`。如果你输入的名字没有扩展名，会自动补上 `.e5backup`；
   补上之后如果已经有同名文件，不会覆盖，而是提示换一个名字。
 
 导入完成后会列出导入的账号、来源系统和版本，以及哪些内容没有导入。
@@ -139,9 +139,9 @@ printf '%s\n' "$PASSPHRASE" | e5renew backup export all.e5backup
 
 **提示 `wrong backup passphrase, or the file is damaged`**：这两种情况无法区分，也不应该区分。先确认密码（注意大小写和键盘布局），再确认文件拷贝完整。
 
-**提示 `the backup comes from a newer version of e5renew`**：导出它的 e5renew 比这台机器上的新，请先升级。
+**提示 `the backup comes from a newer version of e5extend`**：导出它的 e5extend 比这台机器上的新，请先升级。
 
-**提示 `not an e5renew backup file`**：选错了文件。
+**提示 `not an e5extend backup file`**：选错了文件。
 
 **文件很大**：备份文件上限是 64 MiB，解压后的内容上限是 96 MiB。调用记录占地方，不加 `--with-logs` 通常只有几十 KB。
 超过上限时导出会直接失败并建议不带调用记录（桌面版：取消勾选“同时导出调用记录”）。
