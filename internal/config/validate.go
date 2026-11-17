@@ -88,6 +88,11 @@ func (c *Config) Validate() error {
 		seenEv[ev] = true
 	}
 	validateNotify(&c.Notify, add)
+	switch c.Update.Channel {
+	case "", UpdateStable, UpdatePrerelease: // empty means stable
+	default:
+		add("update.channel", "must be stable or prerelease, got %q", c.Update.Channel)
+	}
 	switch c.Vault.Backend {
 	case BackendAuto, BackendKeyring, BackendFile:
 	default:

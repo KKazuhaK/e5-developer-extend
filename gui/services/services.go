@@ -47,6 +47,11 @@ type Backend struct {
 	// CancelHandover withdraws a handover request and tells the tray to take the engine back.
 	CancelHandover func()
 
+	// Exit ends the app (the Windows installer is about to replace its files).
+	Exit func()
+	// RestartApp closes the app and starts it again, so an upgraded program runs.
+	RestartApp func() error
+
 	// Now is the clock of the app setup idle expiry; nil means time.Now.
 	Now func() time.Time
 	// SetupIdle is how long an app setup may wait for the user (default 30 minutes).
@@ -61,7 +66,8 @@ type Backend struct {
 	logins     map[string]context.CancelFunc
 	setups     map[string]*setupSession
 	runBusy    bool
-	busy       int // install, uninstall and similar jobs in progress
+	updateBusy bool // an upgrade is running
+	busy       int  // install, uninstall and similar jobs in progress
 	bgCtx      context.Context
 	bgCancel   context.CancelFunc
 }

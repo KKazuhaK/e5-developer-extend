@@ -1,6 +1,6 @@
 import type {
   APIStat, AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
-  RecommendResult, SubscriptionRefresh, TenantSubscriptions, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
+  RecommendResult, SubscriptionRefresh, TenantSubscriptions, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview, UpdateInfo, UpdateProgress,
 } from "./types";
 
 /**
@@ -102,6 +102,18 @@ export interface Api {
     refresh(account: string): Promise<SubscriptionRefresh>;
     /** Writes the end date (YYYY-MM-DD, "" removes it) of the account's tenant, for when it cannot be read. */
     setExpires(account: string, date: string): Promise<void>;
+  };
+  update: {
+    /** What the last check found; makes no request. */
+    info(): Promise<UpdateInfo>;
+    /** Asks GitHub. force false (on opening a window) only goes out when the daily check is due; true is "check now". Rejects when the check fails. */
+    check(force: boolean): Promise<UpdateInfo>;
+    /** Starts the upgrade and returns at once; reports arrive via onProgress. version is the one the person saw: the backend refuses when the newest release has become another. */
+    install(version: string): Promise<void>;
+    /** Closes the app and starts it again, so the upgraded program runs. */
+    restart(): Promise<void>;
+    /** Subscribes to the "update:progress" event. Returns the unsubscribe function. */
+    onProgress(cb: (e: UpdateProgress) => void): () => void;
   };
   catalog: {
     list(account: string): Promise<CatalogEntry[]>;

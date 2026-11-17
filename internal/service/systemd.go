@@ -297,3 +297,19 @@ func (m *systemd) Start() (Result, error) {
 	m.linger(ctx, InstallOptions{}, &res)
 	return res, nil
 }
+
+// Restart restarts the user service so it runs the program file as it is now.
+func (m *systemd) Restart() (Result, error) {
+	var res Result
+	if !fileExists(m.unitPath()) {
+		return res, ErrNotInstalled
+	}
+	if out, err := m.env.Runner.Run(context.Background(), "systemctl", "--user", "restart", UnitName); err != nil {
+		if strings.Contains(out.Stderr+err.Error(), "masked") {
+			return res, fmt.Errorf("%s is masked, so it cannot be restarted; run: systemctl --user unmask %s", UnitName, UnitName)
+		}
+		return res, fmt.Errorf("restart %s: %w\n%s", UnitName, err, busHint)
+	}
+	res.Actions = append(res.Actions, "ran systemctl --user restart "+UnitName)
+	return res, nil
+}

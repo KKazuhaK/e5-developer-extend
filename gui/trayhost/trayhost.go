@@ -52,6 +52,8 @@ type State struct {
 	// ServiceDown is true when a background service is installed but its
 	// engine is not running; the tray then shows a warning.
 	ServiceDown bool
+	// UpdateVersion is the newer version the update check found, "" when none.
+	UpdateVersion string
 }
 
 // Deps are the outside things the controller uses; tests replace them.
@@ -352,6 +354,9 @@ func (c *Controller) stateFrom(snap ops.Snapshot, err error) State {
 		st.Mode = ModeMonitor
 	}
 	st.ServiceDown = c.serviceDown()
+	if snap.Update.Available {
+		st.UpdateVersion = snap.Update.Version
+	}
 	st.Accounts = len(snap.Accounts)
 	paused := 0
 	for _, a := range snap.Accounts {
@@ -398,14 +403,19 @@ const (
 // Texts are the strings of the tray menu.
 type Texts struct {
 	OpenWindow, Diagnose, RunNow, PauseAll, ResumeAll, StartAtLogin, Quit string
+	// Upgrade is the "upgrade to <version>" item; it has one %s for the version.
+	Upgrade string
 }
+
+// UpgradeLabel is the text of the upgrade item for a version.
+func (t Texts) UpgradeLabel(version string) string { return fmt.Sprintf(t.Upgrade, version) }
 
 // MenuTexts returns the menu labels in lang.
 func MenuTexts(lang Lang) Texts {
 	if lang == LangZH {
-		return Texts{"打开主窗口", "检查问题…", "立即运行一轮（全部账号）", "暂停全部", "恢复全部", "开机启动", "退出"}
+		return Texts{"打开主窗口", "检查问题…", "立即运行一轮（全部账号）", "暂停全部", "恢复全部", "开机启动", "退出", "升级到 %s…"}
 	}
-	return Texts{"Open main window", "Diagnose…", "Run a round now (all accounts)", "Pause all", "Resume all", "Start at login", "Quit"}
+	return Texts{"Open main window", "Diagnose…", "Run a round now (all accounts)", "Pause all", "Resume all", "Start at login", "Quit", "Upgrade to %s…"}
 }
 
 // StatusLine is the read-only status row of the menu.

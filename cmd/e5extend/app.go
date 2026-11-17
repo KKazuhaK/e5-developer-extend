@@ -43,6 +43,8 @@ type app struct {
 	interactive func(in io.Reader) bool
 	// webhookBackoff replaces the retry waits of alert delivery.
 	webhookBackoff []time.Duration
+	// update replaces the outside world of the update commands; tests only.
+	update ops.UpdateHooks
 }
 
 // svcIdentity overrides who the service is installed for; tests only.
@@ -58,6 +60,7 @@ func (a *app) ops() *ops.Ops {
 		NewAuth: a.newAuth, GraphBase: a.graphBase, NoCallGap: a.noCallGap,
 		Runner: a.runner, Exe: a.exe, Svc: a.svc, WebhookBackoff: a.webhookBackoff,
 		Bootstrap: a.bootstrap, SetupBackoff: a.setupBackoff, SetupHostname: a.setupHost,
+		Update: a.update,
 	}
 }
 

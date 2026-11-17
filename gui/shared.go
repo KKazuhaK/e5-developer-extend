@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -17,6 +20,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/update"
 )
 
 // autostartArgs are the arguments the login entry starts the app with.
@@ -90,6 +94,21 @@ func shouldQuit(start time.Time, content []byte, mtime time.Time, exists bool) b
 		at = mtime
 	}
 	return at.After(start)
+}
+
+// quitRequested reports whether another process asked this one, started at
+// start, to quit (see quitFile and shouldQuit).
+func quitRequested(start time.Time) bool {
+	f, err := quitFile()
+	if err != nil {
+		return false
+	}
+	fi, err := os.Stat(f)
+	if err != nil {
+		return false
+	}
+	content, _ := os.ReadFile(f)
+	return shouldQuit(start, content, fi.ModTime(), true)
 }
 
 // cancelHandover withdraws a handover request after a failed install: the
@@ -203,6 +222,121 @@ func passThroughArgs() []string {
 		}
 	}
 	return out
+}
+
+// restartWait is how long the helper waits for the old processes to exit
+// before it starts the app anyway. The old tray polls the quit file every 3 s
+// and stops its engine (up to 10 s) before it lets go of its single-instance
+// lock, and the window may wait for an upgrade, so this is generous.
+const restartWait = 30
+
+// trayPidFile is where a running tray records its process id, from the moment
+// it holds the single-instance lock until it exits.
+func trayPidFile() (string, error) {
+	dir, err := paths.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "gui-tray.pid"), nil
+}
+
+// markTrayRunning records this process as the running tray and returns the
+// function that removes the record again.
+func markTrayRunning() func() {
+	f, err := trayPidFile()
+	if err != nil {
+		return func() {}
+	}
+	pid := strconv.Itoa(os.Getpid())
+	if err := paths.WriteFileAtomic(f, []byte(pid+"\n")); err != nil {
+		return func() {}
+	}
+	return func() {
+		// Only remove our own record, never a newer tray's.
+		if b, err := os.ReadFile(f); err == nil && strings.TrimSpace(string(b)) == pid {
+			_ = os.Remove(f)
+		}
+	}
+}
+
+// runningTrayPID is the process id of the running tray, 0 when there is none.
+func runningTrayPID() int {
+	f, err := trayPidFile()
+	if err != nil {
+		return 0
+	}
+	return readTrayPID(f, ops.PidAlive)
+}
+
+func readTrayPID(file string, alive func(int) bool) int {
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return 0
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	if err != nil || pid <= 0 || !alive(pid) {
+		return 0
+	}
+	return pid
+}
+
+// restartScript is the shell script of the helper that starts the app again:
+// it waits until every process in pids has exited (at most wait seconds), then
+// runs the command given as "$0" "$@" (through open for a bundle).
+func restartScript(pids []int, wait int, bundle bool) string {
+	var cond []string
+	for _, p := range pids {
+		if p > 0 {
+			cond = append(cond, fmt.Sprintf("kill -0 %d 2>/dev/null", p))
+		}
+	}
+	launch := `exec "$0" "$@"`
+	if bundle {
+		launch = `exec open -n "$0" --args "$@"`
+	}
+	if len(cond) == 0 {
+		return launch
+	}
+	return fmt.Sprintf("i=0; while [ $i -lt %d ] && { %s; }; do sleep 1; i=$((i+1)); done; %s",
+		wait, strings.Join(cond, " || "), launch)
+}
+
+// restartApp closes the app and starts it again once the old processes have
+// exited, so an upgraded program runs: the tray when one was in use (it
+// runs, hosts the engine or starts at login), the window otherwise. trayPID is
+// the running tray (0 for none). It does nothing on Windows, where the
+// installer restarts the tray itself. The quit request closes this window and
+// the tray, as the tray's Quit item does.
+func restartApp(log *slog.Logger, trayInUse bool, trayPID int) error {
+	if runtime.GOOS == "windows" {
+		return errors.New("the installer restarts the app on Windows")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	mode := "--window"
+	if trayInUse {
+		mode = "--tray"
+	}
+	args := append([]string{mode}, passThroughArgs()...)
+	// Wait for this process (it holds the window's lock) and for the tray.
+	pids := []int{os.Getpid(), trayPID}
+	first, bundle := exe, false
+	if i := strings.Index(exe, ".app/Contents/MacOS/"); runtime.GOOS == "darwin" && i >= 0 {
+		// A bundle is started through LaunchServices.
+		first, bundle = exe[:i+len(".app")], true
+	}
+	cmd := append([]string{"-c", restartScript(pids, restartWait, bundle), first}, args...)
+	if err := update.StartDetached("sh", cmd...); err != nil {
+		return err
+	}
+	if f, err := quitFile(); err == nil {
+		if err := paths.WriteFileAtomic(f, []byte(time.Now().Format(time.RFC3339Nano)+"\n")); err != nil {
+			log.Warn("quit request", "err", err)
+		}
+	}
+	return nil
 }
 
 func openURL(url string) error {

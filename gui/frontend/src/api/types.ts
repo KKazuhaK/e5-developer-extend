@@ -406,3 +406,61 @@ export interface SubscriptionRefresh {
   /** A running engine had not answered yet; the tenants show what it saved before. */
   queued: boolean;
 }
+
+// ---- updates (docs/design/update.md) ----
+
+/** What is known about the newest release and what this installation can do about it. */
+export interface UpdateInfo {
+  current: string;
+  /** The newest version the channel offers; "" when none is known yet. */
+  latest: string;
+  available: boolean;
+  prerelease: boolean;
+  /** The page of that release (or the releases page). */
+  url: string;
+  channel: "stable" | "prerelease";
+  /** A development build is never offered an upgrade. */
+  dev: boolean;
+  /** config [update] check: the daily automatic check. */
+  checkEnabled: boolean;
+  checkedAt: string | null; // RFC3339
+  /** How the program was installed, and whether it can upgrade itself ("auto") or only point to the release page ("manual"). */
+  kind: string;
+  mode: "auto" | "manual";
+  /** Why it is manual: docker, dev, no_key or unsupported. */
+  reason: string;
+}
+/** One thing an upgrade did; code is stable (downloaded, verified, replaced, package_installed, installer_started, manual), text is English. */
+export interface UpdateStep {
+  code: string;
+  arg?: string;
+  text: string;
+}
+export interface UpdateResult {
+  /** There was nothing newer to install. */
+  upToDate: boolean;
+  version: string;
+  steps: UpdateStep[];
+  /** Commands the person has to run because the program could not (no administrator rights, a folder it may not write to). */
+  manual: string[];
+  done: boolean;
+  /** A setup program was started to replace this app: the window closes by itself. */
+  exitNow: boolean;
+  restartService: boolean;
+  /** The tray and the window still run the old program. */
+  restartApp: boolean;
+  keepDir?: string;
+  service: "" | "restarted" | "not_installed" | "not_running" | "failed";
+  serviceNote: string;
+}
+/** A report of a running upgrade (event "update:progress"). */
+export interface UpdateProgress {
+  stage: "download" | "verify" | "install" | "done" | "error";
+  file: string;
+  done: number;
+  total: number;
+  result: UpdateResult | null;
+  /** On "error": no_signature, no_key, bad_signature, checksum, manual_docker, manual_dev, manual_no_key, manual_unsupported or other. */
+  code: string;
+  error: string;
+}

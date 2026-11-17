@@ -536,3 +536,56 @@ func TestStartPerPlatform(t *testing.T) {
 		t.Fatalf("schtasks start: %v %v", err, fr.Commands())
 	}
 }
+
+func TestRestartPerPlatform(t *testing.T) {
+	// systemd
+	o, env, fr := testOpts(t, Linux)
+	m, _ := New(env)
+	if _, err := m.Restart(); !errors.Is(err, ErrNotInstalled) || len(fr.Commands()) != 0 {
+		t.Fatalf("systemd not installed: %v %v", err, fr.Commands())
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	if res, err := m.Restart(); err != nil || strings.Join(fr.Commands(), "|") != "systemctl --user restart e5extend.service" || len(res.Actions) != 1 {
+		t.Fatalf("systemd restart: %+v %v %v", res, err, fr.Commands())
+	}
+	fr.FailOn = []string{"systemctl --user restart"}
+	if _, err := m.Restart(); err == nil {
+		t.Fatal("a failed restart was not reported")
+	}
+
+	// launchd: kickstart -k, and a plain start when it was not loaded.
+	o, env, fr = testOpts(t, Darwin)
+	m, _ = New(env)
+	if _, err := m.Restart(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("launchd not installed: %v", err)
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	tgt := "gui/501/io.github.kkazuhak.e5extend"
+	fr.Calls = nil
+	if _, err := m.Restart(); err != nil || strings.Join(fr.Commands(), "|") != "launchctl kickstart -k "+tgt {
+		t.Fatalf("launchd restart: %v %v", err, fr.Commands())
+	}
+	fr.Calls = nil
+	fr.FailOnce = []string{"launchctl kickstart -k"}
+	if _, err := m.Restart(); err != nil || !strings.HasPrefix(strings.Join(fr.Commands(), "|"), "launchctl kickstart -k "+tgt+"|launchctl kickstart "+tgt) {
+		t.Fatalf("launchd restart of a job that is not loaded: %v %v", err, fr.Commands())
+	}
+
+	// Task Scheduler: end (it may not be running), then run.
+	_, env, fr = testOpts(t, Windows)
+	m, _ = New(env)
+	fr.Replies = map[string]Output{"schtasks /Query": {ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified."}}
+	if _, err := m.Restart(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("schtasks not installed: %v", err)
+	}
+	fr.Replies, fr.Calls = nil, nil
+	fr.FailOn = []string{"schtasks /End"} // not running: ending fails, restarting still works
+	if _, err := m.Restart(); err != nil || strings.Join(fr.Commands(), "|") != "schtasks /Query /TN "+TaskName+"|schtasks /End /TN "+TaskName+"|schtasks /Run /TN "+TaskName {
+		t.Fatalf("schtasks restart: %v %v", err, fr.Commands())
+	}
+}

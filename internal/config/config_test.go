@@ -295,3 +295,43 @@ func TestSubscriptionConfigRoundTrip(t *testing.T) {
 		t.Errorf("parsed %+v / %+v", c.Subscription, c.Accounts[0])
 	}
 }
+
+func TestUpdateSettings(t *testing.T) {
+	d := Default()
+	if !d.Update.Check || d.Update.Channel != UpdateStable {
+		t.Fatalf("defaults: %+v", d.Update)
+	}
+	cfg, err := Parse([]byte("version = 1\n[update]\ncheck = false\nchannel = \"prerelease\"\n"))
+	if err != nil || cfg.Update.Check || cfg.Update.Channel != UpdatePrerelease {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+	// A file that does not mention [update] keeps the defaults.
+	cfg, err = Parse([]byte("version = 1\n"))
+	if err != nil || !cfg.Update.Check || cfg.Update.Channel != UpdateStable {
+		t.Fatalf("%+v %v", cfg, err)
+	}
+	if _, err := Parse([]byte("version = 1\n[update]\nchannel = \"nightly\"\n")); err == nil || !strings.Contains(err.Error(), "update.channel") {
+		t.Fatalf("a bad channel: %v", err)
+	}
+	if _, err := Parse([]byte("version = 1\n[update]\nbogus = 1\n")); err == nil {
+		t.Fatal("an unknown [update] key was accepted")
+	}
+	// It survives a save and a load.
+	path := filepath.Join(t.TempDir(), "config.toml")
+	d.Update = Update{Check: false, Channel: UpdatePrerelease}
+	if err := d.Save(path); err != nil {
+		t.Fatal(err)
+	}
+	back, err := Load(path)
+	if err != nil || back.Update != d.Update {
+		t.Fatalf("%+v %v", back, err)
+	}
+}
+
+func TestEffectiveChannel(t *testing.T) {
+	for in, want := range map[string]string{"": UpdateStable, "stable": UpdateStable, "prerelease": UpdatePrerelease} {
+		if got := (Update{Channel: in}).EffectiveChannel(); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

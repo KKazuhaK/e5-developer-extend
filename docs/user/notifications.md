@@ -160,6 +160,7 @@ e5extend notify channel add mail --type email --preset gmail \
 | `subscription_status` | 严重 / 提示 | 订阅状态从 `Enabled` 变成 `Warning`、`Suspended`、`LockedOut` 或 `Deleted`（严重），或恢复为 `Enabled`（提示） |
 | `subscription_renewed` | 提示 | 订阅的到期时间向后移动了，写明从哪天移到哪天 |
 | `daily_summary` | 提示 | **默认关闭**。设置 `daily_summary_at = "21:00"` 后每天发一条：每个账号过去 24 小时的成功、失败、限流次数，最近成功时间，是否暂停或需要处理，暂停了几个 API，以及已知时 E5 订阅还剩几天。免打扰时段内到点的话，在时段结束时发；错过很久（比如当时机器关着）的当天摘要会跳过。每种渠道都有中英文内置模板；`e5extend notify preview daily_summary` 可以预览，`e5extend notify test --event daily_summary` 会发一条示例 |
+| `update_available` | 提示 | 有新版本可以升级，写明新旧版本和发布页；**每个版本只通知一次**（升级后重新计，再出新版本会再通知）。每天检查一次，`config.toml` 的 `[update] check = false` 可关闭检查 |
 | `recovered` | 提示 | 之前的问题恢复了；`failure_spike` 解除时会写明“解除的是调用失败率过高” |
 | `period_ended` | 提示 | 运行期限结束 |
 

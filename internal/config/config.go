@@ -45,8 +45,10 @@ type Config struct {
 	Notify   Notify   `toml:"notify"`
 	// Subscription selects which subscriptions the expiry check watches.
 	Subscription Subscription `toml:"subscription"`
-	Vault        Vault        `toml:"vault"`
-	Accounts     []Account    `toml:"accounts"`
+	// Update controls the check for a newer release.
+	Update   Update    `toml:"update"`
+	Vault    Vault     `toml:"vault"`
+	Accounts []Account `toml:"accounts"`
 }
 
 // Schedule controls when and how much the engine runs.
@@ -101,7 +103,7 @@ type Notify struct {
 
 // NotifyEvents are the alert kinds accepted in Notify.Events.
 var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
-	"subscription_expiring", "subscription_status", "subscription_renewed", "daily_summary"}
+	"subscription_expiring", "subscription_status", "subscription_renewed", "daily_summary", "update_available"}
 
 // DefaultStaleAfter is the default for Notify.StaleAfter.
 const DefaultStaleAfter = "72h"
@@ -133,6 +135,29 @@ type Subscription struct {
 	// Skus lists the SKU part numbers to watch; an entry matches every SKU
 	// that starts with it (case-insensitive). Empty means DefaultSubscriptionSKU.
 	Skus []string `toml:"skus"`
+}
+
+// Update channels.
+const (
+	UpdateStable     = "stable"
+	UpdatePrerelease = "prerelease"
+)
+
+// Update holds the settings of the update check (docs/design/update.md).
+type Update struct {
+	// Check turns the daily automatic check on or off. A manual check
+	// (e5extend update check, the About page) always works.
+	Check bool `toml:"check"`
+	// Channel is "stable" (releases only) or "prerelease" (also release candidates).
+	Channel string `toml:"channel"`
+}
+
+// EffectiveChannel is the channel in force: an empty setting means stable.
+func (u Update) EffectiveChannel() string {
+	if u.Channel == UpdatePrerelease {
+		return UpdatePrerelease
+	}
+	return UpdateStable
 }
 
 // DefaultSubscriptionSKU is the SKU prefix of E5 developer subscriptions.
@@ -203,6 +228,7 @@ func Default() *Config {
 			Channels: []Channel{},
 		},
 		Subscription: Subscription{Skus: []string{}},
+		Update:       Update{Check: true, Channel: UpdateStable},
 		Vault:        Vault{Backend: BackendAuto},
 		Accounts:     []Account{},
 	}

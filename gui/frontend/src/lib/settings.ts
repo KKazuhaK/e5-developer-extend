@@ -3,7 +3,7 @@ import type { Settings, ValidationError } from "@/api/types";
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const NOTIFY_EVENTS = [
   "needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
-  "subscription_expiring", "subscription_status", "subscription_renewed", "daily_summary",
+  "subscription_expiring", "subscription_status", "subscription_renewed", "daily_summary", "update_available",
 ] as const;
 /** Shortest allowed interval_min in the engine config. */
 export const MIN_INTERVAL_MS = 5 * 60_000;

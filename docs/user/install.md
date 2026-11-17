@@ -82,6 +82,31 @@ sudo dnf install ./e5extend-*.x86_64.rpm ./e5extend-desktop-*.x86_64.rpm
 暂时没有 AppImage：AppImage 每次运行时程序都在一个临时路径下，后台服务和开机启动都会指向一个过后就不存在的位置，
 不适合需要长期后台运行的程序。
 
+## 升级
+
+程序会**每天自动查一次**有没有新版本（后台引擎里，访问 GitHub 的公开接口，不上传任何你的数据），有就在概览页顶部显示横幅，
+托盘菜单里多一项“升级到 x.y.z”，也可以通过告警渠道通知你（事件 `update_available`，每个版本只通知一次）。
+**从不静默自动升级**：要你点“立即升级”或运行 `e5extend update install`。
+
+- 桌面版：概览页的横幅点 **立即升级**，会显示下载、验证、安装的进度；“稍后”只对这个版本隐藏横幅。“关于”页能看到当前和最新版本，点 **立即检查** 马上查一次。
+- 命令行：`e5extend update check` 看有没有新版本；`e5extend update install` 升级（`--yes` 跳过确认）。
+- 不想要每天的检查：`config.toml` 里写 `[update]` `check = false`；想收到预发布版本写 `channel = "prerelease"`。手动检查不受影响。
+
+升级前程序会**先验证发布签名，再校验文件的 SHA-256**，通过了才替换；任何一步不对都不会改动现有程序。不同安装方式的做法：
+
+| 你的安装方式 | 一键升级做什么 |
+|---|---|
+| Windows 安装包 | 下载新的安装包并静默运行它，本程序随即退出；安装程序停掉托盘和后台任务、换文件、重新启动它们 |
+| Windows 命令行 zip | 把 `e5extend.exe`、`e5extend-bg.exe` 换成新版本（正在运行的旧文件先改名为 `.old`，下次清理），然后重启后台任务 |
+| macOS 应用 | 挂载 dmg，替换 `/Applications` 里的应用，重启后台服务；之后在应用里点“立即重启”。应用所在目录没有写权限时会告诉你怎么手动拖 |
+| macOS / Linux 命令行 tar 包 | 原子替换 `e5extend`，重启后台服务（`systemctl --user restart e5extend` / launchd）；目录没有写权限时给出 `sudo install` 命令 |
+| Linux deb / rpm | 一次装好命令行包和桌面包。桌面版通过 `pkexec` 弹出系统的授权窗口；命令行不是 root 时**只打印**要你运行的 `sudo apt-get install -y …` 命令（下载的文件留在临时目录）。装完重启后台服务 |
+| Docker | 不能自己升级：`docker pull ghcr.io/kkazuhak/e5-developer-extend:<版本>` 后重建容器 |
+
+没有签名的版本（发布时没有配置签名密钥）、开发构建，以及无法识别的安装方式，只会提示有新版本并给出发布页链接，不会自动安装。
+想自己验证下载的文件：`minisign -Vm SHA256SUMS -P <公钥>`，公钥在 [internal/update/pubkey.go](../../internal/update/pubkey.go)，再 `sha256sum --ignore-missing -c SHA256SUMS`。
+设计细节见 [design/update.md](../design/update.md)。
+
 ## 从源码构建
 
 见 [dev-setup.md](../dev-setup.md)。发布包的构建脚本在 `scripts/release/`，说明见 [design/release.md](../design/release.md)。

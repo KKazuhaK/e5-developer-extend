@@ -7,7 +7,7 @@ import { doctorMessage } from "@/lib/doctor";
 import type {
   AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, APIStat, LoginEvent, RunDone, ServiceInfo,
   ChannelInput, ChannelType, ChannelView, ChannelTest, MessagePreview, EmailPreset, SecretStatus,
-  Settings, Snapshot, SubscriptionView, TenantSubscriptions, ValidationError,
+  Settings, Snapshot, SubscriptionView, TenantSubscriptions, UpdateInfo, UpdateProgress, UpdateResult, ValidationError,
 } from "./types";
 
 type Host = "gui" | "service" | "none";
@@ -143,6 +143,74 @@ function seedAccounts() {
 }
 if (!controls.empty) seedAccounts();
 
+
+// ---- updates ----
+// ?update=none|available|downloading|error|manual|restart picks what the update check finds and how an upgrade ends:
+// available (a new version, the upgrade works), downloading (the upgrade is stuck at 42%), error (the checksum does
+// not match), manual (a Docker image: only the release page), restart (it works and asks for a restart), none (up to date).
+type UpdateVariant = "none" | "available" | "downloading" | "error" | "manual" | "restart";
+const updateVariant = (["none", "available", "downloading", "error", "manual", "restart"].includes(q.get("update") ?? "") ? q.get("update") : "none") as UpdateVariant;
+let updateCheckedAt: number | null = updateVariant === "none" ? null : Date.now() - 3_600_000;
+let updateRunning = false;
+const updateListeners = new Set<(e: UpdateProgress) => void>();
+const emitUpdate = (p: Partial<UpdateProgress> & Pick<UpdateProgress, "stage">) =>
+  updateListeners.forEach((l) => l({ file: "", done: 0, total: 0, result: null, code: "", error: "", ...p }));
+const UPDATE_SIZE = 48_000_000;
+const updateFile = "e5extend_0.3.0_linux_amd64.tar.gz";
+
+function mockUpdateInfo(): UpdateInfo {
+  const newer = updateVariant !== "none";
+  const manual = updateVariant === "manual";
+  return {
+    current: "0.2.0", latest: newer ? "0.3.0" : updateCheckedAt ? "0.2.0" : "", available: newer, prerelease: false,
+    url: newer ? "https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.0" : "https://github.com/KKazuhaK/e5-developer-extend/releases/latest",
+    channel: "stable", dev: false, checkEnabled: true, checkedAt: updateCheckedAt ? iso(updateCheckedAt) : null,
+    kind: manual ? "docker" : "linux-standalone", mode: manual ? "manual" : "auto", reason: manual ? "docker" : "",
+  };
+}
+
+function mockUpdateResult(): UpdateResult {
+  return {
+    upToDate: false, version: "0.3.0", done: true, exitNow: false, restartService: true, restartApp: updateVariant === "restart",
+    steps: [
+      { code: "downloaded", arg: "0.3.0", text: `downloaded ${updateFile}` },
+      { code: "verified", text: "verified the signature and the checksums" },
+      { code: "replaced", arg: "e5extend", text: "replaced e5extend" },
+    ],
+    manual: [], service: "restarted", serviceNote: "",
+  };
+}
+
+async function runMockUpgrade() {
+  updateRunning = true;
+  try {
+    const steps = 12;
+    for (let i = 1; i <= steps; i++) {
+      await wait(250);
+      const done = Math.round((UPDATE_SIZE * i) / steps);
+      if (updateVariant === "downloading" && done > UPDATE_SIZE * 0.42) {
+        emitUpdate({ stage: "download", file: updateFile, done: Math.round(UPDATE_SIZE * 0.42), total: UPDATE_SIZE });
+        return; // stuck, to look at the progress bar
+      }
+      emitUpdate({ stage: "download", file: updateFile, done, total: UPDATE_SIZE });
+    }
+    emitUpdate({ stage: "verify" });
+    await wait(700);
+    if (updateVariant === "error") {
+      emitUpdate({ stage: "error", code: "checksum", error: `the downloaded file does not match its checksum: ${updateFile}` });
+      return;
+    }
+    if (updateVariant === "manual") {
+      emitUpdate({ stage: "error", code: "manual_docker", error: "this is a Docker image; pull the new image instead" });
+      return;
+    }
+    emitUpdate({ stage: "install" });
+    await wait(900);
+    emitUpdate({ stage: "done", result: mockUpdateResult() });
+  } finally {
+    updateRunning = false;
+  }
+}
 
 // ---- subscriptions ----
 // ?subscription=ok|expiring|warning|nopermission|manual picks what the check found for the first tenant
@@ -528,7 +596,7 @@ const EVENT_LABEL: Record<string, [string, string]> = {
   period_ended: ["运行周期已结束", "Run period ended"], failure_spike: ["调用失败率过高", "High failure rate"],
   all_failing: ["所有账号同时异常", "All accounts failing"],
   subscription_expiring: ["E5 订阅即将到期", "E5 subscription expiring"], subscription_status: ["E5 订阅状态变化", "E5 subscription status changed"],
-  subscription_renewed: ["E5 订阅已续期", "E5 subscription renewed"], daily_summary: ["每日摘要", "Daily summary"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
+  subscription_renewed: ["E5 订阅已续期", "E5 subscription renewed"], daily_summary: ["每日摘要", "Daily summary"], update_available: ["有新版本可以升级", "A new version is available"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
 };
 
 function validateSettings(s: Settings): ValidationError[] {
@@ -928,6 +996,7 @@ export const mockApi: Api = {
         subscription_status: `subscription DEVELOPERPACK_E5 ${SUB} changed from Enabled to Warning; check it in the Microsoft 365 admin center (Billing > Your products)`,
         subscription_renewed: `subscription DEVELOPERPACK_E5 ${SUB} was renewed: the end date moved from 2027-02-14 to 2027-05-14`,
         daily_summary: "daily summary: 2 accounts, 41 calls ok, 1 failed, 2 throttled in the last 24 hours",
+        update_available: "version 0.3.0 is available (this is 0.2.0): https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.0",
       } as Record<string, string>)[event] ?? "needs attention: login required; run: e5extend account login demo";
       const bold = (x: string) => (type === "telegram" ? `<b>${x}</b>` : type === "slack" ? `*${x}*` : ["wecom", "dingtalk", "discord", "serverchan"].includes(type) ? `**${x}**` : x);
       const body = template.trim()
@@ -984,6 +1053,37 @@ export const mockApi: Api = {
           skipped: [], notes: [], hint: "",
           skippedCodes: mode === "merge" ? [{ code: "merge_settings", args: [] }] : [], noteCodes: [],
         },
+      };
+    },
+  },
+  update: {
+    async info() {
+      await lag();
+      return mockUpdateInfo();
+    },
+    async check() {
+      await wait(rand(500, 900));
+      updateCheckedAt = Date.now();
+      return mockUpdateInfo();
+    },
+    async install(_version) {
+      await lag();
+      if (updateRunning) throw new Error("an upgrade is already running");
+      void runMockUpgrade();
+    },
+    async restart() {
+      await lag();
+    },
+    onProgress(cb) {
+      updateListeners.add(cb);
+      // Opening the page with ?update=downloading shows an upgrade that is already under way.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      if (updateVariant === "downloading") {
+        timer = setTimeout(() => cb({ stage: "download", file: updateFile, done: Math.round(UPDATE_SIZE * 0.42), total: UPDATE_SIZE, result: null, code: "", error: "" }), 400);
+      }
+      return () => {
+        updateListeners.delete(cb);
+        if (timer) clearTimeout(timer);
       };
     },
   },
@@ -1057,6 +1157,9 @@ export const mockApi: Api = {
         on
           ? dx("notify", "Alerts", "ok", [[settings.notify.channels === 1 ? "notify.one" : "notify.many", { count: String(settings.notify.channels) }]])
           : dx("notify", "Alerts", "warn", [["notify.none"]], [["fix.channelAdd"]]),
+        ...(updateVariant !== "none" && updateVariant !== "manual"
+          ? [dx("update", "Update", "ok", [["update.available", { current: "0.2.0", latest: "0.3.0", url: "https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.0" }]], [["fix.update"]])]
+          : []),
         // A code this version has no text for: the English text is shown (hidden in the clean demo data set).
         ...(demo ? [] : [{ id: "future.check", title: "Some future check", level: "ok", detail: "unknown codes fall back to the backend text", fix: "", parts: [{ code: "future.thing", params: {} }], fixParts: [] } as DoctorCheck]),
       ];
