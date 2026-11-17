@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/update"
 )
 
 // autostartArgs are the arguments the login entry starts the app with.
@@ -203,6 +205,45 @@ func passThroughArgs() []string {
 		}
 	}
 	return out
+}
+
+// restartDelay is how many seconds the helper waits before it starts the app
+// again, so the old tray has let go of its single-instance lock.
+const restartDelay = "6"
+
+// restartApp closes the app and starts it again in a few seconds, so an
+// upgraded program runs: the tray when one was in use (it hosts the engine or
+// starts at login), the window otherwise. It does nothing on Windows, where
+// the installer restarts the tray itself. The quit request closes this window
+// and the tray, as the tray's Quit item does.
+func restartApp(log *slog.Logger, trayInUse bool) error {
+	if runtime.GOOS == "windows" {
+		return errors.New("the installer restarts the app on Windows")
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	mode := "--window"
+	if trayInUse {
+		mode = "--tray"
+	}
+	args := append([]string{mode}, passThroughArgs()...)
+	script, first := `sleep `+restartDelay+`; exec "$0" "$@"`, exe
+	if i := strings.Index(exe, ".app/Contents/MacOS/"); runtime.GOOS == "darwin" && i >= 0 {
+		// A bundle is started through LaunchServices.
+		script, first = `sleep `+restartDelay+`; exec open -n "$0" --args "$@"`, exe[:i+len(".app")]
+	}
+	cmd := append([]string{"-c", script, first}, args...)
+	if err := update.StartDetached("sh", cmd...); err != nil {
+		return err
+	}
+	if f, err := quitFile(); err == nil {
+		if err := paths.WriteFileAtomic(f, []byte(time.Now().Format(time.RFC3339Nano)+"\n")); err != nil {
+			log.Warn("quit request", "err", err)
+		}
+	}
+	return nil
 }
 
 func openURL(url string) error {

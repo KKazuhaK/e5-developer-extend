@@ -510,3 +510,26 @@ func TestSuccessfulAnswersAreCachedUntilHandoverOrResume(t *testing.T) {
 		t.Fatalf("the cache must expire after 5 minutes (asked %d)", r.asked)
 	}
 }
+
+func TestStateCarriesTheUpdateAndTheMenuTextSaysTheVersion(t *testing.T) {
+	f := &fakeHost{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	c := New(ctx, f.deps())
+	defer c.Stop()
+	if got := c.Refresh().UpdateVersion; got != "" {
+		t.Fatalf("an update with nothing found: %q", got)
+	}
+	f.mu.Lock()
+	f.snap.Update = ops.UpdateNote{Available: true, Version: "0.3.0", URL: "https://example.test"}
+	f.mu.Unlock()
+	if got := c.Refresh().UpdateVersion; got != "0.3.0" {
+		t.Fatalf("UpdateVersion = %q", got)
+	}
+	if got := MenuTexts(LangEN).UpgradeLabel("0.3.0"); got != "Upgrade to 0.3.0…" {
+		t.Errorf("en: %q", got)
+	}
+	if got := MenuTexts(LangZH).UpgradeLabel("0.3.0"); got != "升级到 0.3.0…" {
+		t.Errorf("zh: %q", got)
+	}
+}
