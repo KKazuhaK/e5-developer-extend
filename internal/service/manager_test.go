@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -461,3 +462,77 @@ func TestNewRejectsUnknownPlatform(t *testing.T) {
 }
 
 func runtimeIsUnix() bool { return filepath.Separator == '/' }
+
+func TestStartPerPlatform(t *testing.T) {
+	// Systemd: refuses when not installed, then only runs systemctl start.
+	o, env, fr := testOpts(t, Linux)
+	m, _ := New(env)
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) || len(fr.Commands()) != 0 {
+		t.Fatalf("systemd not installed: %v %v", err, fr.Commands())
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	fr.Replies = map[string]Output{"systemctl --user is-enabled": {Stdout: "enabled\n"}, "loginctl": {Stdout: "yes\n"}}
+	res, err := m.Start()
+	if err != nil || len(res.Warnings) != 0 || !strings.HasPrefix(strings.Join(fr.Commands(), "|"), "systemctl --user start e5extend.service|") {
+		t.Fatalf("systemd start: %+v %v %v", res, err, fr.Commands())
+	}
+	// Not enabled and no lingering: both are reported.
+	fr.Replies = map[string]Output{"systemctl --user is-enabled": {Stdout: "disabled\n", ExitCode: 1}, "loginctl": {Stdout: "no\n"}}
+	res, err = m.Start()
+	if err != nil || len(res.Warnings) != 2 || !strings.Contains(res.Warnings[0], "systemctl --user enable") || !strings.Contains(res.Warnings[1], "lingering is off") {
+		t.Fatalf("systemd warnings: %+v %v", res, err)
+	}
+	// A masked unit gets its own message, not the login-session hint.
+	fr.Replies = map[string]Output{"systemctl --user start": {Stderr: "Failed to start e5extend.service: Unit e5extend.service is masked.", ExitCode: 1}}
+	if _, err := m.Start(); err == nil || !strings.Contains(err.Error(), "unmask") || strings.Contains(err.Error(), "login session") {
+		t.Fatalf("masked: %v", err)
+	}
+	fr.Replies = nil
+	fr.FailOn = []string{"systemctl --user start"}
+	if _, err := m.Start(); err == nil || !strings.Contains(err.Error(), "login session") {
+		t.Fatalf("systemd start failure: %v", err)
+	}
+
+	// Launchd: kickstart, falling back to enable + bootstrap when not loaded.
+	o, env, fr = testOpts(t, Darwin)
+	m, _ = New(env)
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("launchd not installed: %v", err)
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "launchctl kickstart gui/501/io.github.kkazuhak.e5extend" {
+		t.Fatalf("launchd start: %v %v", err, fr.Commands())
+	}
+	// Loaded but disabled: the first kickstart fails, enable, then kickstart works.
+	fr.Calls = nil
+	fr.FailOnce = []string{"launchctl kickstart"}
+	tgt := "gui/501/io.github.kkazuhak.e5extend"
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "launchctl kickstart "+tgt+"|launchctl enable "+tgt+"|launchctl kickstart "+tgt {
+		t.Fatalf("launchd disabled: %v %v", err, fr.Commands())
+	}
+	// Not loaded: bootstrap is the last resort.
+	fr.Calls = nil
+	fr.FailOn = []string{"launchctl kickstart"}
+	if _, err := m.Start(); err != nil || len(fr.Commands()) != 4 || !strings.HasPrefix(fr.Commands()[3], "launchctl bootstrap") {
+		t.Fatalf("launchd fallback: %v %v", err, fr.Commands())
+	}
+
+	// Task Scheduler: a missing task is "not installed".
+	_, env, fr = testOpts(t, Windows)
+	m, _ = New(env)
+	fr.Replies = map[string]Output{"schtasks /Query": {ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified."}}
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("schtasks not installed: %v", err)
+	}
+	fr.Replies = nil
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "schtasks /Query /TN "+TaskName+"|schtasks /Run /TN "+TaskName {
+		t.Fatalf("schtasks start: %v %v", err, fr.Commands())
+	}
+}

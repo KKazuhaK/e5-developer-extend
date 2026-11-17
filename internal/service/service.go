@@ -289,9 +289,15 @@ type Manager interface {
 	Install(opts InstallOptions) (Result, error)
 	// Uninstall stops and unregisters the job and removes its files.
 	Uninstall() (Result, error)
+	// Start starts an installed job that is not running. It does not rewrite
+	// any file; a job that is not installed is an error.
+	Start() (Result, error)
 	// Status asks the platform about the job.
 	Status() (Status, error)
 }
+
+// ErrNotInstalled means Start found no job to start.
+var ErrNotInstalled = errors.New("the background service is not installed")
 
 // ErrUnsupported means the platform has no background job support.
 var ErrUnsupported = errors.New("background service is not supported on this platform")

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { BellRing, CheckCircle2, Globe, Palette, Save, Send, Timer, Trash2 } from "lucide-react";
+import { BellRing, CheckCircle2, ChevronDown, Globe, Palette, Save, Send, SlidersHorizontal, Timer, Trash2 } from "lucide-react";
 import { api } from "@/api";
 import type { Settings, ValidationError } from "@/api";
 import { useApp } from "@/state/app";
@@ -16,6 +16,32 @@ import { ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, fieldAria } from 
 import { NOTIFY_EVENTS, WEEKDAYS, errorsByField, isValidWebhook, validateSettings, type LocalCode } from "@/lib/settings";
 import { cn, errMsg } from "@/lib/utils";
 import { BackupCard } from "./BackupCard";
+import { PaceCard } from "./PaceCard";
+import { RunningCard } from "./RunningCard";
+
+/** Form field (as the validators name it) to the id of its control, in page order. Every one lives in Advanced settings. */
+const ADVANCED_FIELDS: [string, string][] = [
+  ["schedule.intervalMin", "s-imin"], ["schedule.intervalMax", "s-imax"], ["schedule.apisPerRoundMin", "s-amin"],
+  ["schedule.apisPerRoundMax", "s-amax"], ["schedule.workDays", "s-days-l"], ["schedule.workStart", "s-ws"],
+  ["schedule.workEnd", "s-we"], ["schedule.periodStart", "s-ps"], ["schedule.periodEnd", "s-pe"],
+  ["network.proxy", "n-proxy"], ["notify.staleAfter", "n-stale"], ["notify.events", "n-ev-l"],
+];
+const ADVANCED_KEY = "e5extend.settings.advancedOpen";
+
+function readAdvancedOpen(): boolean {
+  try {
+    return localStorage.getItem(ADVANCED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+function writeAdvancedOpen(open: boolean) {
+  try {
+    localStorage.setItem(ADVANCED_KEY, open ? "1" : "0");
+  } catch {
+    /* storage can be unavailable; the section just does not remember */
+  }
+}
 
 const LOCAL_MSG: Record<LocalCode, DictKey> = {
   duration: "settings.err.duration", minInterval: "settings.err.minInterval", intervalOrder: "settings.err.intervalOrder",
@@ -33,6 +59,27 @@ export function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [remote, setRemote] = useState<Record<string, string>>({});
   const [showLocal, setShowLocal] = useState(false);
+  const [advOpen, setAdvOpen] = useState(readAdvancedOpen);
+  const toggleAdvanced = (open: boolean) => {
+    setAdvOpen(open);
+    writeAdvancedOpen(open);
+  };
+  // Save asks for the first bad field to be shown; the effect below opens Advanced
+  // settings, then scrolls to it and focuses it once it is visible.
+  const [reveal, setReveal] = useState<{ id: string; n: number } | null>(null);
+  const revealFirstError = (keys: Set<string>) => {
+    const hit = ADVANCED_FIELDS.find(([k]) => keys.has(k));
+    if (!hit) return;
+    setAdvOpen(true); // not remembered: it is only there to show the error
+    setReveal((r) => ({ id: hit[1], n: (r?.n ?? 0) + 1 }));
+  };
+  useEffect(() => {
+    if (!reveal || !advOpen) return;
+    const el = document.getElementById(reveal.id);
+    el?.scrollIntoView({ block: "center", behavior: "smooth" });
+    if (el && el.tagName !== "P") el.focus({ preventScroll: true });
+    setReveal(null);
+  }, [reveal, advOpen]);
 
   const load = useCallback(async () => {
     try {
@@ -84,14 +131,17 @@ export function SettingsPage() {
     setShowLocal(true);
     if (Object.keys(local).length) {
       toast.error(t("settings.fixErrors"));
+      revealFirstError(new Set(Object.keys(local)));
       return;
     }
     setSaving(true);
     try {
       const errs: ValidationError[] = await api.settings.save(draft);
       if (errs.length) {
-        setRemote(errorsByField(errs));
+        const byField = errorsByField(errs);
+        setRemote(byField);
         toast.error(t("settings.fixErrors"));
+        revealFirstError(new Set(Object.keys(byField)));
         return;
       }
       setRemote({});
@@ -127,78 +177,13 @@ export function SettingsPage() {
       />
 
       <div className="grid gap-4">
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Timer className="size-4" aria-hidden /> {t("settings.schedule")}</CardTitle>
-            <CardDescription>{t("settings.scheduleDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent className="grid gap-4 sm:grid-cols-2">
-            <Field id="s-imin" label={t("settings.intervalMin")} hint={t("settings.durationHint")} error={fieldErr("schedule.intervalMin")}>
-              <Input {...fieldAria("s-imin", fieldErr("schedule.intervalMin"), "x")} value={sc.intervalMin} onChange={(e) => { clearRemote("schedule.intervalMin"); upd((d) => void (d.schedule.intervalMin = e.target.value)); }} />
-            </Field>
-            <Field id="s-imax" label={t("settings.intervalMax")} error={fieldErr("schedule.intervalMax")}>
-              <Input {...fieldAria("s-imax", fieldErr("schedule.intervalMax"))} value={sc.intervalMax} onChange={(e) => { clearRemote("schedule.intervalMax"); upd((d) => void (d.schedule.intervalMax = e.target.value)); }} />
-            </Field>
-            <Field id="s-amin" label={t("settings.apisMin")} error={fieldErr("schedule.apisPerRoundMin")}>
-              <Input {...fieldAria("s-amin", fieldErr("schedule.apisPerRoundMin"))} type="number" min={1} value={Number.isNaN(sc.apisPerRoundMin) ? "" : sc.apisPerRoundMin} onChange={(e) => { clearRemote("schedule.apisPerRoundMin"); upd((d) => void (d.schedule.apisPerRoundMin = e.target.valueAsNumber)); }} />
-            </Field>
-            <Field id="s-amax" label={t("settings.apisMax")} error={fieldErr("schedule.apisPerRoundMax")}>
-              <Input {...fieldAria("s-amax", fieldErr("schedule.apisPerRoundMax"))} type="number" min={1} value={Number.isNaN(sc.apisPerRoundMax) ? "" : sc.apisPerRoundMax} onChange={(e) => { clearRemote("schedule.apisPerRoundMax"); upd((d) => void (d.schedule.apisPerRoundMax = e.target.valueAsNumber)); }} />
-            </Field>
-            <div className="sm:col-span-2">
-              <p className="mb-1.5 text-[13px] font-medium" id="s-days-l">{t("settings.workDays")}</p>
-              <div role="group" aria-labelledby="s-days-l" className="flex flex-wrap gap-1.5">
-                {days.map((d) => {
-                  const on = sc.workDays.includes(d);
-                  return (
-                    <button
-                      key={d}
-                      type="button"
-                      aria-pressed={on}
-                      onClick={() => { clearRemote("schedule.workDays"); upd((x) => void (x.schedule.workDays = on ? x.schedule.workDays.filter((y) => y !== d) : days.filter((y) => y === d || x.schedule.workDays.includes(y)))); }}
-                      className={cn("flex h-8 min-w-12 cursor-pointer items-center justify-center gap-1 rounded-md border px-2 text-[13px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent")}
-                    >
-                      {t(`day.${d}` as DictKey)}
-                    </button>
-                  );
-                })}
-              </div>
-              {fieldErr("schedule.workDays") && <p role="alert" className="mt-1.5 text-xs text-danger">{fieldErr("schedule.workDays")}</p>}
-            </div>
-            <Field id="s-ws" label={t("settings.workStart")} error={fieldErr("schedule.workStart")}>
-              <Input {...fieldAria("s-ws", fieldErr("schedule.workStart"))} type="time" value={sc.workStart} onChange={(e) => { clearRemote("schedule.workStart"); upd((d) => void (d.schedule.workStart = e.target.value)); }} />
-            </Field>
-            <Field id="s-we" label={t("settings.workEnd")} hint={t("settings.workEndHint")} error={fieldErr("schedule.workEnd")}>
-              <Input {...fieldAria("s-we", fieldErr("schedule.workEnd"), "x")} type="time" value={sc.workEnd} onChange={(e) => { clearRemote("schedule.workEnd"); upd((d) => void (d.schedule.workEnd = e.target.value)); }} />
-            </Field>
-            <Field id="s-ps" label={t("settings.periodStart")} hint={t("settings.periodHint")} error={fieldErr("schedule.periodStart")}>
-              <Input {...fieldAria("s-ps", fieldErr("schedule.periodStart"), "x")} type="date" value={sc.periodStart} onChange={(e) => { clearRemote("schedule.periodStart"); upd((d) => void (d.schedule.periodStart = e.target.value)); }} />
-            </Field>
-            <Field id="s-pe" label={t("settings.periodEnd")} error={fieldErr("schedule.periodEnd")}>
-              <Input {...fieldAria("s-pe", fieldErr("schedule.periodEnd"))} type="date" value={sc.periodEnd} onChange={(e) => { clearRemote("schedule.periodEnd"); upd((d) => void (d.schedule.periodEnd = e.target.value)); }} />
-            </Field>
-            <label className="flex cursor-pointer items-center gap-2.5 text-[13px] sm:col-span-2">
-              <Switch checked={sc.randomOrder} onCheckedChange={(v) => upd((d) => void (d.schedule.randomOrder = v))} />
-              <span>
-                {t("settings.randomOrder")}
-                <span className="block text-xs text-muted-foreground">{t("settings.randomOrderHint")}</span>
-              </span>
-            </label>
-          </CardContent>
-        </Card>
+        <RunningCard
+          startAtLogin={draft.ui.startAtLogin}
+          // Applied by the backend already: record it as saved too, so it never makes the page dirty.
+          onStartAtLogin={(on) => { setSaved((x) => x && { ...x, ui: { ...x.ui, startAtLogin: on } }); setDraft((d) => d && { ...d, ui: { ...d.ui, startAtLogin: on } }); }}
+        />
 
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2"><Globe className="size-4" aria-hidden /> {t("settings.network")}</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Field id="n-proxy" label={t("settings.proxy")} hint={t("settings.proxyHint")} error={fieldErr("network.proxy")}>
-              <Input {...fieldAria("n-proxy", fieldErr("network.proxy"), "x")} value={draft.network.proxy} placeholder="http://127.0.0.1:7890" spellCheck={false} onChange={(e) => { clearRemote("network.proxy"); upd((d) => void (d.network.proxy = e.target.value)); }} />
-            </Field>
-          </CardContent>
-        </Card>
-
-        <NotifyCard draft={draft} upd={upd} fieldErr={fieldErr} clearRemote={clearRemote} onWebhookChanged={(v) => { setSaved((s) => s && { ...s, notify: { ...s.notify, webhookConfigured: v } }); setDraft((d) => d && { ...d, notify: { ...d.notify, webhookConfigured: v } }); }} />
+        <PaceCard draft={draft} upd={upd} clearRemote={clearRemote} />
 
         <Card>
           <CardHeader>
@@ -225,17 +210,108 @@ export function SettingsPage() {
                 </SelectContent>
               </Select>
             </Field>
-            <label className="flex cursor-pointer items-center gap-2.5 text-[13px] sm:col-span-2">
-              <Switch checked={draft.ui.startAtLogin} onCheckedChange={(v) => upd((d) => void (d.ui.startAtLogin = v))} />
-              <span>
-                {t("settings.startAtLogin")}
-                <span className="block text-xs text-muted-foreground">{t("settings.startAtLoginHint")}</span>
-              </span>
-            </label>
           </CardContent>
         </Card>
 
         <BackupCard onImported={() => { void afterImport(); }} />
+
+        <section className="rounded-lg border bg-card">
+          <h2 className="text-base font-semibold">
+            <button
+              type="button"
+              id="adv-btn"
+              aria-expanded={advOpen}
+              aria-controls="adv-panel"
+              onClick={() => toggleAdvanced(!advOpen)}
+              className="flex w-full cursor-pointer items-center gap-2 rounded-lg px-4 py-3 text-left"
+            >
+              <SlidersHorizontal className="size-4" aria-hidden />
+              <span className="min-w-0 flex-1">
+                {t("settings.advanced")}
+                <span className="block text-xs font-normal text-muted-foreground">{t("settings.advancedDesc")}</span>
+              </span>
+              <ChevronDown className={cn("size-4 shrink-0 transition-transform", advOpen && "rotate-180")} aria-hidden />
+            </button>
+          </h2>
+          <p aria-live="polite" className="px-4 pb-3 text-xs text-danger empty:hidden empty:p-0">
+            {!advOpen && ADVANCED_FIELDS.some(([k]) => fieldErr(k)) ? t("settings.advancedHasError") : null}
+          </p>
+          <div id="adv-panel" role="region" aria-labelledby="adv-btn" hidden={!advOpen} className="grid gap-4 border-t p-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Timer className="size-4" aria-hidden /> {t("settings.schedule")}</CardTitle>
+              <CardDescription>{t("settings.scheduleDesc")}</CardDescription>
+            </CardHeader>
+            <CardContent className="grid gap-4 sm:grid-cols-2">
+              <Field id="s-imin" label={t("settings.intervalMin")} hint={t("settings.durationHint")} error={fieldErr("schedule.intervalMin")}>
+                <Input {...fieldAria("s-imin", fieldErr("schedule.intervalMin"), "x")} value={sc.intervalMin} onChange={(e) => { clearRemote("schedule.intervalMin"); upd((d) => void (d.schedule.intervalMin = e.target.value)); }} />
+              </Field>
+              <Field id="s-imax" label={t("settings.intervalMax")} error={fieldErr("schedule.intervalMax")}>
+                <Input {...fieldAria("s-imax", fieldErr("schedule.intervalMax"))} value={sc.intervalMax} onChange={(e) => { clearRemote("schedule.intervalMax"); upd((d) => void (d.schedule.intervalMax = e.target.value)); }} />
+              </Field>
+              <Field id="s-amin" label={t("settings.apisMin")} error={fieldErr("schedule.apisPerRoundMin")}>
+                <Input {...fieldAria("s-amin", fieldErr("schedule.apisPerRoundMin"))} type="number" min={1} value={Number.isNaN(sc.apisPerRoundMin) ? "" : sc.apisPerRoundMin} onChange={(e) => { clearRemote("schedule.apisPerRoundMin"); upd((d) => void (d.schedule.apisPerRoundMin = e.target.valueAsNumber)); }} />
+              </Field>
+              <Field id="s-amax" label={t("settings.apisMax")} error={fieldErr("schedule.apisPerRoundMax")}>
+                <Input {...fieldAria("s-amax", fieldErr("schedule.apisPerRoundMax"))} type="number" min={1} value={Number.isNaN(sc.apisPerRoundMax) ? "" : sc.apisPerRoundMax} onChange={(e) => { clearRemote("schedule.apisPerRoundMax"); upd((d) => void (d.schedule.apisPerRoundMax = e.target.valueAsNumber)); }} />
+              </Field>
+              <div className="sm:col-span-2">
+                <p className="mb-1.5 text-[13px] font-medium" id="s-days-l">{t("settings.workDays")}</p>
+                <div role="group" aria-labelledby="s-days-l" className="flex flex-wrap gap-1.5">
+                  {days.map((d) => {
+                    const on = sc.workDays.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        type="button"
+                        aria-pressed={on}
+                        onClick={() => { clearRemote("schedule.workDays"); upd((x) => void (x.schedule.workDays = on ? x.schedule.workDays.filter((y) => y !== d) : days.filter((y) => y === d || x.schedule.workDays.includes(y)))); }}
+                        className={cn("flex h-8 min-w-12 cursor-pointer items-center justify-center gap-1 rounded-md border px-2 text-[13px] transition-colors", on ? "border-primary bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent")}
+                      >
+                        {t(`day.${d}` as DictKey)}
+                      </button>
+                    );
+                  })}
+                </div>
+                {fieldErr("schedule.workDays") && <p role="alert" className="mt-1.5 text-xs text-danger">{fieldErr("schedule.workDays")}</p>}
+              </div>
+              <Field id="s-ws" label={t("settings.workStart")} error={fieldErr("schedule.workStart")}>
+                <Input {...fieldAria("s-ws", fieldErr("schedule.workStart"))} type="time" value={sc.workStart} onChange={(e) => { clearRemote("schedule.workStart"); upd((d) => void (d.schedule.workStart = e.target.value)); }} />
+              </Field>
+              <Field id="s-we" label={t("settings.workEnd")} hint={t("settings.workEndHint")} error={fieldErr("schedule.workEnd")}>
+                <Input {...fieldAria("s-we", fieldErr("schedule.workEnd"), "x")} type="time" value={sc.workEnd} onChange={(e) => { clearRemote("schedule.workEnd"); upd((d) => void (d.schedule.workEnd = e.target.value)); }} />
+              </Field>
+              <Field id="s-ps" label={t("settings.periodStart")} hint={t("settings.periodHint")} error={fieldErr("schedule.periodStart")}>
+                <Input {...fieldAria("s-ps", fieldErr("schedule.periodStart"), "x")} type="date" value={sc.periodStart} onChange={(e) => { clearRemote("schedule.periodStart"); upd((d) => void (d.schedule.periodStart = e.target.value)); }} />
+              </Field>
+              <Field id="s-pe" label={t("settings.periodEnd")} error={fieldErr("schedule.periodEnd")}>
+                <Input {...fieldAria("s-pe", fieldErr("schedule.periodEnd"))} type="date" value={sc.periodEnd} onChange={(e) => { clearRemote("schedule.periodEnd"); upd((d) => void (d.schedule.periodEnd = e.target.value)); }} />
+              </Field>
+              <label className="flex cursor-pointer items-center gap-2.5 text-[13px] sm:col-span-2">
+                <Switch checked={sc.randomOrder} onCheckedChange={(v) => upd((d) => void (d.schedule.randomOrder = v))} />
+                <span>
+                  {t("settings.randomOrder")}
+                  <span className="block text-xs text-muted-foreground">{t("settings.randomOrderHint")}</span>
+                </span>
+              </label>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2"><Globe className="size-4" aria-hidden /> {t("settings.network")}</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <Field id="n-proxy" label={t("settings.proxy")} hint={t("settings.proxyHint")} error={fieldErr("network.proxy")}>
+                <Input {...fieldAria("n-proxy", fieldErr("network.proxy"), "x")} value={draft.network.proxy} placeholder="http://127.0.0.1:7890" spellCheck={false} onChange={(e) => { clearRemote("network.proxy"); upd((d) => void (d.network.proxy = e.target.value)); }} />
+              </Field>
+            </CardContent>
+          </Card>
+
+          <NotifyCard draft={draft} upd={upd} fieldErr={fieldErr} clearRemote={clearRemote} onWebhookChanged={(v) => { setSaved((s) => s && { ...s, notify: { ...s.notify, webhookConfigured: v } }); setDraft((d) => d && { ...d, notify: { ...d.notify, webhookConfigured: v } }); }} />
+          </div>
+        </section>
+
       </div>
     </>
   );

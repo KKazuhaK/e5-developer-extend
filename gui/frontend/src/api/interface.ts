@@ -37,6 +37,8 @@ export interface Api {
   settings: {
     get(): Promise<Settings>;
     save(s: Settings): Promise<ValidationError[]>;
+    /** Turns the tray's login entry on or off at once; not part of save. */
+    setStartAtLogin(on: boolean): Promise<void>;
     setWebhook(url: string): Promise<void>;
     clearWebhook(): Promise<void>;
     testWebhook(): Promise<void>;
@@ -53,6 +55,8 @@ export interface Api {
     doctor(offline: boolean): Promise<DoctorCheck[]>;
     serviceInfo(): Promise<ServiceInfo>;
     installService(): Promise<ServiceResult>;
+    /** Starts the installed service when it is stopped; does not rewrite it. */
+    startService(): Promise<ServiceResult>;
     uninstallService(): Promise<ServiceResult>;
   };
   catalog: {

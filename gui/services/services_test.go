@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -256,16 +257,24 @@ func TestNothingSecretLeavesTheServices(t *testing.T) {
 		t.Fatalf("settings: %+v %v", s, err)
 	}
 	r.keep(s)
-	s.UI.Language, s.UI.Theme, s.UI.StartAtLogin = "zh", "dark", true
+	s.UI.Language, s.UI.Theme = "zh", "dark"
 	s.Schedule.IntervalMin = "45m"
 	if bad, err := set.Save(s); err != nil || len(bad) != 0 {
 		t.Fatalf("save: %v %v", bad, err)
 	}
-	if !r.auto.on {
-		t.Fatal("start at login not applied")
-	}
-	if got, _ := set.Get(); got.UI.Language != "zh" || got.Schedule.IntervalMin != "45m" || !got.UI.StartAtLogin {
+	if got, _ := set.Get(); got.UI.Language != "zh" || got.Schedule.IntervalMin != "45m" {
 		t.Fatalf("after save: %+v", got)
+	}
+	if err := set.SetStartAtLogin(true); err != nil || !r.auto.on {
+		t.Fatalf("start at login not applied: %v", err)
+	}
+	if got, _ := set.Get(); !got.UI.StartAtLogin {
+		t.Fatalf("after set: %+v", got)
+	}
+	// Save must not undo it, even with a stale value in the form.
+	s.UI.StartAtLogin = false
+	if bad, err := set.Save(s); err != nil || len(bad) != 0 || !r.auto.on {
+		t.Fatalf("save touched start at login: %v %v", bad, err)
 	}
 	s.UI.Language = "klingon"
 	s.Schedule.IntervalMax = "soon"
@@ -542,11 +551,8 @@ func TestAutostartFailureIsAnError(t *testing.T) {
 	r := newRig(t)
 	r.b.Autostart = brokenAutostart{}
 	set := NewSettingsService(r.b)
-	s, _ := set.Get()
-	s.UI.StartAtLogin = true
-	bad, err := set.Save(s)
-	if err == nil || len(bad) != 0 {
-		t.Fatalf("bad=%+v err=%v", bad, err)
+	if err := set.SetStartAtLogin(true); err == nil {
+		t.Fatal("want the failure back")
 	}
 }
 
@@ -577,5 +583,41 @@ func TestProxyPasswordIsHiddenAndKept(t *testing.T) {
 	cfg, _, _ = r.b.Ops.LoadConfig()
 	if cfg.Network.Proxy != "http://other.example:8080" {
 		t.Fatalf("proxy = %q", cfg.Network.Proxy)
+	}
+}
+
+func TestStartServiceNeedsAnInstalledServiceAndWithdrawsHandover(t *testing.T) {
+	r := newRig(t)
+	r.b.Ops.Platform = service.Linux
+	fr := &service.FakeRunner{}
+	r.b.Ops.Runner = fr
+	var asked, cancels int
+	r.b.RequestHandover = func(context.Context) error { asked++; return nil }
+	r.b.CancelHandover = func() { cancels++ }
+	h := NewHealthService(r.b)
+	// Not installed: nothing is started and the tray is not even asked.
+	if _, err := h.StartService(); !errors.Is(err, service.ErrNotInstalled) || asked != 0 || cancels != 0 {
+		t.Fatalf("not installed: err=%v asked=%d cancels=%d", err, asked, cancels)
+	}
+	if _, err := h.InstallService(); err != nil {
+		t.Fatal(err)
+	}
+	fr.Replies = map[string]service.Output{
+		"systemctl --user is-enabled": {Stdout: "enabled\n"}, "systemctl --user is-active": {Stdout: "inactive\n"}, "loginctl": {Stdout: "yes\n"},
+	}
+	fr.Calls = nil
+	cancels = 0
+	res, err := h.StartService()
+	if err != nil || len(res.Actions) != 1 || cancels != 0 || asked != 2 {
+		t.Fatalf("start: %+v %v cancels=%d asked=%d", res, err, cancels, asked)
+	}
+	if got := strings.Join(fr.Commands(), "|"); !strings.Contains(got, "systemctl --user start e5extend.service") {
+		t.Fatalf("commands = %s", got)
+	}
+	// A failing start after the handover withdraws it.
+	fr.FailOn = []string{"systemctl --user start"}
+	cancels = 0
+	if _, err := h.StartService(); err == nil || cancels != 1 {
+		t.Fatalf("failed start: err=%v cancels=%d", err, cancels)
 	}
 }

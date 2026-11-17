@@ -178,3 +178,33 @@ func (m *launchd) Status() (Status, error) {
 	st.Details = append(st.Details, "loaded in "+m.domain())
 	return st, nil
 }
+
+// Start starts the job. A loaded job that is only disabled is enabled and
+// kicked again; a job that is not loaded at all is bootstrapped last.
+func (m *launchd) Start() (Result, error) {
+	var res Result
+	if !fileExists(m.plistPath()) {
+		return res, ErrNotInstalled
+	}
+	ctx := context.Background()
+	run := func(args ...string) error {
+		_, err := m.env.Runner.Run(ctx, "launchctl", args...)
+		if err == nil {
+			res.Actions = append(res.Actions, "ran launchctl "+strings.Join(args, " "))
+		}
+		return err
+	}
+	if run("kickstart", m.target()) == nil {
+		return res, nil
+	}
+	if err := run("enable", m.target()); err != nil {
+		return res, fmt.Errorf("enable %s: %w", Label, err)
+	}
+	if run("kickstart", m.target()) == nil {
+		return res, nil
+	}
+	if err := run("bootstrap", m.domain(), m.plistPath()); err != nil {
+		return res, fmt.Errorf("load %s: %w", Label, err)
+	}
+	return res, nil
+}

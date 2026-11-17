@@ -58,6 +58,7 @@ export const wailsApi: Api = {
       };
     },
     save: async (s) => arr(await SettingsService.Save(cast(s))),
+    setStartAtLogin: (on) => SettingsService.SetStartAtLogin(on),
     setWebhook: (u) => SettingsService.SetWebhook(u),
     clearWebhook: () => SettingsService.ClearWebhook(),
     testWebhook: () => SettingsService.TestWebhook(),
@@ -91,6 +92,7 @@ export const wailsApi: Api = {
       return { ...i, details: arr(i.details) };
     },
     installService: async () => norm(await HealthService.InstallService()),
+    startService: async () => norm(await HealthService.StartService()),
     uninstallService: async () => norm(await HealthService.UninstallService()),
   },
   catalog: {
