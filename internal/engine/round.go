@@ -155,17 +155,23 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 				force, rt.forceTok = rt.forceTok, false
 			}
 		})
+		// Only here may a password account sign in with its password again.
+		ctx := e.gateContext(ctx, acct.Name)
 		tctx := ctx
 		if force {
 			tctx = auth.ForceRefresh(ctx)
 		}
 		tok, err = au.Token(tctx)
-		if err != nil && force && ctx.Err() == nil && !errors.Is(err, auth.ErrTransient) {
+		if err != nil && force && ctx.Err() == nil && !errors.Is(err, auth.ErrTransient) && auth.CredentialFailure(err) == "" {
 			// A forced refresh is a recovery attempt; if the identity service
 			// rejects it, fall back to a normal silent request before raising
-			// attention.
+			// attention. A credential failure of the password sign-in is not
+			// tried again: that would repeat a wrong password.
 			e.log.Warn("forced token refresh failed; retrying without force", "account", acct.Name)
 			tok, err = au.Token(ctx)
+		}
+		if err == nil {
+			e.saveHomeAccount(ctx, acct, tok)
 		}
 		if err == nil {
 			return e.callAPIs(ctx, acct, roundID, tok)
@@ -467,4 +473,21 @@ func (e *Engine) sleep(ctx context.Context, d time.Duration) bool {
 	case <-e.clock.After(d):
 		return true
 	}
+}
+
+// saveHomeAccount stores the home account ID a password sign-in returned, which
+// the configuration lacks (the first login did not get it written back).
+func (e *Engine) saveHomeAccount(ctx context.Context, acct config.Account, tok auth.Token) {
+	if !acct.Delegated() || tok.HomeAccountID == "" || tok.HomeAccountID == acct.HomeAccountID || e.o.SaveHomeAccount == nil {
+		return
+	}
+	if err := e.o.SaveHomeAccount(ctx, acct.Name, tok.HomeAccountID); err != nil {
+		e.log.Warn("save home account id", "account", acct.Name, "err", err)
+		return
+	}
+	e.withLock(func() {
+		if a, ok := e.cfg.Find(acct.Name); ok {
+			a.HomeAccountID = tok.HomeAccountID
+		}
+	})
 }

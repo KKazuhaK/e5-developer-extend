@@ -48,6 +48,9 @@ func (o *Ops) EngineOptions(cfg *config.Config, cfgPath string) (engine.Options,
 		eo.CallGapMin, eo.CallGapMax = 0, 0
 		eo.LockWait = 50 * time.Millisecond
 	}
+	eo.SaveHomeAccount = func(ctx context.Context, name, homeID string) error {
+		return o.updateAccount(ctx, name, func(ac *config.Account) { ac.HomeAccountID = homeID })
+	}
 	eo.NewAuth = func(acct config.Account) (auth.Authenticator, error) {
 		s, err := openVault()
 		if err != nil {

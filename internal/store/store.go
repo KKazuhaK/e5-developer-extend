@@ -52,6 +52,12 @@ type Notice struct {
 	Msg     string    `json:"msg,omitempty"`
 }
 
+// PasswordBlock records why automatic password sign-in stopped.
+type PasswordBlock struct {
+	Code string    `json:"code"` // AADSTS code of the failure
+	At   time.Time `json:"at"`
+}
+
 // AccountState is the persisted state of one account.
 type AccountState struct {
 	NextRun                time.Time            `json:"next_run,omitzero"`
@@ -64,6 +70,12 @@ type AccountState struct {
 	APISkipUntil           map[string]time.Time `json:"api_skip_until,omitempty"`
 	APIForbiddenCount      map[string]int       `json:"api_forbidden_count,omitempty"`
 	Totals                 Totals               `json:"totals"`
+	// PasswordBlocked is set after a password sign-in failed in a way that
+	// retrying cannot fix; the engine then stops signing the account in with
+	// its password until the person acts (set-secret, login, editing the account).
+	PasswordBlocked *PasswordBlock `json:"password_blocked,omitempty"`
+	// LastPasswordAttempt is when the engine last tried an automatic password sign-in.
+	LastPasswordAttempt time.Time `json:"last_password_attempt,omitzero"`
 	// Notified maps an alert kind to its last notice; only the engine writes it.
 	Notified map[string]Notice `json:"notified,omitempty"`
 }

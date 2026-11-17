@@ -47,32 +47,51 @@ func (d *delegated) msal() (public.Client, error) {
 	return c, nil
 }
 
-// Token returns an access token silently. A password account whose refresh
-// token no longer works (expired, revoked, or cut off by a Conditional Access
-// sign-in frequency policy) signs in again with its stored password, so a
-// background job keeps running without a person; device code and browser
-// accounts need the person and report ErrLoginRequired instead.
+// Token returns an access token silently. Only when ctx carries a
+// PasswordGate (AllowPasswordFallback; the background engine sets it) does a
+// password account whose refresh token no longer works (expired, revoked, or
+// cut off by a Conditional Access sign-in frequency policy) sign in again with
+// its stored password, so a background job keeps running without a person.
+// Everyone else, and device code and browser accounts, get ErrLoginRequired.
 func (d *delegated) Token(ctx context.Context) (Token, error) {
 	tok, err := d.silentToken(ctx)
 	if err == nil || d.acct.Auth != config.AuthPassword || !errors.Is(err, ErrLoginRequired) || ctx.Err() != nil {
 		return tok, err
 	}
-	return d.passwordSignIn(ctx)
+	gate := FallbackGate(ctx)
+	if gate == nil {
+		return tok, err
+	}
+	return d.passwordSignIn(ctx, gate, err)
 }
 
 // passwordSignIn is the non-interactive re-authentication for password
 // accounts. The password is read from the vault for this call only and never
-// logged. It fails with ErrLoginRequired when the password does not work
-// (wrong, MFA required, blocked by policy), so the usual hints apply.
-func (d *delegated) passwordSignIn(ctx context.Context) (Token, error) {
+// logged. silentErr is what the silent refresh returned; it is the answer
+// whenever the password must not be tried. A credential failure blocks further
+// attempts through the gate, so a wrong password or a policy that needs MFA is
+// not retried until the person has acted.
+func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silentErr error) (Token, error) {
 	d.reauth.Lock()
 	defer d.reauth.Unlock()
+	// Signing in the first time is an explicit step, not something to do on the side.
+	if _, err := d.store.Get(vault.TokenCacheKey(d.acct.Name)); err != nil {
+		return Token{}, silentErr
+	}
 	pw, err := d.store.Get(vault.SecretKey(d.acct.Name))
 	if errors.Is(err, vault.ErrNotFound) {
 		return Token{}, fmt.Errorf("%w: account %q has no stored password to sign in again", ErrLoginRequired, d.acct.Name)
 	}
 	if err != nil {
 		return Token{}, fmt.Errorf("account %q: read password from vault: %w", d.acct.Name, err)
+	}
+	ok, blocked := gate.Allow()
+	if blocked != "" {
+		return Token{}, fmt.Errorf("%w: automatic password sign-in is paused after %s; fix the cause, then run: e5extend account set-secret %s (or account login)",
+			ErrLoginRequired, blocked, d.acct.Name)
+	}
+	if !ok {
+		return Token{}, silentErr
 	}
 	c, err := d.msal()
 	if err != nil {
@@ -81,11 +100,13 @@ func (d *delegated) passwordSignIn(ctx context.Context) (Token, error) {
 	res, err := c.AcquireTokenByUsernamePassword(withRecovery(ctx), scopes, d.acct.Username, string(pw))
 	if err != nil {
 		err = d.wrap(err)
+		if code := CredentialFailure(err); code != "" {
+			gate.Failed(code)
+		}
 		if errors.Is(err, ErrLoginRequired) || errors.Is(err, ErrTransient) || errors.Is(err, ErrInvalidClient) || errors.Is(err, ErrConsentRequired) {
 			return Token{}, err
 		}
-		// Any other refusal (for example a Conditional Access block) means the
-		// stored password cannot sign in without a person.
+		// Any other refusal means the stored password cannot sign in without a person.
 		return Token{}, fmt.Errorf("%w: %s", ErrLoginRequired, describe(err.Error()))
 	}
 	// The same user signs in again, so the home account id stays stable; a

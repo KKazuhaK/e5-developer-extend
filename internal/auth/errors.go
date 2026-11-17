@@ -39,6 +39,10 @@ var codeKinds = map[string]error{
 	"AADSTS50078":   ErrLoginRequired,
 	"AADSTS70043":   ErrLoginRequired,
 	"AADSTS50132":   ErrLoginRequired,
+	"AADSTS50053":   ErrLoginRequired, // account locked
+	"AADSTS50055":   ErrLoginRequired, // password expired
+	"AADSTS50057":   ErrLoginRequired, // account disabled
+	"AADSTS53003":   ErrLoginRequired, // blocked by Conditional Access
 }
 
 // nameKinds maps OAuth error names to classes; they are only consulted when no

@@ -142,11 +142,17 @@ func Hint(err error, name string) string {
 		// Seen on a real tenant: a Conditional Access "sign-in frequency" policy
 		// caps the refresh token's lifetime, so signing in again only buys that
 		// much time and the background job keeps stopping.
-		return "ways out, in order: (a) use the app identity, which user sign-in policies do not affect: e5extend account add " + name + "-app --auto --auth client_secret; " +
-			"(b) password sign-in, only if the account has no MFA (the password is stored encrypted on this machine; E5 developer tenants usually enforce MFA, so this rarely works); " +
+		return "ways out, in order: (a) use the app identity (recommended), which user sign-in policies do not affect: e5extend account add " + name + "-app --auto --auth client_secret; " +
+			"(b) password sign-in, only if the account has no MFA (the password is stored encrypted on this machine); a sign-in frequency policy often comes with MFA, so this usually fails there; " +
 			"(c) exclude this app registration from the Conditional Access policy (Entra > Protection > Conditional Access), then run `e5extend account login " + name + "`"
 	case strings.Contains(text, "AADSTS50126"):
-		return "the stored password is wrong or expired: run `e5extend account set-secret " + name + "`"
+		return "the stored password is wrong or expired: run `e5extend account set-secret " + name + "` (automatic password sign-in stays paused until then)"
+	case strings.Contains(text, "AADSTS50053"):
+		return "the account is locked (Smart Lockout); wait, sign in on the web to unlock it, then run `e5extend account login " + name + "`"
+	case strings.Contains(text, "AADSTS50055"):
+		return "the password has expired: change it, then run `e5extend account set-secret " + name + "`"
+	case strings.Contains(text, "AADSTS50057"):
+		return "the account is disabled in Entra; enable it there, then run `e5extend account login " + name + "`"
 	case strings.Contains(text, "AADSTS50076"), strings.Contains(text, "AADSTS50079"):
 		return "this account requires MFA; switch to device_code or browser (remove it and add it again with --auth device_code)"
 	case errors.Is(err, auth.ErrLoginRequired) && errors.Is(err, vault.ErrWrongKey):
