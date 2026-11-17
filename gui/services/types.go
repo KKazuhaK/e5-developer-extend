@@ -291,3 +291,6 @@ type BackupImportResult struct {
 	Summary   ImportSummary  `json:"summary"`
 	Problem   *BackupProblem `json:"problem"`
 }
+
+// APIStat is the call statistics of one API.
+type APIStat = ops.APIStatRow
