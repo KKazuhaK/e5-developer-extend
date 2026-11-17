@@ -822,6 +822,7 @@ func (e *Engine) resumeAccount(name string, now time.Time) {
 		}
 		as.Status, as.Reason, as.ConsecutiveFailedRound = store.StatusOK, "", 0
 		as.NextProbe, as.Probes, as.ResumedAt = time.Time{}, 0, now
+		as.APISkipUntil = nil // the 24 h pauses would leave nothing to call and pause it again
 		e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		e.saveLocked()
 		resumed = true

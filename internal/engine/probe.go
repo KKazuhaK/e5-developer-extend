@@ -183,6 +183,7 @@ func (e *Engine) resumeFromProbe(acct config.Account, api string) {
 		as.Status, as.Reason, as.ConsecutiveFailedRound = store.StatusOK, "", 0
 		as.NextProbe, as.Probes = time.Time{}, 0
 		as.LastSuccess, as.ResumedAt = now, now
+		as.APISkipUntil = nil
 		e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		e.saveLocked()
 		resumed = true

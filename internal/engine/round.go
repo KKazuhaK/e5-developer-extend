@@ -21,6 +21,7 @@ type outcome struct {
 	calls, ok, failed int
 	throttled         bool   // some call ended throttled (it is no failure)
 	unavailable       int    // calls refused with 403/404; the API is paused for the account
+	refused           bool   // some API answered 403/404 (now or within the last 24 hours)
 	allSkipped        bool   // every API the account may call is paused after a 403/404
 	netStop           bool   // a network error cut the round short
 	skipped           string // whole round skipped: network, needs_attention
@@ -137,7 +138,9 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 			if as.ConsecutiveFailedRound >= AutoPauseRounds {
 				as.Status = store.StatusPaused
 				what := fmt.Sprintf("%d rounds in a row failed (last error: %s)", as.ConsecutiveFailedRound, out.lastFail)
-				if out.failed == 0 {
+				if out.failed == 0 && out.calls == 0 {
+					what = fmt.Sprintf("%d rounds in a row made no call: no API left to call, all were refused (403/404) recently (license or mailbox removed?)", as.ConsecutiveFailedRound)
+				} else if out.failed == 0 {
 					what = fmt.Sprintf("%d rounds in a row had no successful call: every API answered 403/404 (license or mailbox removed?)", as.ConsecutiveFailedRound)
 				}
 				as.Reason = fmt.Sprintf("%s; it is tried again automatically, or fix the cause and run: e5extend account resume %s", what, acct.Name)
@@ -278,6 +281,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 		return out
 	}
 
+	out.refused = len(skip) > 0
 	var cands []catalog.API
 	allowed := catalog.Available(e.apis, kind, tok.Scopes, acct.Categories)
 	for _, a := range allowed {
@@ -346,6 +350,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			// is no failure of the round.
 			out.calls++
 			out.unavailable++
+			out.refused = true
 			out.lastFail = res.Class
 			skip[id] = true
 			e.updateAccount(acct.Name, func(as *store.AccountState) {
@@ -377,6 +382,13 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 					if handle("users.pick", res) {
 						return finishCalls(ctx, out)
 					}
+				case graph.Forbidden, graph.NotFound:
+					// No user to address: this API is refused for the round
+					// (not remembered), so a round that lost everything else
+					// too still counts as refused.
+					out.unavailable++
+					out.lastFail = res.Class
+					skip[api.ID] = true
 				}
 				continue
 			}
@@ -428,8 +440,9 @@ func finishCalls(ctx context.Context, out outcome) outcome {
 	if ctx.Err() != nil {
 		out.aborted = true
 	}
-	if out.calls == 0 && !out.netStop && !out.aborted {
-		// Every picked call needed a {user} that could not be found.
+	if out.calls == 0 && !out.netStop && !out.aborted && !(out.allSkipped && out.refused) {
+		// Every picked call needed a {user} that could not be found. (Not when
+		// the other APIs were refused too: that is a refused round.)
 		out.attention = "no calls could be made: set `username` for this account or grant User.Read.All"
 	}
 	if out.netStop && out.ok == 0 && out.failed == 0 {

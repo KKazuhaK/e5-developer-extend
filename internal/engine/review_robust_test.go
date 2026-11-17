@@ -25,7 +25,7 @@ func TestAccountRefusedEverywhereEndsUpPausedWithoutRecovered(t *testing.T) {
 		}
 	}
 	as := f.acct("main")
-	if as.Status != store.StatusPaused || !strings.Contains(as.Reason, "every API answered 403/404") || strings.Contains(as.Reason, "permission") {
+	if as.Status != store.StatusPaused || !strings.Contains(as.Reason, "403/404") || strings.Contains(as.Reason, "permission") {
 		t.Fatalf("got %+v", as)
 	}
 	if k := n.kinds("main"); len(k) != 1 || k[0] != notify.AutoPaused {
@@ -142,5 +142,81 @@ func TestProbeRejectedTokenForcesRefreshNextTime(t *testing.T) {
 	last := f.auths["main"].forced
 	if !last[len(last)-1] {
 		t.Error("the next probe did not ask for a fresh token")
+	}
+}
+
+// A resume must not leave the 24 h API pauses behind: the account would find
+// nothing to call, count a refused round and pause itself again.
+func TestManualResumeClearsAPIPauses(t *testing.T) {
+	n := &fakeNotifier{}
+	f := newFixture(t, delegatedAcct("main"))
+	f.opts.Notifier = n
+	f.h.setStatus(func(string) (int, map[string]string) { return 403, nil })
+	f.start()
+	for i := 0; i < 12 && f.acct("main").Status == store.StatusOK; i++ {
+		f.round("main")
+	}
+	if as := f.acct("main"); as.Status != store.StatusPaused || len(as.APISkipUntil) == 0 {
+		t.Fatalf("setup: %+v", as)
+	}
+	f.h.setStatus(nil)
+	if err := TriggerResume(f.dir, "main"); err != nil {
+		t.Fatal(err)
+	}
+	f.tickWait()
+	if as := f.acct("main"); as.Status != store.StatusOK || len(as.APISkipUntil) != 0 {
+		t.Fatalf("resume left pauses: %+v", as)
+	}
+	base := f.h.total()
+	for i := 0; i < AutoPauseRounds+1; i++ {
+		f.jump(10 * time.Minute)
+		f.round("main")
+	}
+	as := f.acct("main")
+	if as.Status != store.StatusOK || f.h.total() == base || as.LastSuccess.IsZero() {
+		t.Fatalf("paused again or made no call: %+v", as)
+	}
+	paused := 0
+	for _, k := range n.kinds("main") {
+		if k == notify.AutoPaused {
+			paused++
+		}
+	}
+	if paused != 1 {
+		t.Errorf("%d auto_paused alerts, want 1", paused)
+	}
+}
+
+func TestProbeResumeClearsAPIPauses(t *testing.T) {
+	f, pausedAt := pausedFixture(t, nil)
+	f.h.setStatus(nil)
+	f.e.updateAccount("main", func(as *store.AccountState) {
+		as.APISkipUntil = map[string]time.Time{}
+		for _, a := range f.e.apis {
+			if a.ID != "user.me" {
+				as.APISkipUntil[a.ID] = pausedAt.Add(30 * time.Hour)
+			}
+		}
+	})
+	f.clock.Set(pausedAt.Add(6 * time.Hour))
+	f.tickWait()
+	if as := f.acct("main"); as.Status != store.StatusOK || len(as.APISkipUntil) != 0 {
+		t.Fatalf("probe resume left pauses: %+v", as)
+	}
+}
+
+func TestAppAccountLosingEveryAPIPausesWhenUserListIsRefused(t *testing.T) {
+	f := newFixture(t, appAcct())
+	f.auths["svc"].tok.Scopes = []string{"Mail.Read", "Organization.Read.All"}
+	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 30, 30
+	f.h.usersCode = 403
+	f.h.setStatus(func(string) (int, map[string]string) { return 404, nil })
+	f.start()
+	for i := 0; i < 8 && f.acct("svc").Status == store.StatusOK; i++ {
+		f.round("svc")
+	}
+	as := f.acct("svc")
+	if as.Status != store.StatusPaused {
+		t.Fatalf("not auto-paused: %+v", as)
 	}
 }
