@@ -155,7 +155,7 @@ Windows 文件版本只能是数字，用去掉预发布部分的 `NUM_VERSION`�
 
 ## 7. 以后再做
 
-- 代码签名：macOS（Developer ID + 公证）、Windows（Azure Trusted Signing 或 OV 证书）。工作流里已经留了开关位置。
+- 代码签名：macOS（Developer ID + 公证）、Windows（SignPath Foundation 或 Azure Artifact Signing）。方案比较和建议见 [signing.md](signing.md)。
 - Homebrew tap、Scoop bucket、winget 清单。
 - 应用内更新（Wails 自带，基于 GitHub Releases），前提是先有签名。
 
