@@ -281,7 +281,8 @@ func EngineHost(dataDir string) string {
 	return HostGUI
 }
 
-// PidAlive reports whether a process with this id exists.
+// PidAlive reports whether a process with this id exists and belongs to this
+// user (another user's process counts as gone).
 func PidAlive(pid int) bool { return pidAlive(pid) }
 
 // ProcStart is a token for when the process started ("" when unknown). With

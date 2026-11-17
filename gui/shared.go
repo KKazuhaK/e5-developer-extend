@@ -349,7 +349,7 @@ func restartScript(procs []procRef, wait int, bundle bool) string {
 		return launch
 	}
 	// st prints the start time of a process as ops.ProcStart does.
-	fn := `st() { if [ -r /proc/$1/stat ]; then sed 's/^.*) //' /proc/$1/stat | cut -d' ' -f20; else ps -o lstart= -p $1 | tr -s ' ' | sed 's/^ //;s/ $//'; fi; }; `
+	fn := `st() { if [ -r /proc/$1/stat ]; then sed 's/^.*) //' /proc/$1/stat | cut -d' ' -f20; else LC_ALL=C TZ=UTC ps -o lstart= -p $1 | tr -s ' ' | sed 's/^ //;s/ $//'; fi; }; `
 	script := fn + fmt.Sprintf("i=0; while [ $i -lt %d ] && { %s; }; do sleep 1; i=$((i+1)); done; ",
 		wait, strings.Join(loose, " || "))
 	if len(strict) > 0 {

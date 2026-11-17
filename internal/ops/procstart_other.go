@@ -3,6 +3,7 @@
 package ops
 
 import (
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -14,7 +15,11 @@ func procStart(pid int) string {
 	if pid <= 0 {
 		return ""
 	}
-	out, err := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid)).Output()
+	// A fixed locale and time zone, so the text is the same whoever reads it
+	// (the restart helper in gui/shared.go runs ps the same way).
+	cmd := exec.Command("ps", "-o", "lstart=", "-p", strconv.Itoa(pid))
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "TZ=UTC")
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
