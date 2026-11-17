@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, type ComponentType } from "react";
 import { Activity, HeartPulse, Info, LayoutDashboard, Settings as SettingsIcon, Users } from "lucide-react";
 import { AppName } from "@/config";
+import appIcon from "@/assets/appicon-128.png";
 import { useI18n, type DictKey } from "@/i18n";
 import { useApp, type Page } from "@/state/app";
 import { cn } from "@/lib/utils";
@@ -83,9 +84,7 @@ export function App() {
     <div className="flex h-full">
       <nav aria-label={t("nav.label")} className="flex w-52 shrink-0 flex-col border-r bg-sidebar px-3 py-4">
         <div className="mb-5 flex items-center gap-2 px-2">
-          <div className="flex size-7 items-center justify-center rounded-md bg-primary text-[13px] font-bold text-primary-foreground" aria-hidden>
-            E5
-          </div>
+          <img src={appIcon} alt="" aria-hidden className="size-7 shrink-0 select-none" draggable={false} />
           <span className="text-[15px] font-semibold tracking-tight">{AppName}</span>
         </div>
         <ul className="flex flex-col gap-0.5">

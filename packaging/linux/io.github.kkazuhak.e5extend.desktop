@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=E5 Developer Extend
+Comment=Keep a Microsoft 365 E5 developer tenant active
+Exec=/usr/bin/e5extend-gui --tray
+Icon=io.github.kkazuhak.e5extend
+Terminal=false
+Categories=Utility;
+Keywords=Microsoft;365;E5;Graph;
+StartupWMClass=e5extend-gui

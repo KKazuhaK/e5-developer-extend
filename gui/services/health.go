@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 // HealthService runs the health checks and manages the background service.
@@ -74,6 +74,38 @@ func (s *HealthService) undoHandover() {
 	if s.b.CancelHandover != nil {
 		s.b.CancelHandover()
 	}
+}
+
+// StartService starts the installed background service when it is stopped.
+// Like an install it first asks the tray to hand the engine over, so the two
+// do not run it at once; if the start fails the handover is withdrawn.
+func (s *HealthService) StartService() (ServiceResult, error) {
+	b := s.b
+	defer b.begin()()
+	// Nothing to start: say so before the tray is asked to give anything up.
+	st, err := b.Ops.ServiceStatus()
+	if err != nil {
+		return ServiceResult{}, err
+	}
+	if !st.Installed {
+		return ServiceResult{}, service.ErrNotInstalled
+	}
+	handed := false
+	if b.RequestHandover != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+		err := b.RequestHandover(ctx)
+		handed = true
+		if err != nil {
+			s.undoHandover()
+			return ServiceResult{}, err
+		}
+	}
+	res, err := b.Ops.ServiceStart()
+	if err != nil && handed {
+		s.undoHandover()
+	}
+	return toResult(res), err
 }
 
 // UninstallService stops and removes the background service.

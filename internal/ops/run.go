@@ -9,13 +9,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // EngineOptions wires the engine to the vault, proxy and config file.
@@ -48,6 +48,7 @@ func (o *Ops) EngineOptions(cfg *config.Config, cfgPath string) (engine.Options,
 		eo.CallGapMin, eo.CallGapMax = 0, 0
 		eo.LockWait = 50 * time.Millisecond
 	}
+	eo.SaveHomeAccount = o.saveHomeAccount
 	eo.NewAuth = func(acct config.Account) (auth.Authenticator, error) {
 		s, err := openVault()
 		if err != nil {
@@ -134,7 +135,7 @@ func (o *Ops) RunNow(ctx context.Context, names []string, opts RunNowOptions) (R
 		}
 	}
 	if len(cfg.Accounts) == 0 {
-		return RunNowResult{}, errors.New("no accounts configured; add one with: e5renew account add")
+		return RunNowResult{}, errors.New("no accounts configured; add one with: e5extend account add")
 	}
 	targets := names
 	if len(targets) == 0 {

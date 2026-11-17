@@ -10,7 +10,10 @@ const base = (): Settings => ({
     workDays: ["mon", "tue"], workStart: "09:00", workEnd: "18:00", periodStart: "", periodEnd: "",
   },
   network: { proxy: "" },
-  notify: { staleAfter: "72h", events: [], webhookConfigured: false },
+  notify: {
+    staleAfter: "72h", events: [], webhookConfigured: false, channels: 0, cooldown: "6h", quietHours: "",
+    spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5,
+  },
   ui: { language: "auto", theme: "system", startAtLogin: false },
 });
 
@@ -126,5 +129,25 @@ describe("backend ValidationError field mapping", () => {
       { field: "network.proxy", message: "c" },
     ]);
     expect(m).toEqual({ "schedule.workDays": "a", "network.proxy": "c" });
+  });
+});
+
+describe("validateSettings: alert noise", () => {
+  const withNotify = (patch: Partial<Settings["notify"]>): Settings => ({ ...base(), notify: { ...base().notify, ...patch } });
+  it("accepts the defaults, \"0\" and an empty quiet window", () => {
+    expect(validateSettings(base())).toEqual({});
+    expect(validateSettings(withNotify({ cooldown: "0" }))).toEqual({});
+    expect(validateSettings(withNotify({ quietHours: "23:00-08:00" }))).toEqual({});
+  });
+  it("flags bad cooldown, quiet hours and spike values", () => {
+    const e = validateSettings(withNotify({ cooldown: "soon", quietHours: "late", spikeRounds: 0, spikeRate: 1.5, spikeMinFailures: 0 }));
+    expect(e["notify.cooldown"]).toBe("cooldown");
+    expect(e["notify.quietHours"]).toBe("quiet");
+    expect(e["notify.spikeRounds"]).toBe("spikeRounds");
+    expect(e["notify.spikeRate"]).toBe("spikeRate");
+    expect(e["notify.spikeMinFailures"]).toBe("spikeMin");
+  });
+  it("rejects a quiet window whose ends are equal", () => {
+    expect(validateSettings(withNotify({ quietHours: "08:00-08:00" }))["notify.quietHours"]).toBe("quiet");
   });
 });

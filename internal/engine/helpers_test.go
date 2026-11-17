@@ -13,10 +13,10 @@ import (
 
 	_ "time/tzdata"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 const testGUID = "11111111-2222-3333-4444-555555555555"
@@ -113,9 +113,26 @@ type graphHandler struct {
 	hits   []string
 	// usersCode, when set, is the answer to the {user} lookup.
 	usersCode int
+	// subs answers GET /directory/subscriptions (status, body); nil means 403.
+	// These requests are kept out of hits: they are not account calls.
+	subs     func(r *http.Request) (int, string)
+	subsHits int
 }
 
 func (h *graphHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "/directory/subscriptions" {
+		h.mu.Lock()
+		h.subsHits++
+		f := h.subs
+		h.mu.Unlock()
+		code, body := http.StatusForbidden, ""
+		if f != nil {
+			code, body = f(r)
+		}
+		w.WriteHeader(code)
+		_, _ = w.Write([]byte(body))
+		return
+	}
 	h.mu.Lock()
 	h.hits = append(h.hits, r.URL.Path)
 	st, uc := h.status, h.usersCode
@@ -212,6 +229,7 @@ func newFixture(t *testing.T, accts ...config.Account) *fixture {
 	f.opts.DataDir = f.dir
 	f.opts.Clock = f.clock
 	f.opts.CallGapMin, f.opts.CallGapMax = 0, 0
+	f.opts.NoSubscriptionCheck = true // subscription tests turn it on
 	f.opts.Seed = 42
 	f.opts.Tick = 10 * time.Minute // jump threshold 30 minutes
 	f.opts.LockWait = 50 * time.Millisecond

@@ -7,3 +7,4 @@ master.key
 .env
 compose*.yml
 compose*.yaml
+*.env

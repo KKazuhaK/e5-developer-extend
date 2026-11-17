@@ -1,10 +1,10 @@
-# e5-renew
+# E5 Developer Extend
 
 跨平台的 Microsoft 365 E5 开发者订阅活跃工具：定时、随机地调用 Microsoft Graph 只读接口，
 让开发者租户保持有开发活动。支持 **Windows、macOS、Linux**，提供 **GUI** 和 **CLI** 两种形态，
 设计目标是**长期在后台稳定运行**。
 
-> **状态**：第一版 [v0.1.0](https://github.com/KKazuhaK/e5-renew/releases/tag/v0.1.0) 已发布，变更见 [CHANGELOG.md](CHANGELOG.md)。设计文档见 [`docs/`](docs/)。
+> **状态**：第一版 [v0.1.0](https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.1.0) 已发布，变更见 [CHANGELOG.md](CHANGELOG.md)。设计文档见 [`docs/`](docs/)。
 
 *A cross-platform (Windows / macOS / Linux) tool that keeps a Microsoft 365 E5 developer tenant active by
 calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI.*
@@ -15,19 +15,19 @@ calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI.*
 - **API 库**：按分类勾选的 Graph 只读接口，按令牌里实际有的权限自动筛选
 - **调度**：随机抽取、随机顺序、随机参数；工作日和工作时段；断网、睡眠唤醒后自动恢复
 - **多账号**：每个账号单独的状态、日志和统计；连续失败自动暂停（auto-pause）
-- **长期运行**：开机自启、后台服务（systemd / launchd / Windows 服务 / Docker）、健康检查（`e5renew doctor`）、
-  令牌和 Secret 到期提醒、桌面通知和 Webhook 告警
+- **长期运行**：开机自启、后台服务（systemd / launchd / Windows 服务 / Docker）、健康检查（`e5extend doctor`）、
+  令牌和 Secret 到期提醒、桌面通知和多渠道告警（Telegram、邮件、企业微信、飞书、钉钉、Discord、Slack、Bark、ntfy、Server 酱、Webhook）
 - **体积小**：CLI 约 10 MB，单个可执行文件，无运行时依赖
 
 ## 快速开始
 
-从 [Releases](https://github.com/KKazuhaK/e5-renew/releases) 下载：Windows 安装包、macOS dmg、Linux deb/rpm（桌面版），
+从 [Releases](https://github.com/KKazuhaK/e5-developer-extend/releases) 下载：Windows 安装包、macOS dmg、Linux deb/rpm（桌面版），
 或者各平台的命令行压缩包和 Docker 镜像。选哪个文件、未签名的包怎么打开，见 [docs/user/install.md](docs/user/install.md)。
 
-桌面版装好后从开始菜单 / 应用程序 / 应用菜单打开 **E5 Renew**；命令行版运行向导：
+桌面版装好后从开始菜单 / 应用程序 / 应用菜单打开 **E5 Developer Extend**；命令行版运行向导：
 
 ```bash
-e5renew init                    # 交互式向导：配置、账号、登录、试跑、告警、后台服务、体检
+e5extend init                    # 交互式向导：配置、账号、登录、试跑、告警、后台服务、体检
 ```
 
 或者分步：`config init` → `account add` → `account login` → `run-now` → `service install` → `doctor`。
@@ -42,6 +42,8 @@ e5renew init                    # 交互式向导：配置、账号、登录、�
 | [docs/user/app-registration.md](docs/user/app-registration.md) | Entra 应用注册（委托身份和应用身份） |
 | [docs/user/background.md](docs/user/background.md) | 各平台后台运行：Linux、macOS、Windows、Docker |
 | [docs/user/docker.md](docs/user/docker.md) | Docker 和 compose |
+| [docs/user/backup.md](docs/user/backup.md) | 备份与迁移：用一个文件搬到另一台机器 |
+| [docs/user/notifications.md](docs/user/notifications.md) | 通知渠道：Telegram、邮件、企业微信、飞书、钉钉等的设置方法，降噪与自定义模板 |
 | [docs/user/faq.md](docs/user/faq.md) | 常见问题 |
 | [docs/user/troubleshooting.md](docs/user/troubleshooting.md) | 按 `doctor` 检查项排错 |
 | [docs/research.md](docs/research.md) | 技术选型与决定 |
@@ -54,8 +56,8 @@ e5renew init                    # 交互式向导：配置、账号、登录、�
 需要 Go 1.26 或更新版本。
 
 ```bash
-go build -o bin/e5renew ./cmd/e5renew
-./bin/e5renew version
+go build -o bin/e5extend ./cmd/e5extend
+./bin/e5extend version
 ```
 
 ## 说明

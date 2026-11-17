@@ -9,7 +9,7 @@
 - 只有托盘、从不创建 WebView 时约 60 MB；
 - GTK4 下关窗口后 WebKit 进程不会退出，见 wailsapp/wails#6505。
 
-一个可执行文件 `e5renew-gui`，按参数分成两种模式：
+一个可执行文件 `e5extend-gui`，按参数分成两种模式：
 
 | 模式 | 启动方式 | 做什么 | 是否创建 WebView |
 |---|---|---|---|
@@ -17,8 +17,9 @@
 | 窗口（`--window`） | 托盘菜单“打开主窗口”，或再次启动程序时 | 主界面；关闭窗口时**整个进程退出** | 是 |
 
 - 单实例：
-  - 托盘模式用 Wails 的 SingleInstance（ID 为 `io.github.kkazuhak.e5renew.tray`）。重复启动时，由已运行的托盘实例打开窗口。
+  - 托盘模式用 Wails 的 SingleInstance（ID 为 `io.github.kkazuhak.e5extend.tray`）。重复启动时，由已运行的托盘实例打开窗口。
   - 窗口模式用另一个 ID（`…​.window`）。重复打开时，让已有窗口获得焦点。
+- 托盘“退出”要连打开的窗口一起退出：它在退出前往数据目录写 `gui-quit`（内容是 RFC 3339 时间戳），窗口进程每秒查一次，发现时间晚于自己的启动时间就走正常的关窗路径（`WindowClosing` 钩子照常执行）。窗口不删这个文件，托盘下次启动时清掉；之后才启动的窗口因为文件早于自己而忽略它。关闭窗口仍然不会退出托盘。
 - 托盘通过 `os.Executable() --window` 启动窗口进程，并且不等待它退出。
 - 窗口进程**不运行引擎**。它读写的是同一份配置、state 和日志，向引擎发指令用已有的 trigger 文件（`run-now`、`.resume`、`.reload`）。
   所以不需要新的 IPC。
@@ -37,7 +38,7 @@
 
 ## 2. 共享业务层 `internal/ops`
 
-现在 CLI 的逻辑写在 `cmd/e5renew`（`main` 包）里，GUI 没法复用。把这些逻辑抽到 `internal/ops`：
+现在 CLI 的逻辑写在 `cmd/e5extend`（`main` 包）里，GUI 没法复用。把这些逻辑抽到 `internal/ops`：
 - 返回带类型的结果，不直接打印；
 - CLI 负责把结果格式化成文本；GUI 的服务直接把结果返回给前端；
 - **CLI 的行为和输出保持不变**，现有的 CLI 测试全部继续通过。
@@ -81,7 +82,7 @@ interface AccountInput {        // 新增和编辑共用
   secret?: string;              // 只在新增或更换时传；后端永远不会把它返回给前端
 }
 interface LoginEvent {          // 通过 Wails 事件 "login:<name>" 推送
-  kind: "device_code" | "browser_opened" | "done" | "error";
+  kind: "device_code" | "browser_opened" | "progress" | "done" | "error";
   message: string; userCode?: string; verificationUri?: string;
 }
 interface LogEntry { ts: string; account: string; api: string; status: number; class: string; latencyMs: number; event?: string; detail?: string; }
@@ -104,10 +105,11 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 | 服务 | 方法 |
 |---|---|
 | `StatusService` | `Snapshot()`、`RunNow(names: string[])` |
-| `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
+| `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Recommend(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
+| `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Preview(id, choice)`（列出所选选项的具体事项，不写任何东西）、`Apply(id, choice)`、`Finish(id)`（向导已保存账号，结束会话）、`Cancel(id): { secretRemoved, error }`；`id` 由前端生成，好在调用前先订阅事件 |
 | `LogService` | `Read(account, sinceHours, limit)` |
-| `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
-| `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`UninstallService()` |
+| `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`ListChannels()`、`SaveChannel(c, create): ValidationError[]`、`RemoveChannel(id)`、`TestChannel(id)`、`PreviewMessage(...)`、`EmailPresets()`；单个 Webhook 的 `SetWebhook`、`ClearWebhook`、`TestWebhook` 仍在，等价于名为 `webhook` 的渠道（见 alerts.md） |
+| `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`StartService()`、`UninstallService()` |
 | `CatalogService` | `List(account)`、`Categories()` |
 
 - 出错时 Go 返回 error，前端得到 rejected promise。错误信息里带上 ops 给出的修复建议。
@@ -117,7 +119,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 ## 4. 界面
 
 整体：左侧导航，右侧内容；支持浅色、深色、跟随系统；语言分中文和英文，默认跟随系统，中文为主。
-窗口默认 1100×720，最小 900×600。产品显示名暂用常量 `AppName = "e5renew"`（最终名称待定，只改这一处）。
+窗口默认 1100×720，最小 900×600。产品显示名暂用常量 `AppName = "e5extend"`（最终名称待定，只改这一处）。
 
 - **概览**（首页）
   - 顶部：引擎状态（运行中 / 未运行 / 由后台服务运行），下次运行时间，以及“立即运行全部”按钮。
@@ -125,23 +127,32 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
   - 有账号需要处理时，最上方显示醒目的提示条，带“去处理”按钮。
   - 一个账号都没有时，显示引导：一个按钮进入添加账号向导，再给一个应用注册文档的链接。
 - **账号**：列表，可按“出错 / 暂停”筛选，也能搜索。
-  - 添加和编辑是一个分步向导：
-    1. 选登录方式（每种方式附一句说明：什么情况适合用它）；
-    2. 填租户、Client ID，需要时填 Secret 或密码；
-    3. 选 API 分类；
-    4. 登录：设备码模式显示代码和链接，带“复制”和“打开浏览器”按钮；浏览器模式显示“请在浏览器中完成登录”；
+  - 添加和编辑是一个分步向导（添加时第一步先选“自动创建应用注册（推荐）/ 我已经有应用注册”，编辑只有后者）：
+    1. 选登录方式（每种方式附一句说明：什么情况适合用它）；选“自动”时改为：账号名、身份（用户身份：设备码 / 浏览器；高级里有应用身份 Client Secret，需要填目标用户）、
+       管理员的登录方式，并说明登录页会显示“Microsoft Graph Command Line Tools”（微软的官方工具，只用这一次）；
+    2. 填租户、Client ID，需要时填 Secret 或密码；选“自动”时这一步是“创建应用”：管理员登录（设备码或浏览器）→ 显示计划（应用名、权限列表、“不会删除任何已有内容”、将要执行的事项；
+       发现手工建的同名应用时给“采用 X（客户端 ID）/ 新建”单选，采用时有“改为规范名称”复选框，默认勾选；没有要做的事就说一切已就绪）→ 确认 → 进度（含“等待微软同步…”）→ 把租户 ID、客户端 ID 填进账号；
+    3. 登录（账号在第 2 步结束时保存）：设备码模式显示代码和链接，带“复制”和“打开浏览器”按钮；浏览器模式显示“请在浏览器中完成登录”；
+       自动创建之后用 `LoginAfterSetup`，新应用还没同步时显示“等待微软同步…”并自动重试；管理员同意没成功时账号照常保存，这一步显示管理员同意链接（打开、复制）并说明同意之后再登录；
+    4. 选 API 分类：调 `AccountService.Recommend`，每个分类带“推荐 / 不可用（原因）/ 可能可用”徽标并默认勾选推荐的；没登录时不带徽标并提示先登录（见 [api-recommend.md](api-recommend.md)）；
     5. 测试：显示已授予的权限和可用的 API 数量；
     6. 完成。
   - 删除账号要二次确认。“更换 Secret” 是单独的对话框。
 - **日志**：表格，列为时间、账号、API、状态码、耗时；可按账号和时间范围筛选；失败的行标红。每 5 秒自动刷新，可以关闭。
 - **健康检查**：按 `doctor` 的检查项逐条显示（✓ / ! / ✗、详情、修复建议），有“重新检查”按钮。
   - 后台服务区：显示是否安装；提供“安装为系统后台服务”和“卸载”按钮，旁边说明它和“开机启动托盘”有什么区别。
-- **设置**：分组显示——
-  - 调度：间隔、每轮 API 数、工作日（多选）、工作时段、运行期限；
-  - 网络：代理；
-  - 告警：设置 Webhook（输入框保存后清空，只显示“已设置”）、发送测试、清除；
-  - 界面：语言、主题、开机启动。
-  - 保存时有错误，就在对应字段下面显示后端返回的 `ValidationError`。
+- **设置**：默认只显示最常用的几项，其余收进“高级设置”——
+  - 运行方式：
+    - “开机启动”（托盘开机自启）：和后台服务开关一样立即生效，调用 `SettingsService.SetStartAtLogin(on)`，失败时开关保持原状并弹 toast；它不在草稿里，`Save` 不再处理它；
+    - “在后台保持运行”：就是后台服务有没有安装。打开调用 `HealthService.InstallService`，关闭（先确认）调用 `UninstallService`，立即生效，不经过“保存”；复用健康检查页同一套接口和前置检查，出错用 toast 显示；安装和卸载的结果（需要手动做的事、警告）都用和健康检查页同一个组件显示在卡片里。“已安装但没有运行”时开关保持打开，但显示警告和“启动”按钮（`HealthService.StartService`，只启动、不重写服务文件，和安装一样先请托盘交出引擎）。状态来自 `ServiceInfo`（运行中 / 已安装但没有运行 / 未安装 / 不支持），引擎在运行时附上 `Snapshot` 里最近的下次运行时间；平台不支持时说明原因并禁用开关。
+  - 调用节奏：三个预设加“自定义”，再加“每天 / 仅工作日”。预设只改 `intervalMin/Max` 和 `apisPerRoundMin/Max`，表在 `src/lib/pace.ts`：轻度 2h–4h、每轮 2–5 个；标准 40m–2h、每轮 3–8 个（等于 `config.Default()`）；频繁 20m–1h、每轮 5–12 个。当前值不属于任何预设时显示“自定义”，提示到高级设置里调整；运行日只认“每天”和“周一到周五”，其他组合同样提示。
+  - 界面：语言、主题。
+  - 备份与迁移。
+  - 高级设置（可折叠，默认收起，展开状态按浏览器记在 localStorage，读写出错就不记）：
+    - 调度：间隔、每轮 API 数、工作日（多选）、工作时段、运行期限、随机顺序；
+    - 网络：代理；
+    - 告警：设置 Webhook（输入框保存后清空，只显示“已设置”）、发送测试、清除。
+  - 草稿、校验和保存的做法不变：保存时有错误，就在对应字段下面显示 `ValidationError`；错误在收起的高级设置里时，自动展开并滚动、聚焦到第一个出错的字段（这次展开不写入 localStorage）。
 - **关于**：版本号、项目链接、免责声明（“不保证续期”、“与 Microsoft 无关”）。
 
 数据刷新：页面可见时每 3 秒拉一次 `Snapshot()`，切到后台时停止。
@@ -158,7 +169,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 ## 6. 构建与 CI
 
 - GUI 的 Go 代码放在 `gui/`（`package main`），和 CLI 用同一个 Go module。
-  CLI（`cmd/e5renew`）不导入 Wails，**继续保持无 CGO**。
+  CLI（`cmd/e5extend`）不导入 Wails，**继续保持无 CGO**。
 - 构建步骤：先 `wails3 generate bindings -d gui/frontend/bindings -ts ./gui`，再在 `gui/frontend` 里 `npm ci && npm run build`，最后 `go build -tags frontend ./gui`（Windows 上还要加 `-ldflags -H=windowsgui`；见第 8 节：不带 `frontend` 标签时只嵌入一个占位页）。
   Linux 上需要 CGO 和 GTK4、WebKitGTK 6.0 开发包。
 - CI 新增 `GUI build` 任务，在三个平台上编译。ubuntu 先用 apt 装 `libgtk-4-dev libwebkitgtk-6.0-dev`；
@@ -189,12 +200,22 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这个标签。
 
 **绑定**：`wails3 generate bindings -d gui/frontend/bindings -ts ./gui`。生成路径是
-`gui/frontend/bindings/github.com/KKazuhaK/e5-renew/gui/services/<服务名小写>.ts`（模型在同目录 `models.ts`，`ops` 包的模型在 `.../internal/ops/models.ts`）。
+`gui/frontend/bindings/github.com/KKazuhaK/e5-developer-extend/gui/services/<服务名小写>.ts`（模型在同目录 `models.ts`，`ops` 包的模型在 `.../internal/ops/models.ts`）。
 
 **对第 3 节契约的补充**
-- 事件：`login:<name>`（`LoginEvent`，最后一条是 `done` 或 `error`）；`run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。
+- 事件：`login:<name>`（`LoginEvent`，最后一条是 `done` 或 `error`；`progress` 是需要告诉用户的等待，如“等待微软同步”）；
+  `appsetup:<id>`（`AppSetupEvent`）：`device_code` / `browser_opened`（管理员登录，同上）→ `signed_in` → `plan`（`AppSetupPlan`：应用名、标签、权限、缺的权限、已有应用、候选、事项（`code` 稳定，`text` 为英文）、`needsChoice`）→ 前端调 `Apply` → 若干 `progress`（英文原文，前端按前缀翻译，认不出的原样显示）→ `result`（`AppSetupResult`：租户 ID、客户端 ID、应用名、是否创建 / 采用 / 改名、`consentGranted`、`adminConsentUrl`、`consentError`、`secretExpires`）；
+  任何失败以 `error` 结束，带 `code`：`forbidden`（`roles` 列出能做这件事的角色）、`blocked`（租户禁止 Graph Command Line Tools）、`unknown_permission`、`cancelled`、`other`。
+  `result` 之后会话仍然保持，直到向导保存了账号（`Finish`）或放弃（`Cancel`）。应用身份的创建结果已出来、账号却没保存就放弃时，`Cancel` 会用 `RevokeSecret` 把新 Secret 从应用里删掉并清掉 vault 里的条目，
+  返回 `secretRemoved`；删不掉时 `error` 里写明仍然有效的 Secret（名字和 Key ID，不含值），界面用提示条显示。账号已经存在时 `Cancel` 不动它的 Secret。
+  计划里有候选应用时，界面每次改选（采用哪个、是否改名、新建）都调 `Preview`，“将要执行”列表显示所选选项的具体事项（`adopt_app`、`rename_app`、`set_notes`、`add_tags`、`add_redirect_uri`、`set_public_client`、`add_permissions`、`create_app`、`create_service_principal`、`grant_consent`、`assign_roles`、`create_secret`，每个都有中英文翻译）；列表为空就显示“一切已就绪”。
+  `AppSetupResult` 还带 `secretCreated`、`removedSecrets`（删掉的本机旧 Secret 个数）、`notRemovedSecrets`（因可能属于别的账号而没删的个数，界面提示自行处理）。
+  同一时间只有一个创建会话；离开向导或点取消就 `Cancel`，已经在微软那边建好的应用保留（下次复用），不留半个账号。
+  管理员的令牌只在后端内存里；事件里没有令牌、Secret，也没有管理员的登录名。应用身份的 Secret 由后端直接存进 vault（以账号名为键），向导随后用 `AccountInput.useStoredSecret` 添加账号。
+  `run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。
   `browser_opened` 的 `message` 是固定文字，登录地址不放进事件（里面带请求状态）；`device_code` 事件的 `userCode`、`verificationUri` 是从微软给的提示文字里解析出来的，解析不到就为空，`message` 总是完整文字。
 - `AccountService.Test(name)` 返回 `{ scopes, usableApis, totalApis, expiresOn }`，不含登录名。
+- `AccountService.Recommend(name)` 返回 `{ needsLogin, categories: [{ category, status, reason }], recommended }`（见 [api-recommend.md](api-recommend.md)）；没登录时 `needsLogin` 为真、没有建议，不算错误；其他失败（网络等）是错误。不含登录名和令牌。
 - `HealthService.InstallService()` / `UninstallService()` 返回 `{ actions, warnings, manual }`（`manual` 是要用户自己执行的命令）。
 - `LogService.Read` 按时间**从新到旧**返回；`sinceHours`、`limit` 为 0 表示不限。
 - `SettingsService.Save` 返回的 `ValidationError.field` 是驼峰路径：`schedule.intervalMin`、`schedule.workDays`、`schedule.periodStart`、`network.proxy`、`notify.staleAfter`、`notify.events`、`ui.language`、`ui.theme`、`ui.startAtLogin`。
@@ -205,7 +226,7 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
 
 **安装后台服务时的交接**：后台服务和托盘里的引擎抢同一把锁。窗口进程在安装前，如果引擎由托盘运行，就在数据目录写
 `gui-handover`；托盘每 3 秒查一次，看到后停掉自己的引擎并在 2 分钟内不再抢锁，窗口等锁释放（最多 60 秒）再安装。
-安装用的是和 GUI 放在同一目录的 `e5renew` 命令行程序（后台服务要运行的是 `e5renew run`），找不到就报错。
+安装用的是和 GUI 放在同一目录的 `e5extend` 命令行程序（后台服务要运行的是 `e5extend run`），找不到就报错。
 
 **配置改动后的重新加载**：窗口里改了账号或设置之后，服务会写 `.reload` trigger，引擎马上重新读配置，不用等定时检查。
 
@@ -233,7 +254,7 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
 - `gui.log` 在写入时按大小轮换（2 MB，保留一份旧文件）；“engine did not start” 同一种原因只记一次；日志里去掉 `account`、`detail`，`err` 换成固定文字。
 - `engine.host` 带进程号，托盘启动时先删掉遗留的标记，避免 Windows 上进程号被复用而误判。
 - 窗口进程退出前，如果有安装、卸载或本进程里的一轮正在进行，最多再等 60 秒。
-- `SettingsService.Save` 先校验 `ui`，有错就什么都不保存；“开机启动”设置失败作为 error 返回，不是 `ValidationError`。
+- `SettingsService.Save` 先校验 `ui`，有错就什么都不保存；“开机启动”由 `SetStartAtLogin` 单独设置，失败作为 error 返回，不是 `ValidationError`；`Save` 不碰它。
 - `AccountService.Get` 会返回账号配置里的用户名（编辑表单需要），不返回 secret。`Settings.network.proxy` 发给前端时隐藏用户信息里的密码（`http://user:xxxxx@host`）；保存时如果收到的正好是隐藏后的形式，就保留已存的值。
 - Windows 的 GUI 构建必须加 `-ldflags -H=windowsgui`（发布和 CI 都是），否则会多出一个控制台窗口。Ubuntu 的 CI 还需要 `libx11-dev`。
 

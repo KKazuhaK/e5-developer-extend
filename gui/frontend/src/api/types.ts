@@ -37,13 +37,69 @@ export interface AccountInput {
   categories: string[];
   secretExpires: string;
   secret?: string; // only sent on add or replace; the backend never returns it
+  /** Take the secret automatic app setup already put in the vault under this name (app identity). */
+  useStoredSecret?: boolean;
 }
 export interface LoginEvent {
   // pushed through the Wails event "login:<name>"
-  kind: "device_code" | "browser_opened" | "done" | "error";
+  kind: "device_code" | "browser_opened" | "progress" | "done" | "error";
   message: string;
   userCode?: string;
   verificationUri?: string;
+}
+
+// ---- automatic app registration (docs/design/app-setup.md section 7) ----
+export interface AppSetupStart {
+  name: string; // account name
+  appOnly: boolean; // client secret identity; otherwise `auth` is the account's own sign-in
+  auth: "device_code" | "browser";
+  username: string; // user an app identity reads
+  method: "device_code" | "browser"; // how the administrator signs in
+}
+export interface AppSetupApp { clientId: string; displayName: string }
+export interface AppSetupAction { code: string; text: string }
+export interface AppSetupPlan {
+  kind: "delegated" | "app";
+  tenantId: string;
+  displayName: string;
+  tags: string[];
+  permissions: string[];
+  missing: string[];
+  existing: AppSetupApp | null;
+  candidates: AppSetupApp[];
+  actions: AppSetupAction[];
+  needsChoice: boolean;
+}
+export interface AppSetupChoice { adopt: string; createNew: boolean; rename: boolean }
+export interface AppSetupResult {
+  kind: "delegated" | "app";
+  tenantId: string;
+  clientId: string;
+  displayName: string;
+  createdApp: boolean;
+  adoptedApp: boolean;
+  renamed: boolean;
+  consentGranted: boolean;
+  adminConsentUrl: string;
+  consentError: string;
+  secretExpires: string; // YYYY-MM-DD, app identity only; the secret itself stays in the vault
+  secretCreated: boolean; // a client secret was created and stored in the vault
+  removedSecrets: number; // this computer's earlier secrets deleted from the app
+  notRemovedSecrets: number; // older ones left alone because they might belong to another account
+}
+/** What cancelling undid: a client secret nobody uses is deleted again; error names the one still live if that failed. */
+export interface AppSetupCancelResult { secretRemoved: boolean; error: string }
+export type AppSetupErrorCode = "forbidden" | "blocked" | "unknown_permission" | "cancelled" | "other";
+export interface AppSetupEvent {
+  // pushed through the Wails event "appsetup:<id>"
+  kind: "device_code" | "browser_opened" | "signed_in" | "plan" | "progress" | "result" | "error";
+  message: string;
+  userCode?: string;
+  verificationUri?: string;
+  plan?: AppSetupPlan;
+  result?: AppSetupResult;
+  code?: AppSetupErrorCode;
+  roles?: string[];
 }
 export interface LogEntry {
   ts: string;
@@ -69,8 +125,89 @@ export interface Settings {
     periodEnd: string;
   };
   network: { proxy: string };
-  notify: { staleAfter: string; events: string[]; webhookConfigured: boolean };
+  notify: {
+    staleAfter: string;
+    events: string[];
+    /** The channel "webhook" exists (read only). */
+    webhookConfigured: boolean;
+    /** How many notification channels exist (read only). */
+    channels: number;
+    /** Duration such as "6h"; "0" turns it off. */
+    cooldown: string;
+    /** "23:00-08:00", or "" for none. */
+    quietHours: string;
+    spikeRounds: number;
+    /** 0..1 */
+    spikeRate: number;
+    spikeMinFailures: number;
+  };
   ui: { language: "auto" | "zh" | "en"; theme: "system" | "light" | "dark"; startAtLogin: boolean };
+}
+export type ChannelType =
+  | "telegram" | "email" | "wecom" | "feishu" | "dingtalk" | "discord" | "slack" | "bark" | "ntfy" | "serverchan" | "webhook";
+export type AlertLevel = "info" | "warning" | "critical";
+/** A notification channel as it is edited. Secrets go in `secrets` and are never returned. */
+export interface ChannelInput {
+  id: string;
+  type: ChannelType;
+  minLevel: "" | AlertLevel;
+  events: string[];
+  language: "" | "zh" | "en";
+  template: string;
+  chatId: string;
+  apiBase: string;
+  smtpHost: string;
+  smtpPort: number;
+  security: "" | "starttls" | "tls" | "none";
+  username: string;
+  from: string;
+  to: string[];
+  server: string;
+  topic: string;
+  format: "" | "json" | "template";
+  /** Exceptions kept from earlier setups: a webhook that may use http (the app can switch it off, never on) and a mail password sent without encryption (config.toml only). */
+  allowHttp: boolean;
+  allowPlainAuth: boolean;
+  /** New secret values by field; a missing or empty one keeps what is stored. */
+  secrets: Record<string, string>;
+  /** Optional secret fields to remove. */
+  clearSecrets: string[];
+}
+export interface SecretStatus {
+  name: string;
+  required: boolean;
+  set: boolean;
+}
+export interface ChannelResult {
+  at: string;
+  ok: boolean;
+  error?: string;
+}
+export type ChannelWarning = "server_http" | "email_plain" | "legacy" | "allow_http";
+/** A channel for display: settings, which secrets are stored, how the last delivery went. */
+export interface ChannelView extends ChannelInput {
+  secretFields: SecretStatus[];
+  legacy: boolean;
+  lastResult: ChannelResult | null;
+  warnings: ChannelWarning[];
+}
+export interface ChannelTest {
+  id: string;
+  ok: boolean;
+  error: string;
+}
+export interface MessagePreview {
+  title: string;
+  body: string;
+  html: string;
+  format: "html" | "markdown" | "text" | "json";
+}
+export interface EmailPreset {
+  name: string;
+  host: string;
+  port: number;
+  security: "starttls" | "tls";
+  note: string;
 }
 export interface ValidationError {
   field: string;
@@ -107,6 +244,22 @@ export interface TestResult {
   totalApis: number;
   expiresOn: string; // token expiry, RFC3339 or empty
 }
+/** AccountService.Recommend: the verdict on one API category. */
+export type AdviceStatus = "recommended" | "unavailable" | "maybe";
+export interface CategoryAdvice {
+  category: string;
+  status: AdviceStatus;
+  /** "", or a code: no_mailbox, no_onedrive, no_teams_license, no_sharepoint, needs_admin_role, not_supported, probe_failed, probe_arbitrary_user, missing_permission:<scopes> */
+  reason: string;
+  /** True when the category runs for an account without a categories setting (catalog default). */
+  default: boolean;
+}
+/** AccountService.Recommend result. With needsLogin there is no advice. */
+export interface RecommendResult {
+  needsLogin: boolean;
+  categories: CategoryAdvice[];
+  recommended: string[];
+}
 /** HealthService.InstallService / UninstallService result. */
 export interface ServiceResult {
   actions: string[]; // what was done
@@ -116,4 +269,111 @@ export interface ServiceResult {
 /** Payload of the Wails event "run:done". */
 export interface RunDone {
   error: string; // empty when the round went through
+}
+
+/** A remark about an export or import: a code the interface translates, and its arguments. */
+export interface BackupNote {
+  code: string;
+  args: string[];
+}
+/** Summary of a backup export. Names and counts only; never a secret or the webhook address. */
+export interface BackupSummary {
+  path: string;
+  accounts: string[];
+  vaultEntries: number;
+  includesLogs: boolean;
+  logFiles: number;
+  /** English text, for the command line; the interface shows noteCodes. */
+  notes: string[];
+  noteCodes: BackupNote[];
+}
+export type ImportMode = "default" | "merge" | "replace";
+/** Summary of a backup import. */
+export interface ImportSummary {
+  mode: ImportMode;
+  accounts: string[];
+  vaultEntries: number;
+  sourceOS: string;
+  sourceVersion: string;
+  created: string;
+  newMasterKey: boolean;
+  /** English text, for the command line; the interface shows skippedCodes and noteCodes. */
+  skipped: string[];
+  notes: string[];
+  skippedCodes: BackupNote[];
+  noteCodes: BackupNote[];
+  /** English next step for the command line; the interface has its own text. */
+  hint: string;
+}
+/** A refusal or failure of an export or import, as a code the interface translates. */
+export interface BackupProblem {
+  code: string;
+  names: string[];
+  /** English detail from the backend; shown only for some codes. */
+  detail: string;
+}
+/** BackupService results; cancelled is true when the user closed the file dialog. */
+export interface BackupExportResult {
+  cancelled: boolean;
+  summary: BackupSummary;
+  problem: BackupProblem | null;
+}
+export interface BackupImportResult {
+  cancelled: boolean;
+  summary: ImportSummary;
+  problem: BackupProblem | null;
+}
+
+/** What a tenant's subscription check could do: read them, was refused (permission), failed, or has not run. */
+export type SubscriptionAccess = "ok" | "no_permission" | "error" | "unchecked";
+export interface RenewalView {
+  from: string; // YYYY-MM-DD
+  to: string; // YYYY-MM-DD
+  seenAt: string; // RFC3339
+}
+export interface SubscriptionView {
+  id: string;
+  sku: string;
+  /** False for subscriptions the settings do not watch (no alerts for them). */
+  watched: boolean;
+  /** Enabled, Warning, Suspended, LockedOut or Deleted. */
+  status: string;
+  isTrial: boolean;
+  licenses: number;
+  /** End date YYYY-MM-DD (UTC); empty when Microsoft gave none. */
+  expires: string;
+  daysLeft: number | null;
+  checkedAt: string;
+  renewals: RenewalView[];
+}
+export interface TenantSubscriptions {
+  tenant: string;
+  label: string;
+  tenantId: string;
+  accounts: string[];
+  access: SubscriptionAccess;
+  /** English reason of an "error" access; empty otherwise. */
+  detail: string;
+  checkedAt: string | null;
+  attemptedAt: string | null;
+  nextCheckAt: string | null;
+  subscriptions: SubscriptionView[];
+  /** The end date written by hand (YYYY-MM-DD), "" for none. */
+  manualExpires: string;
+  manualDaysLeft: number | null;
+  /** The hand-written date stands in for missing data. */
+  manualInUse: boolean;
+  /** Real data exists, so the hand-written date can be removed. */
+  manualRedundant: boolean;
+  /** The account whose app registration lacks the permission, its identity and the command line that repairs it. */
+  fixAccount: string;
+  fixKind: "delegated" | "app";
+  fixCommand: string;
+  /** SKU prefixes that alert (subscription.skus; the default is DEVELOPERPACK). */
+  watchedSkus: string[];
+}
+export interface SubscriptionRefresh {
+  tenants: TenantSubscriptions[];
+  /** A running engine had not answered yet; the tenants show what it saved before. */
+  queued: boolean;
 }

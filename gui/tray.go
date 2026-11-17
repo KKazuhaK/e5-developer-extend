@@ -13,12 +13,12 @@ import (
 
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/KKazuhaK/e5-renew/gui/services"
-	"github.com/KKazuhaK/e5-renew/gui/trayhost"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/gui/services"
+	"github.com/KKazuhaK/e5-developer-extend/gui/trayhost"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 // refreshEvery is how often the tray reads the state.
@@ -83,7 +83,7 @@ func runTray() error {
 
 	// Any mark of an engine host found now is left from an earlier process.
 	ops.ClearEngineHost(dataDir)
-	for _, f := range []func() (string, error){handoverFile, resumeFile} {
+	for _, f := range []func() (string, error){handoverFile, resumeFile, quitFile} {
 		if p, err := f(); err == nil {
 			_ = os.Remove(p)
 		}
@@ -92,6 +92,12 @@ func runTray() error {
 	auto := wailsAutostart{app}
 	t := newTrayUI(app, log)
 	t.build(ctx, trayhost.MenuTexts(language(cfgDir)), auto, o, ctl, func() {
+		// Tell an open window first, so it closes while the engine stops.
+		if f, err := quitFile(); err != nil {
+			log.Warn("quit request", "err", err)
+		} else if err := paths.WriteFileAtomic(f, []byte(time.Now().Format(time.RFC3339Nano)+"\n")); err != nil {
+			log.Warn("quit request", "err", err)
+		}
 		// Stopping the engine can take a while; keep the UI thread free.
 		stop()
 		go func() {

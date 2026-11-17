@@ -23,17 +23,17 @@ func TestResolve(t *testing.T) {
 		config bool
 		want   string
 	}{
-		{"linux config default", "linux", nil, "/home/u", true, "/home/u/.config/e5renew"},
-		{"linux data default", "linux", nil, "/home/u", false, "/home/u/.local/share/e5renew"},
-		{"linux xdg config", "linux", map[string]string{"XDG_CONFIG_HOME": "/x/c"}, "/home/u", true, "/x/c/e5renew"},
-		{"linux xdg data", "linux", map[string]string{"XDG_DATA_HOME": "/x/d"}, "/home/u", false, "/x/d/e5renew"},
-		{"linux relative xdg ignored", "linux", map[string]string{"XDG_DATA_HOME": "rel"}, "/home/u", false, "/home/u/.local/share/e5renew"},
-		{"darwin config", "darwin", nil, "/Users/u", true, "/Users/u/Library/Application Support/e5renew"},
-		{"darwin data", "darwin", nil, "/Users/u", false, "/Users/u/Library/Application Support/e5renew"},
-		{"windows config", "windows", map[string]string{"APPDATA": "/ad", "LOCALAPPDATA": "/lad"}, "", true, filepath.Join("/ad", "e5renew")},
-		{"windows data", "windows", map[string]string{"APPDATA": "/ad", "LOCALAPPDATA": "/lad"}, "", false, filepath.Join("/lad", "e5renew")},
-		{"override config", "linux", map[string]string{"E5RENEW_CONFIG_DIR": "/o/c"}, "/home/u", true, "/o/c"},
-		{"override data", "windows", map[string]string{"E5RENEW_DATA_DIR": "/o/d"}, "", false, "/o/d"},
+		{"linux config default", "linux", nil, "/home/u", true, "/home/u/.config/e5extend"},
+		{"linux data default", "linux", nil, "/home/u", false, "/home/u/.local/share/e5extend"},
+		{"linux xdg config", "linux", map[string]string{"XDG_CONFIG_HOME": "/x/c"}, "/home/u", true, "/x/c/e5extend"},
+		{"linux xdg data", "linux", map[string]string{"XDG_DATA_HOME": "/x/d"}, "/home/u", false, "/x/d/e5extend"},
+		{"linux relative xdg ignored", "linux", map[string]string{"XDG_DATA_HOME": "rel"}, "/home/u", false, "/home/u/.local/share/e5extend"},
+		{"darwin config", "darwin", nil, "/Users/u", true, "/Users/u/Library/Application Support/e5extend"},
+		{"darwin data", "darwin", nil, "/Users/u", false, "/Users/u/Library/Application Support/e5extend"},
+		{"windows config", "windows", map[string]string{"APPDATA": "/ad", "LOCALAPPDATA": "/lad"}, "", true, filepath.Join("/ad", "e5extend")},
+		{"windows data", "windows", map[string]string{"APPDATA": "/ad", "LOCALAPPDATA": "/lad"}, "", false, filepath.Join("/lad", "e5extend")},
+		{"override config", "linux", map[string]string{"E5EXTEND_CONFIG_DIR": "/o/c"}, "/home/u", true, "/o/c"},
+		{"override data", "windows", map[string]string{"E5EXTEND_DATA_DIR": "/o/d"}, "", false, "/o/d"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -59,8 +59,8 @@ func TestResolveErrors(t *testing.T) {
 
 func TestEnvOverrideAndFiles(t *testing.T) {
 	cfg, data := t.TempDir(), t.TempDir()
-	t.Setenv("E5RENEW_CONFIG_DIR", cfg)
-	t.Setenv("E5RENEW_DATA_DIR", data)
+	t.Setenv("E5EXTEND_CONFIG_DIR", cfg)
+	t.Setenv("E5EXTEND_DATA_DIR", data)
 	if got, _ := ConfigFile(); got != filepath.Join(cfg, "config.toml") {
 		t.Errorf("ConfigFile = %q", got)
 	}

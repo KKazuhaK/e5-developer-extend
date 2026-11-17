@@ -19,8 +19,8 @@
 
 同一个仓库产出两个可执行文件，共用 `internal/` 下的核心：
 
-- **`e5renew`（CLI）**：纯 Go、无 CGO、静态链接。服务器和无桌面环境用，可作为 systemd 或 launchd 服务常驻。
-- **`e5renew-gui`（GUI，显示名称待定）**：Wails v3 应用。带托盘，运行引擎，关窗后留在托盘继续跑。
+- **`e5extend`（CLI）**：纯 Go、无 CGO、静态链接。服务器和无桌面环境用，可作为 systemd 或 launchd 服务常驻。
+- **`e5extend-gui`（GUI，显示名称待定）**：Wails v3 应用。带托盘，运行引擎，关窗后留在托盘继续跑。
 
 **常驻进程不碰 WebView，窗口单独开一个进程**（依据 2026-11-16 的实测，见下表）：
 
@@ -40,12 +40,12 @@
 
 ```
 桌面（Win/macOS/Linux）：
-        e5renew-gui（托盘 + 引擎，常驻，不创建 WebView，~60 MB）
+        e5extend-gui（托盘 + 引擎，常驻，不创建 WebView，~60 MB）
             │ 点“打开主窗口”
             ▼
-        e5renew-gui --window（单独进程，只负责界面，通过 IPC 连常驻进程；
+        e5extend-gui --window（单独进程，只负责界面，通过 IPC 连常驻进程；
                                关窗即退出，内存全部还给系统）
-服务器：e5renew run（纯 Go、无 CGO，引擎常驻，没有界面；
+服务器：e5extend run（纯 Go、无 CGO，引擎常驻，没有界面；
                     Linux 用 systemd，Windows 用服务，macOS 用 launchd）
 ```
 
@@ -66,9 +66,9 @@
 ## 3. 目录结构
 
 ```
-e5-renew/
+e5-developer-extend/
 ├── cmd/
-│   └── e5renew/            # CLI 入口（cobra）
+│   └── e5extend/            # CLI 入口（cobra）
 ├── gui/                    # Wails v3 应用
 │   ├── main.go
 │   ├── services/           # 暴露给前端的 Go 服务（薄封装 internal/）
@@ -106,7 +106,7 @@ e5-renew/
 
 - 优先用系统钥匙串：Windows 凭据管理器、macOS Keychain、Linux Secret Service（GNOME Keyring 或 KWallet）。
   Windows 的凭据管理器单条有 2.5 KB 上限，所以那里只存主密钥；令牌缓存用主密钥加密后写文件。
-- 没有桌面会话的服务器用回退方案：放在 `$XDG_DATA_HOME/e5renew/` 下的加密文件，主密钥来自环境变量或 systemd credentials（`LoadCredential=`）。
+- 没有桌面会话的服务器用回退方案：放在 `$XDG_DATA_HOME/e5extend/` 下的加密文件，主密钥来自环境变量或 systemd credentials（`LoadCredential=`）。
 - 候选库：`99designs/keyring`（多后端，含文件后端）或 `zalando/go-keyring`（更小，只有系统后端）。
 
 ### 4.3 API 库 `internal/catalog`
@@ -147,23 +147,23 @@ loop:
   不用 SQLite：省下 6–8 MB 体积，文件也方便用户直接查看。详见 [design/engine.md](design/engine.md)。
 - 配置用 TOML（人能直接编辑），运行状态和日志单独存放。
 - 目录遵循平台惯例：
-  - Linux：`$XDG_CONFIG_HOME/e5renew`、`$XDG_DATA_HOME/e5renew`
-  - macOS：`~/Library/Application Support/e5renew`
-  - Windows：`%APPDATA%\e5renew`（配置）、`%LOCALAPPDATA%\e5renew`（数据和日志）
+  - Linux：`$XDG_CONFIG_HOME/e5extend`、`$XDG_DATA_HOME/e5extend`
+  - macOS：`~/Library/Application Support/e5extend`
+  - Windows：`%APPDATA%\e5extend`（配置）、`%LOCALAPPDATA%\e5extend`（数据和日志）
 
 ## 5. CLI 草案
 
 ```
-e5renew account add [--device-code | --browser | --client-secret | --password]
-e5renew account list | remove <name> | relogin <name>
-e5renew run            # 前台运行引擎（给 systemd / launchd 用）
-e5renew run-now [name] # 立刻跑一轮
-e5renew status         # 各账号状态、下次运行时间、最近成功率
-e5renew logs [name] [--follow]
-e5renew pause|resume <name>
-e5renew service install|uninstall|status   # systemd user unit / launchd plist / Windows 服务或计划任务
-e5renew doctor         # 体检：后台服务、自启、linger、令牌、Secret 到期、最近一次成功（见第 9 节）
-e5renew catalog list   # 查看 API 库和每条需要的权限
+e5extend account add [--device-code | --browser | --client-secret | --password]
+e5extend account list | remove <name> | relogin <name>
+e5extend run            # 前台运行引擎（给 systemd / launchd 用）
+e5extend run-now [name] # 立刻跑一轮
+e5extend status         # 各账号状态、下次运行时间、最近成功率
+e5extend logs [name] [--follow]
+e5extend pause|resume <name>
+e5extend service install|uninstall|status   # systemd user unit / launchd plist / Windows 服务或计划任务
+e5extend doctor         # 体检：后台服务、自启、linger、令牌、Secret 到期、最近一次成功（见第 9 节）
+e5extend catalog list   # 查看 API 库和每条需要的权限
 ```
 
 ## 6. GUI 页面草案
@@ -235,7 +235,7 @@ e5renew catalog list   # 查看 API 库和每条需要的权限
 - 写一个心跳文件（时间戳），方便外部监控（如 Uptime Kuma 的 push 监控）。
 
 **升级不中断**
-- GUI 用 Wails 自带的更新器；CLI 提供 `e5renew self-update`，或者交给包管理器。
+- GUI 用 Wails 自带的更新器；CLI 提供 `e5extend self-update`，或者交给包管理器。
 - 配置和数据格式带版本号，升级时自动迁移，并保留旧版本的备份。
 
 ### 9.2 后台托管（各平台）
@@ -249,7 +249,7 @@ e5renew catalog list   # 查看 API 库和每条需要的权限
 
 另外：
 - systemd 加 `WatchdogSec`，程序定期 `sd_notify("WATCHDOG=1")`。主循环卡死时会被 systemd 自动重启。
-- `e5renew service install` 一条命令完成上表里的配置（包括提示开启 linger），`service status` 检查是否真的在跑。
+- `e5extend service install` 一条命令完成上表里的配置（包括提示开启 linger），`service status` 检查是否真的在跑。
 
 ### 9.3 文档和引导
 
@@ -261,10 +261,10 @@ e5renew catalog list   # 查看 API 库和每条需要的权限
 5. 设置提醒方式（桌面通知 / Webhook）
 
 **CLI 引导**
-- `e5renew init`：交互式完成登录、选 API、试调用、`service install`。
+- `e5extend init`：交互式完成登录、选 API、试调用、`service install`。
 - 每个子命令出错时给出下一步该做什么，而不只是打印错误。
 
-**`e5renew doctor`（GUI 里也有同样的体检页）**
+**`e5extend doctor`（GUI 里也有同样的体检页）**
 - 后台服务或托盘进程在运行吗？开机自启开了吗？Linux 上 linger 开了吗？
 - 每个账号：令牌是否有效、Secret 还剩几天、上次成功是什么时候、有没有被自动暂停
 - 系统时间准不准（与 Graph 响应头里的 `Date` 比较）、代理和网络是否可达

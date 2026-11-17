@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
 
 // GraphScope requests every permission already consented for the app registration.
@@ -22,6 +22,7 @@ type Token struct {
 	ExpiresOn     time.Time
 	Scopes        []string // from the JWT scp (delegated) or roles (application) claim
 	Account       string   // UPN or application ID, for display
+	TenantID      string   // tid claim of the token, when it has one
 	HomeAccountID string   // delegated only; stored back into the config after login
 }
 
@@ -35,7 +36,8 @@ type LoginUI interface {
 
 // Authenticator gets tokens for one account.
 type Authenticator interface {
-	// Token returns a valid access token. It never prompts.
+	// Token returns a valid access token. It never prompts, and signs a
+	// password account in again only when ctx allows it (AllowPasswordFallback).
 	Token(ctx context.Context) (Token, error)
 	// Login runs the interactive sign-in (device code, browser) or the first
 	// verification (client_secret, password).

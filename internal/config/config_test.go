@@ -141,6 +141,15 @@ func TestValidate(t *testing.T) {
 		{"secret organizations", mod(func(c *Config) { c.Accounts[0].Auth = AuthClientSecret; c.Accounts[0].Tenant = "Organizations" }), "accounts[0].tenant"},
 		{"password username", mod(func(c *Config) { c.Accounts[0].Auth = AuthPassword }), "accounts[0].username"},
 		{"secret_expires", mod(func(c *Config) { c.Accounts[0].SecretExpires = "next year" }), "accounts[0].secret_expires"},
+		{"subscription_expires", mod(func(c *Config) { c.Accounts[0].SubscriptionExpires = "2027-13-40" }), "accounts[0].subscription_expires: not a YYYY-MM-DD"},
+		{"subscription sku", mod(func(c *Config) { c.Subscription.Skus = []string{"A B"} }), "subscription.skus[0]"},
+		{"subscription sku empty", mod(func(c *Config) { c.Subscription.Skus = []string{""} }), "subscription.skus[0]"},
+		{"subscription_expires conflict", mod(func(c *Config) {
+			b := validAccount("second")
+			c.Accounts[0].SubscriptionExpires = "2027-02-14"
+			b.SubscriptionExpires = "2027-03-01"
+			c.Accounts = append(c.Accounts, b)
+		}), "accounts[1].subscription_expires"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -189,7 +198,7 @@ func TestFindRemove(t *testing.T) {
 
 func TestNewerVersionRejectedFirst(t *testing.T) {
 	_, err := Parse([]byte("version = 2\nfuture_field = 1\n"))
-	if err == nil || !strings.Contains(err.Error(), "newer than this e5renew supports") {
+	if err == nil || !strings.Contains(err.Error(), "newer than this e5extend supports") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -200,7 +209,7 @@ func TestSaveWritesHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.HasPrefix(string(data), "# Managed by e5renew") || !strings.Contains(string(data), "--print-template") {
+	if !strings.HasPrefix(string(data), "# Managed by e5extend") || !strings.Contains(string(data), "--print-template") {
 		t.Fatalf("header missing:\n%s", data)
 	}
 	if _, err := Load(path); err != nil {
@@ -241,5 +250,48 @@ func TestNotifyDefaultsAndRoundTrip(t *testing.T) {
 	back, err := Load(path)
 	if err != nil || back.Notify.StaleAfter != "96h" || len(back.Notify.Events) != 2 {
 		t.Fatalf("round trip: %v %+v", err, back.Notify)
+	}
+}
+
+func TestSubscriptionSettings(t *testing.T) {
+	var s Subscription
+	if !s.Watches("DEVELOPERPACK_E5") || !s.Watches("developerpack_e5") || s.Watches("ENTERPRISEPACK") {
+		t.Errorf("default watches the developer pack only: %v", s.SKUPrefixes())
+	}
+	s.Skus = []string{" enterprise ", ""}
+	if !s.Watches("ENTERPRISEPACK") || s.Watches("DEVELOPERPACK_E5") {
+		t.Errorf("custom list replaces the default: %v", s.SKUPrefixes())
+	}
+}
+
+func TestSubscriptionExpiresIsTenantLevel(t *testing.T) {
+	c := Default()
+	a, b := validAccount("a"), validAccount("b")
+	a.Tenant, b.Tenant = "Contoso.OnMicrosoft.com", "contoso.onmicrosoft.com"
+	a.SubscriptionExpires, b.SubscriptionExpires = "2027-02-14", "2027-02-14"
+	c.Accounts = []Account{a, b}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("same date on one tenant is fine: %v", err)
+	}
+	if a.TenantKey() != b.TenantKey() {
+		t.Errorf("tenant keys differ: %q %q", a.TenantKey(), b.TenantKey())
+	}
+	// Multi-tenant sign-ins do not name a tenant: each account stands alone.
+	a.Tenant, b.Tenant = "organizations", "organizations"
+	b.SubscriptionExpires = "2027-05-01"
+	c.Accounts = []Account{a, b}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("accounts of an unnamed tenant are separate: %v", err)
+	}
+}
+
+func TestSubscriptionConfigRoundTrip(t *testing.T) {
+	data := []byte("version = 1\n[subscription]\nskus = [\"DEVELOPERPACK\", \"ENTERPRISEPREMIUM\"]\n[[accounts]]\nname = \"a\"\nauth = \"device_code\"\ntenant = \"organizations\"\nclient_id = \"" + guid + "\"\nsubscription_expires = \"2027-02-14\"\n")
+	c, err := Parse(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(c.Subscription.Skus) != 2 || c.Accounts[0].SubscriptionExpires != "2027-02-14" {
+		t.Errorf("parsed %+v / %+v", c.Subscription, c.Accounts[0])
 	}
 }

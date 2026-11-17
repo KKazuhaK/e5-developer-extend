@@ -48,12 +48,12 @@ jobs:
         run: scripts/release/cli.sh
       - name: Smoke test
         run: |
-          sudo apt-get install -y ./dist/release/e5renew_*_amd64.deb
-          e5renew version
-          tar -xzf dist/release/e5renew_*_linux_amd64.tar.gz -C "$RUNNER_TEMP" e5renew
-          "$RUNNER_TEMP/e5renew" version
-          unzip -l dist/release/e5renew_*_windows_amd64.zip | grep -q e5renew-bg.exe
-          sudo apt-get remove -y e5renew
+          sudo apt-get install -y ./dist/release/e5extend_*_amd64.deb
+          e5extend version
+          tar -xzf dist/release/e5extend_*_linux_amd64.tar.gz -C "$RUNNER_TEMP" e5extend
+          "$RUNNER_TEMP/e5extend" version
+          unzip -l dist/release/e5extend_*_windows_amd64.zip | grep -q e5extend-bg.exe
+          sudo apt-get remove -y e5extend
       - uses: actions/upload-artifact@v7
         with:
           name: cli
@@ -99,16 +99,16 @@ jobs:
       - name: Smoke test
         run: |
           # The desktop package depends on the command-line package of the same version.
-          sudo apt-get install -y "$RUNNER_TEMP"/cli/e5renew_*_${{ matrix.arch }}.deb ./dist/release/e5renew-desktop_*_${{ matrix.arch }}.deb
-          e5renew version
-          test -x /usr/bin/e5renew-gui
-          if ldd /usr/bin/e5renew-gui | grep "not found"; then exit 1; fi
-          desktop-file-validate /usr/share/applications/io.github.kkazuhak.e5renew.desktop
-          test -f /usr/share/icons/hicolor/256x256/apps/io.github.kkazuhak.e5renew.png
+          sudo apt-get install -y "$RUNNER_TEMP"/cli/e5extend_*_${{ matrix.arch }}.deb ./dist/release/e5extend-desktop_*_${{ matrix.arch }}.deb
+          e5extend version
+          test -x /usr/bin/e5extend-gui
+          if ldd /usr/bin/e5extend-gui | grep "not found"; then exit 1; fi
+          desktop-file-validate /usr/share/applications/io.github.kkazuhak.e5extend.desktop
+          test -f /usr/share/icons/hicolor/256x256/apps/io.github.kkazuhak.e5extend.png
       - uses: actions/upload-artifact@v7
         with:
           name: linux-desktop-${{ matrix.arch }}
-          path: dist/release/e5renew-desktop*
+          path: dist/release/e5extend-desktop*
           retention-days: 7
           if-no-files-found: error
 
@@ -134,15 +134,15 @@ jobs:
           dmg=$(ls dist/release/*.dmg)
           mnt=$(mktemp -d)
           hdiutil attach -nobrowse -readonly -mountpoint "$mnt" "$dmg"
-          app="$mnt/E5 Renew.app"
+          app="$mnt/E5 Developer Extend.app"
           codesign --verify --deep --strict --verbose=2 "$app"
           plutil -lint "$app/Contents/Info.plist"
-          for b in e5renew e5renew-gui; do
+          for b in e5extend e5extend-gui; do
             archs=$(lipo -archs "$app/Contents/MacOS/$b")
             echo "$b: $archs"
             case "$archs" in *x86_64*arm64* | *arm64*x86_64*) ;; *) exit 1 ;; esac
           done
-          "$app/Contents/MacOS/e5renew" version
+          "$app/Contents/MacOS/e5extend" version
           test -L "$mnt/Applications"
           hdiutil detach "$mnt"
       - uses: actions/upload-artifact@v7
@@ -184,15 +184,15 @@ jobs:
           $setup = Get-ChildItem dist\release\*_windows_amd64_setup.exe | Select-Object -First 1
           $p = Start-Process -Wait -PassThru $setup.FullName -ArgumentList '/S'
           if ($p.ExitCode -ne 0) { throw "setup exit code $($p.ExitCode)" }
-          $dir = Join-Path $env:LOCALAPPDATA 'Programs\E5 Renew'
-          foreach ($f in 'e5renew-gui.exe', 'e5renew.exe', 'e5renew-bg.exe', 'uninstall.exe') {
+          $dir = Join-Path $env:LOCALAPPDATA 'Programs\E5 Developer Extend'
+          foreach ($f in 'e5extend-gui.exe', 'e5extend.exe', 'e5extend-bg.exe', 'uninstall.exe') {
             if (-not (Test-Path (Join-Path $dir $f))) { throw "$f was not installed" }
           }
-          & (Join-Path $dir 'e5renew.exe') version
-          if ($LASTEXITCODE -ne 0) { throw 'e5renew version failed' }
+          & (Join-Path $dir 'e5extend.exe') version
+          if ($LASTEXITCODE -ne 0) { throw 'e5extend version failed' }
           $p = Start-Process -Wait -PassThru (Join-Path $dir 'uninstall.exe') -ArgumentList '/S'
           Start-Sleep -Seconds 5
-          if (Test-Path (Join-Path $dir 'e5renew.exe')) { throw 'uninstall left the program behind' }
+          if (Test-Path (Join-Path $dir 'e5extend.exe')) { throw 'uninstall left the program behind' }
       - uses: actions/upload-artifact@v7
         with:
           name: windows
@@ -249,4 +249,4 @@ jobs:
           prerelease=""
           case "$v" in *-*) prerelease="--prerelease" ;; esac
           gh release create "$GITHUB_REF_NAME" dist/release/* --draft $prerelease \
-            --title "E5 Renew $v" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
+            --title "E5 Developer Extend $v" --notes-file "$RUNNER_TEMP/notes.md" --verify-tag

@@ -2,7 +2,7 @@
 
 ## 电脑睡眠时会跑吗？
 
-不会。睡眠和关机期间不会发出任何调用，e5renew 也**不补跑**错过的轮次。唤醒后它会检测到时间跳跃，
+不会。睡眠和关机期间不会发出任何调用，e5extend 也**不补跑**错过的轮次。唤醒后它会检测到时间跳跃，
 等 1 到 3 分钟（让网络恢复）再继续。想要持续有活动，请用常开的机器或服务器。
 
 ## 关机多久会出问题？
@@ -15,33 +15,69 @@
 ## 令牌过期怎么办？
 
 访问令牌（约 1 小时）由程序自动刷新，你不用管。如果刷新失败，账号会进入 `needs_attention` 状态并发告警，
-原因里带着下一步命令，通常是 `e5renew account login <名称>`。client_secret 的密钥有固定到期日，
-记得用 `--secret-expires` 登记，到期前会提醒；换新密钥用 `e5renew account set-secret`。
-修好之后 `e5renew account resume <名称>` 可以立刻恢复。
+原因里带着下一步命令，通常是 `e5extend account login <名称>`。client_secret 的密钥有固定到期日，
+记得用 `--secret-expires` 登记，到期前会提醒；换新密钥用 `e5extend account set-secret`。
+修好之后 `e5extend account resume <名称>` 可以立刻恢复。
+
+## 后台运行一段时间后要求重新登录（条件访问的登录频率）
+
+现象：账号每隔一两个小时就进入 `needs_attention`，原因里有 `AADSTS70043`，重新登录后又能用几个小时。
+这是租户里的条件访问策略设了“登录频率”（sign-in frequency），把用户的刷新令牌限制在几个小时内；
+只要后台还在用这个用户身份取令牌，就会被周期性踢下线。不是程序的问题，也不是令牌被撤销。
+
+三种登录方式面对这条策略的表现不同：
+
+| 方式 | 结果 |
+| --- | --- |
+| 委托身份（设备码、浏览器） | 受策略限制，到点就要人重新登录。 |
+| 账号密码 | 刷新令牌被拒时，后台引擎会用本机加密保存的密码自动重新登录，不用人。但只适用于没有 MFA 的账号；E5 开发者租户通常通过安全默认值强制 MFA，而设了登录频率策略的租户往往也同时要求 MFA，所以这条路多半走不通。密码出错、需要 MFA 或被策略拦截后，程序不会再重复尝试（避免锁号），要用 `account set-secret` 或 `account login` 才会恢复；两次自动登录之间至少隔 30 分钟。 |
+| 应用身份（Client Secret） | 不是用户登录，不受用户登录频率策略影响，适合长期后台运行。 |
+
+建议按顺序处理：
+
+1. **改用应用身份**：`e5extend account add <名称>-app --auto --auth client_secret`（桌面版里账号卡片上有“改用应用身份”按钮）。
+   应用身份读取的是一个指定用户的数据，需要给出该用户的邮箱（UPN）；Client Secret 会过期，记得登记到期日。
+2. 账号确实没有 MFA 的话，才考虑账号密码方式（`--auth password`）。密码加密保存在本机，不会写进日志。登录频率策略常和 MFA 一起出现，所以优先用第 1 种。
+3. 或者请租户管理员在条件访问策略里排除本应用注册，然后 `e5extend account login <名称>`。
 
 ## 怎么确认它真的在工作？
 
 ```bash
-e5renew status          # 每个账号的“上次成功”和今天的成功/失败次数
-e5renew logs -f         # 实时查看调用记录
-e5renew doctor          # 全面检查
+e5extend status          # 每个账号的“上次成功”和今天的成功/失败次数
+e5extend logs -f         # 实时查看调用记录
+e5extend doctor          # 全面检查
 ```
 
 数据目录里还有 `heartbeat` 文件，引擎每 30 秒更新一次，可以接到 Uptime Kuma 之类的外部监控。
-再配上 Webhook 告警（`e5renew notify set-webhook`），出问题时会主动通知你。
+再配上通知渠道（`e5extend notify channel add`，见 [notifications.md](notifications.md)），出问题时会主动通知你。
 
 ## 为什么有的 API 一直是 403？
 
-权限不足、账号没有对应的许可证或功能没开。同一个接口连续 3 次返回 403，e5renew 会跳过它 7 天，之后再试。
-这不影响其他接口。`e5renew catalog list --account <名称>` 显示每个接口是否可用，
+权限不足、账号没有对应的许可证或功能没开。同一个接口连续 3 次返回 403，e5extend 会跳过它 7 天，之后再试。
+这不影响其他接口。`e5extend catalog list --account <名称>` 显示每个接口是否可用，
 需要更多接口就在应用注册里授予更多只读权限并同意。
+
+## 为什么邮件、日历、OneDrive 一直是 404？
+
+账号没有对应的服务：没分配 Exchange Online 许可就没有邮箱（邮件、日历、联系人、待办都会 404），没有 OneDrive 许可则文件和 OneNote 会 404 / 400。
+这和 403（权限不够）不同，加权限也没用。运行 `e5extend account test <名称> --recommend` 看哪些分类可用，
+加 `--apply` 把可用的分类写进账号；桌面版在编辑账号的“API 分类”一步里有同样的检查。
 
 ## 会不会保证续期？
 
 不会。这个工具只是让租户有规律的、看起来自然的开发活动，是否续期由微软决定。
 
+它能做的是**告诉你结果**：订阅什么时候到期、状态有没有变、有没有续上，到期前 30、7、1 天提醒，状态变化和续期也会通知（见
+[看订阅什么时候到期](getting-started.md#看订阅什么时候到期)）。
+
+## 概览页的“E5 订阅”卡片说读不到订阅信息
+
+读订阅（`GET /directory/subscriptions`）需要 `Organization.Read.All`。应用身份的推荐权限里本来就有；委托身份（设备码、浏览器、账号密码）是新加的，
+旧的应用注册没有。给账号正在用的应用注册补上它：桌面版点卡片上的“补齐权限”；命令行 `e5extend app setup --repair --account <账号>`（只补权限，不新建账号和 Secret）；或在 Entra 里手动添加后授予同意。然后点“立即刷新”或运行
+`e5extend subscription`。登录的用户本身要能读目录，开发者租户的管理员满足。一时补不了就手动填写到期日，同样会提醒。
+
 ## 我的数据安全吗？
 
-- 配置文件里不放 Client Secret、密码和令牌；它们和令牌缓存、Webhook 地址一起放在 AES-256-GCM 加密的 vault 里。唯一的例外是旧版本的 `notify.webhook_url`：它可能还以明文留在 `config.toml` 里，`doctor` 会警告，`notify set-webhook` 会把它迁进 vault 并清掉。
+- 配置文件里不放 Client Secret、密码和令牌；它们和令牌缓存、通知渠道的令牌与地址一起放在 AES-256-GCM 加密的 vault 里。唯一的例外是旧版本的 `notify.webhook_url`：它可能还以明文留在 `config.toml` 里，`doctor` 会警告，`notify set-webhook` 会把它迁进 vault 并清掉。
 - 只调用只读接口，不保存响应内容；日志里只有接口名、状态码和耗时。
-- 主密钥丢失后 vault 无法读取，需要 `e5renew vault reset` 并重新输入密钥、重新登录。
+- 主密钥丢失后 vault 无法读取，需要 `e5extend vault reset` 并重新输入密钥、重新登录。

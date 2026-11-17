@@ -17,7 +17,7 @@ func (m *launchd) plistPath() string {
 }
 
 func (m *launchd) logPath() string {
-	return join(Darwin, m.env.Home, "Library", "Logs", "e5renew", "engine.log")
+	return join(Darwin, m.env.Home, "Library", "Logs", "e5extend", "engine.log")
 }
 
 func (m *launchd) domain() string { return "gui/" + m.env.UID }
@@ -97,10 +97,10 @@ func (m *launchd) Plan(o InstallOptions) (Plan, error) {
 	}
 	params := LaunchdParams{Exe: o.Exe, LogPath: m.logPath(), LogFile: join(Darwin, o.DataDir, "engine.log")}
 	if o.ExplicitDirs {
-		params.Env = map[string]string{"E5RENEW_CONFIG_DIR": o.ConfigDir, "E5RENEW_DATA_DIR": o.DataDir}
+		params.Env = map[string]string{"E5EXTEND_CONFIG_DIR": o.ConfigDir, "E5EXTEND_DATA_DIR": o.DataDir}
 	}
 	return Plan{
-		Dirs:  []string{join(Darwin, m.env.Home, "Library", "Logs", "e5renew")},
+		Dirs:  []string{join(Darwin, m.env.Home, "Library", "Logs", "e5extend")},
 		Files: []File{{Path: m.plistPath(), Mode: 0o644, Data: []byte(LaunchdPlist(params))}},
 		Commands: []Command{
 			{Args: []string{"launchctl", "bootout", m.target()}, Optional: true, IfInstalled: true, Settle: settleWait, Why: "replace the loaded job"},
@@ -177,4 +177,34 @@ func (m *launchd) Status() (Status, error) {
 	}
 	st.Details = append(st.Details, "loaded in "+m.domain())
 	return st, nil
+}
+
+// Start starts the job. A loaded job that is only disabled is enabled and
+// kicked again; a job that is not loaded at all is bootstrapped last.
+func (m *launchd) Start() (Result, error) {
+	var res Result
+	if !fileExists(m.plistPath()) {
+		return res, ErrNotInstalled
+	}
+	ctx := context.Background()
+	run := func(args ...string) error {
+		_, err := m.env.Runner.Run(ctx, "launchctl", args...)
+		if err == nil {
+			res.Actions = append(res.Actions, "ran launchctl "+strings.Join(args, " "))
+		}
+		return err
+	}
+	if run("kickstart", m.target()) == nil {
+		return res, nil
+	}
+	if err := run("enable", m.target()); err != nil {
+		return res, fmt.Errorf("enable %s: %w", Label, err)
+	}
+	if run("kickstart", m.target()) == nil {
+		return res, nil
+	}
+	if err := run("bootstrap", m.domain(), m.plistPath()); err != nil {
+		return res, fmt.Errorf("load %s: %w", Label, err)
+	}
+	return res, nil
 }

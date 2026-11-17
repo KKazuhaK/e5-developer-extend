@@ -16,12 +16,14 @@ const PER_ACCOUNT: Record<string, DictKey> = {
 
 /**
  * Maps a DoctorCheck.id to a localized title spec: the fixed ids, or
- * "account.<name>.<token|scopes|activity|state|secret>". Null for unknown ids
+ * "account.<name>.<token|scopes|activity|state|secret>" or "subscription.<tenant>". Null for unknown ids
  * (the caller then shows the backend's English title).
  */
 export function doctorTitle(id: string): TitleSpec | null {
   if (FIXED[id]) return { key: FIXED[id] };
   const m = /^account\.(.+)\.(token|scopes|activity|state|secret)$/.exec(id);
   if (m) return { key: PER_ACCOUNT[m[2]], params: { name: m[1] } };
+  const sub = /^subscription\.(.+)$/.exec(id);
+  if (sub) return { key: "doctor.subscription", params: { name: sub[1].replace(/^account:/, "") } };
   return null;
 }

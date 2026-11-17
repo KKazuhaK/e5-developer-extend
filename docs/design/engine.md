@@ -52,7 +52,7 @@
 - `ListUserIDs(ctx, token) ([]string, Result)`：取 `/users?$select=id&$top=50` 的用户 ID，只用于应用身份挑选 `{user}`。
   这是唯一会解析响应体的调用，ID 只返回给调用者，不写入日志或状态。
 - `Call(ctx, token, path string, query url.Values) Result`：
-  - 请求头：`Authorization: Bearer …`、`User-Agent: e5renew/<version>`、`ConsistencyLevel: eventual`（只在需要时加）。
+  - 请求头：`Authorization: Bearer …`、`User-Agent: e5extend/<version>`、`ConsistencyLevel: eventual`（只在需要时加）。
   - 跟随重定向（报表接口返回 302 跳转到 CSV），最多 5 次；**重定向到其他主机时去掉 Authorization 头**（Go 标准库默认就是这样，要有测试）。
   - 响应体最多读 1 MB 后丢弃，**不保存任何响应内容**。
   - 单次请求超时 60 秒。
@@ -207,15 +207,15 @@
 ## 5. CLI 命令
 
 ```
-e5renew run [--log-format text|json]     # 前台运行引擎，直到收到信号
-e5renew run-now [name...]                # 引擎在运行：写 trigger 文件（30 秒内生效）；
+e5extend run [--log-format text|json]     # 前台运行引擎，直到收到信号
+e5extend run-now [name...]                # 引擎在运行：写 trigger 文件（30 秒内生效）；
                                           # 引擎没在运行：在当前进程里直接跑一轮并打印结果；
                                           # 配置里暂停的、自动暂停的、期限已结束的账号会被跳过并说明原因
-e5renew status                           # 引擎是否在运行、心跳时间；每个账号的状态、下次运行、
+e5extend status                           # 引擎是否在运行、心跳时间；每个账号的状态、下次运行、
                                           # 上次成功、今日成功/失败、原因；last_success 超过 3 天的标红
-e5renew logs [name] [--since 24h] [-n 50] [--follow]
-e5renew catalog list [--account name]    # 列出 API 库；带 --account 时根据 granted_scopes 显示是否可用
-e5renew account pause|resume <name>
+e5extend logs [name] [--since 24h] [-n 50] [--follow]
+e5extend catalog list [--account name]    # 列出 API 库；带 --account 时根据 granted_scopes 显示是否可用
+e5extend account pause|resume <name>
 ```
 
 ## 6. 测试

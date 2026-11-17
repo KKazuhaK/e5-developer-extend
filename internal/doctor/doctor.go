@@ -1,4 +1,4 @@
-// Package doctor runs the health checks behind `e5renew doctor`. Every check
+// Package doctor runs the health checks behind `e5extend doctor`. Every check
 // returns a level, a short detail and, where one exists, the command that
 // fixes the problem. Details never contain tokens, secrets, user names or
 // webhook addresses.
@@ -12,20 +12,24 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/recommend"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/subscription"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // Level is the severity of a check result.
@@ -49,6 +53,17 @@ const (
 	Timeout = 30 * time.Second
 
 	fewAPIs = 5
+
+	// DeliveryFailures is how many failed deliveries in a row make the doctor
+	// warn about a channel; DeliveryStale is how long without a success does too.
+	DeliveryFailures = 3
+	DeliveryStale    = 7 * 24 * time.Hour
+
+	// FailingRounds is how many rounds in a row a category must have failed
+	// with "not found" before the doctor warns about it.
+	FailingRounds = 3
+	// failingWindow is how far back the call log is read for that check.
+	failingWindow = 14 * 24 * time.Hour
 )
 
 // Check is one result.
@@ -137,6 +152,13 @@ func Run(ctx context.Context, d Deps, o Options) []Check {
 				func(ctx context.Context) []Check {
 					return checkAccount(ctx, d, cfg, acct, st.Accounts[acct.Name], o.Offline)
 				}})
+		}
+	}
+	if cfg != nil && cfgErr == nil {
+		st, _ := store.New(d.DataDir).LoadState()
+		for _, tv := range subscription.Build(cfg, st, d.now()) {
+			groups = append(groups, group{"subscription." + tv.Label, "Subscription " + tv.Label,
+				func(context.Context) []Check { return []Check{checkSubscription(d, cfg, tv)} }})
 		}
 	}
 	if !o.Offline {
@@ -246,11 +268,11 @@ func checkConfig(d Deps, cfg *config.Config, err error) Check {
 	c := Check{ID: "config", Title: "Configuration"}
 	switch {
 	case errors.Is(err, config.ErrNotFound):
-		c.Level, c.Detail, c.Fix = Fail, "no configuration file yet", "e5renew config init"
+		c.Level, c.Detail, c.Fix = Fail, "no configuration file yet", "e5extend config init"
 	case err != nil:
-		c.Level, c.Detail, c.Fix = Fail, firstLines(err, 5), "e5renew config validate"
+		c.Level, c.Detail, c.Fix = Fail, firstLines(err, 5), "e5extend config validate"
 	case len(cfg.Accounts) == 0:
-		c.Level, c.Detail, c.Fix = Warn, "the configuration is valid but has no accounts", "e5renew account add <name> --auth device_code --tenant <tenant> --client-id <id>"
+		c.Level, c.Detail, c.Fix = Warn, "the configuration is valid but has no accounts", "e5extend account add <name> --auth device_code --tenant <tenant> --client-id <id>"
 	default:
 		c.Level, c.Detail = OK, fmt.Sprintf("valid, %d account(s)", len(cfg.Accounts))
 	}
@@ -305,7 +327,7 @@ func checkVault(d Deps, cfg *config.Config) Check {
 		c.Level, c.Detail = Fail, strings.Join(dedup(problems), "; ")
 		c.Fix = d.hint(firstErr, firstAccount(cfg))
 		if errors.Is(firstErr, vault.ErrNotFound) {
-			c.Fix = "e5renew account set-secret <name>"
+			c.Fix = "e5extend account set-secret <name>"
 		}
 		return c
 	}
@@ -354,7 +376,7 @@ func checkEngine(d Deps) Check {
 		if hbErr == nil {
 			c.Detail += " (last seen " + hb.Local().Format("2006-01-02 15:04") + ")"
 		}
-		c.Fix = "e5renew service install   (or, in the foreground: e5renew run)"
+		c.Fix = "e5extend service install   (or, in the foreground: e5extend run)"
 	case hbErr != nil || d.now().Sub(hb) > HeartbeatMaxAge:
 		c.Level, c.Detail = Warn, "the engine holds its lock but its heartbeat is older than 2 minutes"
 		c.Fix = "check the engine log; restart it if it is stuck"
@@ -376,11 +398,11 @@ func checkService(d Deps) []Check {
 	case err != nil:
 		c.Level, c.Detail = Warn, "cannot ask the service manager: "+firstLines(err, 2)
 	case !st.Installed:
-		c.Level, c.Detail, c.Fix = Warn, "not installed (fine if you start e5renew some other way)", "e5renew service install"
+		c.Level, c.Detail, c.Fix = Warn, "not installed (fine if you start e5extend some other way)", "e5extend service install"
 	case st.Enabled == service.No:
-		c.Level, c.Detail, c.Fix = Warn, "installed but disabled", "e5renew service install"
+		c.Level, c.Detail, c.Fix = Warn, "installed but disabled", "e5extend service install"
 	case st.Running == service.No:
-		c.Level, c.Detail, c.Fix = Warn, "installed and enabled, but not running", "e5renew service status"
+		c.Level, c.Detail, c.Fix = Warn, "installed and enabled, but not running", "e5extend service status"
 	default:
 		c.Level, c.Detail = OK, "installed and enabled"
 		if st.Running == service.Yes {
@@ -423,7 +445,7 @@ func checkAccount(ctx context.Context, d Deps, cfg *config.Config, acct config.A
 		out = append(out, checkScopes(acct, id, title, scopes, recorded))
 	}
 
-	out = append(out, checkActivity(d, acct, as, id, title), checkState(acct, as, id, title))
+	out = append(out, checkActivity(d, acct, as, id, title), checkState(acct, as, id, title), checkAPIs(d, acct, id, title))
 	if acct.NeedsSecret() && acct.SecretExpires != "" {
 		out = append(out, checkSecret(d, acct, id, title))
 	}
@@ -457,6 +479,8 @@ func checkToken(ctx context.Context, d Deps, cfg *config.Config, acct config.Acc
 // tenant names and user names, so it is never shown.
 func tokenLabel(err error) string {
 	switch {
+	case auth.IsSignInFrequency(err):
+		return auth.SignInFrequencyLabel
 	case errors.Is(err, auth.ErrLoginRequired):
 		return "login required"
 	case errors.Is(err, auth.ErrInvalidClient):
@@ -496,10 +520,10 @@ func checkScopes(acct config.Account, id, title string, scopes []string, recorde
 	switch {
 	case n == 0:
 		c.Level, c.Detail = Fail, "no API in the catalog can be called with the granted permissions"+src
-		c.Fix = "grant more API permissions and admin consent (docs/user/app-registration.md); see: e5renew catalog list --account " + acct.Name
+		c.Fix = "grant more API permissions and admin consent (docs/user/app-registration.md); see: e5extend catalog list --account " + acct.Name
 	case n < fewAPIs:
 		c.Level, c.Detail = Warn, fmt.Sprintf("only %d API(s) usable%s; more permissions give more variety", n, src)
-		c.Fix = "see: e5renew catalog list --account " + acct.Name
+		c.Fix = "see: e5extend catalog list --account " + acct.Name
 	default:
 		c.Level, c.Detail = OK, fmt.Sprintf("%d APIs usable%s", n, src)
 	}
@@ -513,16 +537,16 @@ func checkActivity(d Deps, acct config.Account, as *store.AccountState, id, titl
 		return c
 	}
 	if as == nil || as.LastSuccess.IsZero() {
-		c.Level, c.Detail, c.Fix = Warn, "no successful call recorded yet", "e5renew run-now "+acct.Name
+		c.Level, c.Detail, c.Fix = Warn, "no successful call recorded yet", "e5extend run-now "+acct.Name
 		return c
 	}
 	age := d.now().Sub(as.LastSuccess)
 	c.Detail = "last successful call " + humanAge(age) + " ago"
 	switch {
 	case age > ActivityFail:
-		c.Level, c.Fix = Fail, "e5renew status; then e5renew run-now "+acct.Name
+		c.Level, c.Fix = Fail, "e5extend status; then e5extend run-now "+acct.Name
 	case age > ActivityWarn:
-		c.Level, c.Fix = Warn, "e5renew status; then e5renew run-now "+acct.Name
+		c.Level, c.Fix = Warn, "e5extend status; then e5extend run-now "+acct.Name
 	default:
 		c.Level = OK
 	}
@@ -548,13 +572,13 @@ func checkState(acct config.Account, as *store.AccountState, id, title string) C
 	}
 	switch {
 	case acct.Paused:
-		c.Level, c.Detail, c.Fix = Warn, "paused in the configuration", "e5renew account resume "+acct.Name
+		c.Level, c.Detail, c.Fix = Warn, "paused in the configuration", "e5extend account resume "+acct.Name
 	case status == store.StatusNeedsAttention:
 		c.Level, c.Detail = Fail, "needs attention: "+reason
-		c.Fix = "fix the cause above, then: e5renew account resume " + acct.Name
+		c.Fix = "fix the cause above, then: e5extend account resume " + acct.Name
 	case status == store.StatusPaused:
 		c.Level, c.Detail = Fail, "paused automatically: "+reason
-		c.Fix = "e5renew account resume " + acct.Name
+		c.Fix = "e5extend account resume " + acct.Name
 	case status == store.StatusPeriodEnded:
 		c.Level, c.Detail = Warn, "the run period has ended"
 		c.Fix = "extend schedule.period_end in the configuration to keep running"
@@ -564,6 +588,106 @@ func checkState(acct config.Account, as *store.AccountState, id, title string) C
 	return c
 }
 
+// subscriptionWarnDays is how close an end date must be for the doctor to warn.
+const subscriptionWarnDays = 7
+
+// checkSubscription judges what the last subscription check saw. A missing
+// permission is a state to explain, not a problem: the check is optional.
+func checkSubscription(d Deps, cfg *config.Config, tv subscription.TenantView) Check {
+	c := Check{ID: "subscription." + tv.Label, Title: "Subscription " + tv.Label}
+	const renew = "renew it in the Microsoft 365 admin center (Billing > Your products), then run: e5extend subscription"
+	note := "" // the failure of the last check, when older data is still shown
+	manual := func() {
+		switch d := tv.ManualDaysLeft; {
+		case d == nil:
+		case *d <= subscriptionWarnDays:
+			c.Level = Warn
+			c.Detail += fmt.Sprintf("; the date you entered (%s) is %s", tv.ManualExpires, daysPhrase(*d))
+			c.Fix = renew
+		default:
+			c.Detail += fmt.Sprintf("; the date you entered (%s) is %s", tv.ManualExpires, daysPhrase(*d))
+		}
+	}
+	switch tv.Access {
+	case subscription.AccessUnchecked:
+		c.Level, c.Detail = OK, "not checked yet; the engine checks once a day (or run: e5extend subscription)"
+		manual()
+		return c
+	case store.AccessNoPermission:
+		c.Level = OK
+		c.Detail = "cannot read the subscription: Organization.Read.All is needed (add it to the app of account " + tv.FixAccount + " with: " + tv.FixCommand + ")"
+		if tv.ManualExpires != "" {
+			c.Detail = "cannot read the subscription (Organization.Read.All is needed)"
+			manual()
+		}
+		return c
+	case store.AccessError:
+		c.Level = OK
+		c.Detail = "the last check failed: " + tv.Detail
+		note = c.Detail
+		if tv.CheckedAt == nil {
+			c.Level = Warn
+			c.Fix = "e5extend subscription"
+		}
+		if len(tv.Subscriptions) == 0 {
+			manual()
+			return c
+		}
+	}
+
+	var parts []string
+	watched := 0
+	for _, s := range tv.Subscriptions {
+		if !s.Watched {
+			continue
+		}
+		watched++
+		part := s.SKU + " " + s.Status
+		if s.DaysLeft != nil {
+			part += ", ends " + s.Expires + " (" + daysPhrase(*s.DaysLeft) + ")"
+		}
+		parts = append(parts, part)
+		switch {
+		case s.Status != notify.StatusEnabled:
+			c.Level = Warn
+			c.Fix = "check the subscription in the Microsoft 365 admin center (Billing > Your products)"
+		case s.DaysLeft != nil && *s.DaysLeft <= subscriptionWarnDays:
+			c.Level = Warn
+			c.Fix = renew
+		}
+	}
+	if c.Level == "" {
+		c.Level = OK
+	}
+	if watched == 0 {
+		c.Detail = "no E5 developer subscription found in the tenant (watched SKUs: " + strings.Join(cfg.Subscription.SKUPrefixes(), ", ") + ")"
+		if len(tv.Subscriptions) > 0 {
+			c.Detail = fmt.Sprintf("%d subscription(s), none of the watched SKUs", len(tv.Subscriptions))
+		}
+		return c
+	}
+	c.Detail = strings.Join(parts, "; ")
+	if note != "" {
+		c.Detail += "; " + note
+	}
+	if tv.ManualRedundant {
+		c.Detail += "; the date entered by hand is no longer needed, remove subscription_expires"
+	}
+	return c
+}
+
+func daysPhrase(d int) string {
+	switch {
+	case d < 0:
+		return fmt.Sprintf("%d day(s) ago", -d)
+	case d == 0:
+		return "today"
+	case d == 1:
+		return "tomorrow"
+	}
+	return fmt.Sprintf("in %d days", d)
+}
+
 func checkSecret(d Deps, acct config.Account, id, title string) Check {
 	c := Check{ID: id + ".secret", Title: title + " client secret"}
 	days, ok := notify.DaysLeft(d.now(), acct.SecretExpires)
@@ -571,7 +695,7 @@ func checkSecret(d Deps, acct config.Account, id, title string) Check {
 		c.Level, c.Detail = Warn, "secret_expires is not a YYYY-MM-DD date"
 		return c
 	}
-	c.Fix = "create a new secret in the app registration, then: e5renew account set-secret " + acct.Name + " --secret-expires YYYY-MM-DD"
+	c.Fix = "create a new secret in the app registration, then: e5extend account set-secret " + acct.Name + " --secret-expires YYYY-MM-DD"
 	switch {
 	case days < 0:
 		c.Level, c.Detail = Fail, fmt.Sprintf("expired on %s", acct.SecretExpires)
@@ -607,7 +731,7 @@ func checkNetwork(ctx context.Context, d Deps, cfg *config.Config) []Check {
 		nc.Level, nc.Detail = Fail, "bad Graph address: "+err.Error()
 		return []Check{cc.skipped(), nc}
 	}
-	req.Header.Set("User-Agent", "e5renew/"+version.Version)
+	req.Header.Set("User-Agent", "e5extend/"+version.Version)
 	cp := *hc
 	cp.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := cp.Do(req)
@@ -661,32 +785,220 @@ func (c Check) skipped() Check {
 
 func checkNotify(d Deps, cfg *config.Config) Check {
 	c := Check{ID: "notify", Title: "Alerts"}
-	inVault, unreadable := false, false
-	if v, err := d.OpenVault(cfg); err == nil {
-		inVault, _ = v.Has(notify.VaultKey)
-		if inVault {
-			// Only whether it can be decrypted is of interest; the address is never shown.
-			if _, gerr := v.Get(notify.VaultKey); gerr != nil {
-				unreadable = true
+	v, verr := d.OpenVault(cfg)
+	has := func(key string) bool {
+		if verr != nil {
+			return false
+		}
+		ok, _ := v.Has(key)
+		return ok
+	}
+	// A secret is only tried for decryption: its value is never shown.
+	unreadable := func(key string) bool {
+		if verr != nil || !has(key) {
+			return false
+		}
+		_, err := v.Get(key)
+		return err != nil
+	}
+
+	var problems, fixes []string
+	add := func(problem, fix string) {
+		problems = append(problems, problem)
+		if fix != "" && !slices.Contains(fixes, fix) {
+			fixes = append(fixes, fix)
+		}
+	}
+	channels := len(cfg.Notify.Channels)
+	for _, ch := range cfg.Notify.Channels {
+		name := ch.Type + " channel " + ch.ID
+		legacyURL := ch.ID == notify.LegacyChannelID && ch.Type == config.ChannelWebhook && has(notify.VaultKey)
+		for _, f := range config.ChannelSecrets(ch.Type) {
+			key := notify.ChannelSecretKey(ch.ID, f.Name)
+			switch {
+			case unreadable(key):
+				add(name+": the stored "+f.Name+" cannot be decrypted, so nothing can be sent there",
+					"restore the master key, or set it again: e5extend notify channel edit "+ch.ID)
+			case f.Required && !has(key) && !(f.Name == "url" && legacyURL):
+				add(name+": "+f.Name+" is not set", "e5extend notify channel edit "+ch.ID)
+			}
+		}
+		if ch.Server != "" && notify.IsPlainHTTP(ch.Server) || ch.APIBase != "" && notify.IsPlainHTTP(ch.APIBase) {
+			add(name+": talks to its server over http, so the token travels unencrypted", "use an https:// server address")
+		}
+		if ch.Type == config.ChannelEmail && ch.SecurityOrDefault() == config.SecurityNone {
+			add(name+": the mail connection is not encrypted", "set security to starttls or tls")
+		}
+		if ch.AllowHTTP {
+			add(name+": allow_http is set, so its address may be http and travel unencrypted", "set an https address (that clears allow_http), or run: e5extend notify channel edit "+ch.ID+" --allow-http=false")
+		}
+		if ch.AllowPlainAuth {
+			add(name+": allow_plain_auth is set, so the password is sent without encryption", "set security to starttls or tls")
+		}
+		if ch.Template != "" {
+			if err := notify.CheckTemplate(ch.Type, ch.Template, ch.Type == config.ChannelWebhook && ch.Format == config.FormatTemplate); err != nil {
+				add(name+": the custom template does not work: "+err.Error(), "e5extend notify preview test --type "+ch.Type)
 			}
 		}
 	}
-	plain := cfg.Notify.WebhookURL != ""
+	// How the deliveries went (recorded by whoever sent them; no secrets in it).
+	status := notify.ReadStatus(d.DataDir)
+	ids := []string{}
+	for _, ch := range cfg.Notify.Channels {
+		ids = append(ids, ch.ID)
+	}
+	if _, ok := cfg.Notify.FindChannel(notify.LegacyChannelID); !ok {
+		ids = append(ids, notify.LegacyChannelID)
+	}
+	for _, id := range ids {
+		st, ok := status[id]
+		if !ok || st.OK {
+			continue
+		}
+		stale := st.LastOK.IsZero() || d.now().Sub(st.LastOK) > DeliveryStale
+		switch {
+		case st.Failures >= DeliveryFailures:
+			add(fmt.Sprintf("channel %s: the last %d deliveries failed (%s)", id, st.Failures, st.Error), "e5extend notify test "+id)
+		case stale:
+			add(fmt.Sprintf("channel %s: nothing delivered in the last %d days (%s)", id, int(DeliveryStale.Hours()/24), st.Error), "e5extend notify test "+id)
+		}
+	}
+	// The webhook of older versions, when it has not been saved as a channel yet.
+	if _, ok := cfg.Notify.FindChannel(notify.LegacyChannelID); !ok {
+		// Older versions accepted http addresses; they still work, but the token travels unencrypted.
+		insecure := func(raw string) bool {
+			u, err := url.Parse(strings.TrimSpace(raw))
+			return err == nil && u.Scheme == "http" && !notify.IsLoopback(u.Hostname())
+		}
+		if has(notify.VaultKey) && !unreadable(notify.VaultKey) {
+			if b, err := v.Get(notify.VaultKey); err == nil && insecure(string(b)) {
+				add("the stored webhook address is http, so it travels unencrypted", "set an https address: e5extend notify set-webhook <url>")
+			}
+		}
+		if insecure(cfg.Notify.WebhookURL) {
+			add("the webhook address is http, so it travels unencrypted", "set an https address: e5extend notify set-webhook <url>")
+		}
+		switch {
+		case unreadable(notify.VaultKey):
+			channels++
+			add("the stored webhook address cannot be decrypted, so no alert can be sent",
+				"restore the master key, or set the address again: e5extend notify set-webhook <url>")
+		case cfg.Notify.WebhookURL != "":
+			channels++
+			add("the webhook address is stored in plain text in config.toml",
+				"e5extend notify set-webhook <url>   (moves it into the vault and clears the config entry)")
+		case has(notify.VaultKey):
+			channels++
+		}
+	}
 	switch {
-	case unreadable:
-		c.Level = Warn
-		c.Detail = "the stored webhook address cannot be decrypted, so no alert can be sent"
-		c.Fix = "restore the master key, or set the address again: e5renew notify set-webhook <url>"
-	case plain:
-		c.Level = Warn
-		c.Detail = "the webhook address is stored in plain text in config.toml"
-		c.Fix = "e5renew notify set-webhook <url>   (moves it into the vault and clears the config entry)"
-	case !inVault:
+	case channels == 0:
 		c.Level = Warn
 		c.Detail = "no alert destination is set; you will not hear about problems"
-		c.Fix = "e5renew notify set-webhook <url>"
+		c.Fix = "e5extend notify channel add <id> --type telegram|email|wecom|feishu|dingtalk|discord|slack|bark|ntfy|serverchan|webhook"
+	case len(problems) > 0:
+		c.Level = Warn
+		c.Detail = strings.Join(problems, "; ")
+		c.Fix = strings.Join(fixes, "; ")
 	default:
-		c.Level, c.Detail = OK, "webhook set (stored in the vault)"
+		c.Level = OK
+		if channels == 1 {
+			c.Detail = "1 notification channel set (secrets stored in the vault)"
+		} else {
+			c.Detail = fmt.Sprintf("%d notification channels set (secrets stored in the vault)", channels)
+		}
 	}
 	return c
+}
+
+// checkAPIs warns about a category whose calls found nothing in each of its
+// last FailingRounds rounds, which usually means the account lacks the service
+// (no mailbox, no OneDrive). It only reads the local call log.
+func checkAPIs(d Deps, acct config.Account, id, title string) Check {
+	c := Check{ID: id + ".apis", Title: title + " APIs"}
+	apis, err := catalog.Load()
+	if err != nil {
+		c.Level, c.Detail = Warn, "the API catalog could not be read"
+		return c
+	}
+	category := callstat.CategoryIndex(apis)
+	entries, err := store.New(d.DataDir).Read(store.Filter{Account: acct.Name, Since: d.now().Add(-failingWindow)})
+	if err != nil {
+		c.Level, c.Detail = OK, "the call log could not be read"
+		return c
+	}
+	// Per category, the rounds it was called in (oldest first) and whether
+	// every call of that round found nothing.
+	type round struct {
+		id       string
+		allFound bool
+	}
+	rounds := map[string][]round{}
+	var order []string
+	for _, e := range entries {
+		cat, known := category[e.API]
+		if !callstat.IsCall(e) || !known {
+			continue
+		}
+		missing := callstat.IsMissing(e.Class, e.Status)
+		rs := rounds[cat]
+		if len(rs) == 0 {
+			order = append(order, cat)
+		}
+		if n := len(rs); n > 0 && rs[n-1].id == e.Round {
+			rs[n-1].allFound = rs[n-1].allFound && missing
+		} else {
+			rs = append(rs, round{e.Round, missing})
+		}
+		rounds[cat] = rs
+	}
+	// Only categories the account currently runs count: one switched off
+	// (for example by --apply) has old failures in the log but no problem.
+	enabled := callstat.EnabledCategories(apis, acct.Categories)
+	var parts []string
+	for _, cat := range order {
+		if !enabled[strings.ToLower(cat)] {
+			continue
+		}
+		rs := rounds[cat]
+		if len(rs) < FailingRounds {
+			continue
+		}
+		failing := true
+		for _, r := range rs[len(rs)-FailingRounds:] {
+			failing = failing && r.allFound
+		}
+		if failing {
+			parts = append(parts, fmt.Sprintf("category %s keeps failing (not found%s)", cat, missingHint(cat)))
+		}
+	}
+	if len(parts) == 0 {
+		c.Level, c.Detail = OK, fmt.Sprintf("no category found nothing in its last %d rounds", FailingRounds)
+		return c
+	}
+	c.Level, c.Detail = Warn, strings.Join(parts, "; ")
+	c.Fix = "e5extend account test " + acct.Name + " --recommend"
+	return c
+}
+
+// missingHint guesses why a category finds nothing, from the probe table.
+func missingHint(category string) string {
+	for _, p := range recommend.Probes() {
+		for _, c := range p.Categories {
+			if c != category {
+				continue
+			}
+			switch p.Reason {
+			case recommend.ReasonNoMailbox:
+				return "; no mailbox?"
+			case recommend.ReasonNoOneDrive:
+				return "; no OneDrive?"
+			case recommend.ReasonNoTeams:
+				return "; no Teams license?"
+			case recommend.ReasonNoSharePoint:
+				return "; no SharePoint?"
+			}
+		}
+	}
+	return ""
 }

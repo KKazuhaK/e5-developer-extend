@@ -1,4 +1,4 @@
-module github.com/KKazuhaK/e5-renew
+module github.com/KKazuhaK/e5-developer-extend
 
 go 1.26.0
 

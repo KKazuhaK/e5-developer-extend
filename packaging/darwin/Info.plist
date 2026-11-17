@@ -6,18 +6,18 @@
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleName</key>
-	<string>E5 Renew</string>
+	<string>E5 Developer Extend</string>
 	<key>CFBundleDisplayName</key>
-	<string>E5 Renew</string>
+	<string>E5 Developer Extend</string>
 	<key>CFBundleExecutable</key>
-	<string>e5renew-gui</string>
+	<string>e5extend-gui</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.kkazuhak.e5renew</string>
+	<string>io.github.kkazuhak.e5extend</string>
 	<key>CFBundleShortVersionString</key>
 	<string>@NUM_VERSION@</string>
 	<key>CFBundleVersion</key>
 	<string>@NUM_VERSION@</string>
-	<key>E5RenewFullVersion</key>
+	<key>E5ExtendFullVersion</key>
 	<string>@VERSION@</string>
 	<key>CFBundleIconFile</key>
 	<string>icons</string>

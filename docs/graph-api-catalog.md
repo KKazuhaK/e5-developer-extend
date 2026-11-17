@@ -92,22 +92,16 @@
 
 ## 推荐的应用注册权限组合
 
-**委托身份**（设备码或浏览器登录）——尽量选普通用户能自己同意的低权限：
+推荐权限的**唯一来源**是代码里的两个列表：`catalog.RecommendedDelegated`（委托身份，设备码或浏览器登录）和
+`catalog.RecommendedApplication`（应用身份，Client Secret），见 [internal/catalog/recommended.go](../internal/catalog/recommended.go)。
+自动创建应用（`e5extend app setup`、桌面版的添加账号向导）直接使用这两个列表，并按名称向 Microsoft Graph 查出权限 ID。
+手动注册时照着这两个列表勾选；`e5extend app setup` 在执行前也会把完整列表打印出来。
 
-```
-User.Read  User.ReadBasic.All  GroupMember.Read.All*  Mail.ReadBasic  MailboxSettings.Read
-Calendars.ReadBasic  Contacts.Read  Files.Read  Sites.Read.All  Notes.Read
-Tasks.Read  Team.ReadBasic.All  offline_access
-```
-
-`*` 需要管理员同意（E5 开发者租户里你自己就是管理员，所以不是问题）。其余是否需要管理员同意，以 Entra 后台“API 权限”页显示为准，实测时核对。
-
-**应用身份**（Client Secret）——全部需要管理员同意：
-
-```
-User.Read.All  Organization.Read.All  Group.Read.All  Mail.ReadBasic.All  MailboxSettings.Read
-Calendars.Read  Contacts.Read  Files.Read.All  Sites.Read.All  Tasks.Read.All  Team.ReadBasic.All
-```
+- 委托身份：尽量选普通用户能自己同意的低权限。`GroupMember.Read.All` 需要管理员同意（E5 开发者租户里你自己就是管理员，所以不是问题）。
+  其余是否需要管理员同意，以 Entra 后台“API 权限”页显示为准，实测时核对。`offline_access` 不对应任何接口，只是让登录可以续期。
+- 应用身份：全部需要管理员同意。
+- `Organization.Read.All` 在两个列表里都有：除了“组织信息”接口，订阅到期检测（`GET /directory/subscriptions`，见 [docs/design/subscription.md](design/subscription.md)）也读它；委托身份下它需要管理员同意。
+- 测试保证列表里的每个权限（`offline_access` 除外）都至少被 `apis.yaml` 里的一个接口用到，所以列表不会悄悄变成多余的权限。
 
 ## 还要实测确认的事
 

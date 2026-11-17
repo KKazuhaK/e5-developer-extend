@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 // StatusService reports the engine and account state and starts rounds.

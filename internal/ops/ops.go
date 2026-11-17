@@ -1,5 +1,5 @@
 // Package ops holds the operations behind both user interfaces: the command
-// line (cmd/e5renew) and the desktop app (gui). Every operation returns typed
+// line (cmd/e5extend) and the desktop app (gui). Every operation returns typed
 // results and never prints, so each interface formats them its own way.
 //
 // Nothing here returns or logs a secret, a token or the webhook address.
@@ -13,11 +13,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 // SvcIdentity overrides who the background job is installed for; tests only.
@@ -45,6 +45,22 @@ type Ops struct {
 	Platform string
 	// WebhookBackoff replaces the retry waits of alert delivery.
 	WebhookBackoff []time.Duration
+	// VaultFor replaces how the vault is opened; tests use it to give each
+	// simulated machine its own master key.
+	VaultFor func(cfg *config.Config) (*vault.Vault, error)
+	// Bootstrap replaces the administrator sign-in of automatic app setup
+	// (auth.Bootstrap when nil); tests use it to skip the identity service.
+	Bootstrap func(ctx context.Context, method, tenant, clientID string, scopes []string, ui auth.LoginUI, c *http.Client) (auth.Token, error)
+	// SetupBackoff replaces the waits for Microsoft to replicate a new app
+	// registration; nil means about two minutes in total.
+	SetupBackoff []time.Duration
+	// SetupHostname replaces os.Hostname in the client secret's name.
+	SetupHostname string
+	// SaveConfig replaces how an import saves config.toml; tests inject failures.
+	SaveConfig func(cfg *config.Config, path string) error
+	// RefreshWait is how long a subscription refresh waits for a running
+	// engine; zero means the default of about 75 seconds.
+	RefreshWait time.Duration
 }
 
 // New returns Ops that talk to the real services.
@@ -66,9 +82,9 @@ func (o *Ops) LoadConfig() (*config.Config, string, error) {
 	cfg, err := config.Load(path)
 	switch {
 	case errors.Is(err, config.ErrNotFound):
-		return nil, path, fmt.Errorf("%w\nrun: e5renew config init", err)
+		return nil, path, fmt.Errorf("%w\nrun: e5extend config init", err)
 	case err != nil && cfg != nil:
-		return nil, path, fmt.Errorf("%s is invalid; check it with: e5renew config validate\n%w", path, err)
+		return nil, path, fmt.Errorf("%s is invalid; check it with: e5extend config validate\n%w", path, err)
 	case err != nil:
 		return nil, path, err
 	}
@@ -86,6 +102,9 @@ func (o *Ops) LoadConfigOrDefault() (*config.Config, string, error) {
 
 // OpenVault opens the vault named by the configuration.
 func (o *Ops) OpenVault(cfg *config.Config) (*vault.Vault, error) {
+	if o.VaultFor != nil {
+		return o.VaultFor(cfg)
+	}
 	return vault.Open(cfg.Vault.Backend)
 }
 
@@ -102,7 +121,7 @@ func (o *Ops) Authenticator(cfg *config.Config, acct config.Account) (auth.Authe
 func (o *Ops) FindAccount(cfg *config.Config, name string) (*config.Account, error) {
 	acct, ok := cfg.Find(name)
 	if !ok {
-		return nil, fmt.Errorf("no account named %q\nrun: e5renew account list", name)
+		return nil, fmt.Errorf("no account named %q\nrun: e5extend account list", name)
 	}
 	return acct, nil
 }
@@ -122,27 +141,42 @@ func Hint(err error, name string) string {
 	switch {
 	case strings.Contains(text, "AADSTS7000218"):
 		return "enable \"Allow public client flows\" in the app registration (Authentication > Advanced settings)"
+	case strings.Contains(text, "AADSTS70043"):
+		// Seen on a real tenant: a Conditional Access "sign-in frequency" policy
+		// caps the refresh token's lifetime, so signing in again only buys that
+		// much time and the background job keeps stopping.
+		return "ways out, in order: (a) use the app identity (recommended), which user sign-in policies do not affect: e5extend account add " + name + "-app --auto --auth client_secret (choose another name if taken); " +
+			"(b) password sign-in, only if the account has no MFA (the password is stored encrypted on this machine); a sign-in frequency policy often comes with MFA, so this usually fails there; " +
+			"(c) exclude this app registration from the Conditional Access policy (Entra > Protection > Conditional Access), then run `e5extend account login " + name + "`"
 	case strings.Contains(text, "AADSTS50126"):
-		return "the stored password is wrong or expired: run `e5renew account set-secret " + name + "`"
+		return "the stored password is wrong or expired: run `e5extend account set-secret " + name + "` (automatic password sign-in stays paused until then)"
+	case strings.Contains(text, "AADSTS53003"):
+		return "blocked by a Conditional Access policy; ask the administrator, or check the policy's conditions (location, device, workload identity)"
+	case strings.Contains(text, "AADSTS50053"):
+		return "the account is locked (Smart Lockout); wait, sign in on the web to unlock it, then run `e5extend account login " + name + "`"
+	case strings.Contains(text, "AADSTS50055"):
+		return "the password has expired: change it, then run `e5extend account set-secret " + name + "`"
+	case strings.Contains(text, "AADSTS50057"):
+		return "the account is disabled in Entra; enable it there, then run `e5extend account login " + name + "`"
 	case strings.Contains(text, "AADSTS50076"), strings.Contains(text, "AADSTS50079"):
 		return "this account requires MFA; switch to device_code or browser (remove it and add it again with --auth device_code)"
 	case errors.Is(err, auth.ErrLoginRequired) && errors.Is(err, vault.ErrWrongKey):
-		return "the stored token cache cannot be decrypted (did the master key change?); run: e5renew account login " + name + " (this discards the unreadable cache)"
+		return "the stored token cache cannot be decrypted (did the master key change?); run: e5extend account login " + name + " (this discards the unreadable cache)"
 	case errors.Is(err, auth.ErrLoginRequired):
-		return "run: e5renew account login " + name
+		return "run: e5extend account login " + name
 	case errors.Is(err, auth.ErrInvalidClient):
-		return "check the client ID and client secret; to replace the secret run: e5renew account set-secret " + name
+		return "check the client ID and client secret; to replace the secret run: e5extend account set-secret " + name
 	case errors.Is(err, auth.ErrConsentRequired):
 		return "an administrator must grant consent for the app's API permissions (Azure portal > App registrations > API permissions > Grant admin consent)"
 	case errors.Is(err, auth.ErrTransient):
 		return "network or service problem; check connectivity and the proxy setting, then try again"
 	case errors.Is(err, vault.ErrRemoteSession):
-		return "the key is probably fine but out of reach from this remote session: run the command in the desktop session, or set E5RENEW_MASTER_KEY for this shell; do not reset the vault"
+		return "the key is probably fine but out of reach from this remote session: run the command in the desktop session, or set E5EXTEND_MASTER_KEY for this shell; do not reset the vault"
 	case errors.Is(err, vault.ErrNoMasterKey):
-		return "if the vault already holds data, restore the old key (E5RENEW_MASTER_KEY or the system keyring entry); if it is empty, run: e5renew vault init; " +
-			"only as a last resort, e5renew vault reset deletes all stored secrets"
+		return "if the vault already holds data, restore the old key (E5EXTEND_MASTER_KEY or the system keyring entry); if it is empty, run: e5extend vault init; " +
+			"only as a last resort, e5extend vault reset deletes all stored secrets"
 	case errors.Is(err, vault.ErrWrongKey):
-		return "restore the original master key (E5RENEW_MASTER_KEY or the system keyring entry); otherwise re-enter the secret with: e5renew account set-secret " + name
+		return "restore the original master key (E5EXTEND_MASTER_KEY or the system keyring entry); otherwise re-enter the secret with: e5extend account set-secret " + name
 	}
 	return ""
 }

@@ -3,9 +3,12 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -13,13 +16,14 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 const testGUID = "11111111-2222-3333-4444-555555555555"
@@ -120,14 +124,14 @@ func newRig(t *testing.T) *rig {
 		AccessToken: tokenValue, HomeAccountID: "uid.tid", Account: upn,
 		ExpiresOn: time.Now().Add(time.Hour), Scopes: []string{"User.Read", "Mail.Read"},
 	}, prompt: "To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code ABCD1234EF to authenticate."}
-	t.Setenv("E5RENEW_CONFIG_DIR", r.cfgDir)
-	t.Setenv("E5RENEW_DATA_DIR", r.dataDir)
+	t.Setenv("E5EXTEND_CONFIG_DIR", r.cfgDir)
+	t.Setenv("E5EXTEND_DATA_DIR", r.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	o := &ops.Ops{
 		NewAuth:   func(config.Account, auth.Store, *http.Client) (auth.Authenticator, error) { return r.fa, nil },
 		NoCallGap: true, WebhookBackoff: []time.Duration{time.Millisecond},
-		Runner: &service.FakeRunner{}, Exe: func() (string, error) { return "/opt/e5renew/e5renew", nil },
+		Runner: &service.FakeRunner{}, Exe: func() (string, error) { return "/opt/e5extend/e5extend", nil },
 		Svc: ops.SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"},
 	}
 	r.b = NewBackend(&Backend{Ops: o, ConfigDir: r.cfgDir, Emit: r.ev.emit, Autostart: r.auto,
@@ -256,16 +260,24 @@ func TestNothingSecretLeavesTheServices(t *testing.T) {
 		t.Fatalf("settings: %+v %v", s, err)
 	}
 	r.keep(s)
-	s.UI.Language, s.UI.Theme, s.UI.StartAtLogin = "zh", "dark", true
+	s.UI.Language, s.UI.Theme = "zh", "dark"
 	s.Schedule.IntervalMin = "45m"
 	if bad, err := set.Save(s); err != nil || len(bad) != 0 {
 		t.Fatalf("save: %v %v", bad, err)
 	}
-	if !r.auto.on {
-		t.Fatal("start at login not applied")
-	}
-	if got, _ := set.Get(); got.UI.Language != "zh" || got.Schedule.IntervalMin != "45m" || !got.UI.StartAtLogin {
+	if got, _ := set.Get(); got.UI.Language != "zh" || got.Schedule.IntervalMin != "45m" {
 		t.Fatalf("after save: %+v", got)
+	}
+	if err := set.SetStartAtLogin(true); err != nil || !r.auto.on {
+		t.Fatalf("start at login not applied: %v", err)
+	}
+	if got, _ := set.Get(); !got.UI.StartAtLogin {
+		t.Fatalf("after set: %+v", got)
+	}
+	// Save must not undo it, even with a stale value in the form.
+	s.UI.StartAtLogin = false
+	if bad, err := set.Save(s); err != nil || len(bad) != 0 || !r.auto.on {
+		t.Fatalf("save touched start at login: %v %v", bad, err)
 	}
 	s.UI.Language = "klingon"
 	s.Schedule.IntervalMax = "soon"
@@ -504,7 +516,7 @@ func TestInstallChecksBeforeHandover(t *testing.T) {
 	}
 
 	// The checks pass but the install fails: the handover is withdrawn.
-	r.b.Ops.Exe = func() (string, error) { return "/opt/e5renew/e5renew", nil }
+	r.b.Ops.Exe = func() (string, error) { return "/opt/e5extend/e5extend", nil }
 	r.b.Ops.Platform = service.Linux // make systemctl the command that fails, on every host
 	r.b.Ops.Runner = &service.FakeRunner{FailOn: []string{"systemctl"}}
 	if _, err := h.InstallService(); err == nil {
@@ -542,11 +554,8 @@ func TestAutostartFailureIsAnError(t *testing.T) {
 	r := newRig(t)
 	r.b.Autostart = brokenAutostart{}
 	set := NewSettingsService(r.b)
-	s, _ := set.Get()
-	s.UI.StartAtLogin = true
-	bad, err := set.Save(s)
-	if err == nil || len(bad) != 0 {
-		t.Fatalf("bad=%+v err=%v", bad, err)
+	if err := set.SetStartAtLogin(true); err == nil {
+		t.Fatal("want the failure back")
 	}
 }
 
@@ -577,5 +586,97 @@ func TestProxyPasswordIsHiddenAndKept(t *testing.T) {
 	cfg, _, _ = r.b.Ops.LoadConfig()
 	if cfg.Network.Proxy != "http://other.example:8080" {
 		t.Fatalf("proxy = %q", cfg.Network.Proxy)
+	}
+}
+
+func TestStartServiceNeedsAnInstalledServiceAndWithdrawsHandover(t *testing.T) {
+	r := newRig(t)
+	r.b.Ops.Platform = service.Linux
+	fr := &service.FakeRunner{}
+	r.b.Ops.Runner = fr
+	var asked, cancels int
+	r.b.RequestHandover = func(context.Context) error { asked++; return nil }
+	r.b.CancelHandover = func() { cancels++ }
+	h := NewHealthService(r.b)
+	// Not installed: nothing is started and the tray is not even asked.
+	if _, err := h.StartService(); !errors.Is(err, service.ErrNotInstalled) || asked != 0 || cancels != 0 {
+		t.Fatalf("not installed: err=%v asked=%d cancels=%d", err, asked, cancels)
+	}
+	if _, err := h.InstallService(); err != nil {
+		t.Fatal(err)
+	}
+	fr.Replies = map[string]service.Output{
+		"systemctl --user is-enabled": {Stdout: "enabled\n"}, "systemctl --user is-active": {Stdout: "inactive\n"}, "loginctl": {Stdout: "yes\n"},
+	}
+	fr.Calls = nil
+	cancels = 0
+	res, err := h.StartService()
+	if err != nil || len(res.Actions) != 1 || cancels != 0 || asked != 2 {
+		t.Fatalf("start: %+v %v cancels=%d asked=%d", res, err, cancels, asked)
+	}
+	if got := strings.Join(fr.Commands(), "|"); !strings.Contains(got, "systemctl --user start e5extend.service") {
+		t.Fatalf("commands = %s", got)
+	}
+	// A failing start after the handover withdraws it.
+	fr.FailOn = []string{"systemctl --user start"}
+	cancels = 0
+	if _, err := h.StartService(); err == nil || cancels != 1 {
+		t.Fatalf("failed start: err=%v cancels=%d", err, cancels)
+	}
+}
+
+func TestRecommendProbesTheSignedInAccount(t *testing.T) {
+	r := newRig(t)
+	acc := NewAccountService(r.b)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Errorf("probe used %s", req.Method)
+		}
+		if req.URL.Path == "/me/drive" {
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	r.b.Ops.GraphBase = srv.URL
+	r.fa.tok.Scopes = catalog.RecommendedDelegated
+	if err := acc.Add(AccountInput{Name: "me", Auth: config.AuthDeviceCode, Tenant: "t.example", ClientID: testGUID}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := acc.Recommend("me")
+	if err != nil || res.NeedsLogin {
+		t.Fatalf("%+v %v", res, err)
+	}
+	r.keep(res)
+	status := map[string]string{}
+	for _, c := range res.Categories {
+		status[c.Category] = c.Status + "/" + c.Reason
+	}
+	if status["files"] != "unavailable/no_onedrive" || status["mail"] != "recommended/" {
+		t.Errorf("status %v", status)
+	}
+	if slices.Contains(res.Recommended, "files") || !slices.Contains(res.Recommended, "mail") {
+		t.Errorf("recommended %v", res.Recommended)
+	}
+	for _, leaked := range []string{tokenValue, upn} {
+		if strings.Contains(r.returned[0], leaked) {
+			t.Errorf("result leaks %q", leaked)
+		}
+	}
+
+	// Not signed in: no advice, no error.
+	r.fa.err = auth.ErrLoginRequired
+	res, err = acc.Recommend("me")
+	if err != nil || !res.NeedsLogin || len(res.Categories) != 0 || res.Recommended == nil {
+		t.Fatalf("not signed in: %+v %v", res, err)
+	}
+
+	// Any other failure is an error.
+	r.fa.err = auth.ErrTransient
+	if _, err := acc.Recommend("me"); err == nil {
+		t.Error("a transient sign-in failure must be an error")
+	}
+	if _, err := acc.Recommend("nobody"); err == nil {
+		t.Error("unknown account must be an error")
 	}
 }

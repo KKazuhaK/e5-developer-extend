@@ -13,10 +13,10 @@ import (
 	"github.com/pkg/browser"
 	"github.com/wailsapp/wails/v3/pkg/application"
 
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 // autostartArgs are the arguments the login entry starts the app with.
@@ -27,7 +27,7 @@ var autostartArgs = []string{"--tray"}
 // which is the bundle ID Wails would use by default on macOS: both would write
 // ~/Library/LaunchAgents/<label>.plist, and the login item would replace the
 // background service. The Windows installer removes the Run value by this name.
-const autostartID = "io.github.kkazuhak.e5renew.tray"
+const autostartID = "io.github.kkazuhak.e5extend.tray"
 
 // wailsAutostart adapts the Wails autostart manager to services.Autostart.
 type wailsAutostart struct{ app *application.App }
@@ -64,6 +64,32 @@ func resumeFile() (string, error) {
 		return "", err
 	}
 	return filepath.Join(dir, "gui-resume"), nil
+}
+
+// quitFile is how the tray tells an open window that the app is quitting. Its
+// content is the time of the request; the tray removes it at its next start.
+func quitFile() (string, error) {
+	dir, err := paths.DataDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "gui-quit"), nil
+}
+
+// shouldQuit reports whether a window started at start has to close, given the
+// content and modification time of the quit file (exists is false when there
+// is none). The request time is the content, an RFC 3339 timestamp; when that
+// does not parse, the modification time stands in. A request that predates the
+// window is left from an earlier quit and is ignored.
+func shouldQuit(start time.Time, content []byte, mtime time.Time, exists bool) bool {
+	if !exists {
+		return false
+	}
+	at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(string(content)))
+	if err != nil {
+		at = mtime
+	}
+	return at.After(start)
 }
 
 // cancelHandover withdraws a handover request after a failed install: the
@@ -120,8 +146,8 @@ func requestHandover(ctx context.Context) error {
 	return nil
 }
 
-// cliPath finds the e5renew command-line binary next to this program. The
-// background service has to run the CLI (`e5renew run`), not the app.
+// cliPath finds the e5extend command-line binary next to this program. The
+// background service has to run the CLI (`e5extend run`), not the app.
 func cliPath() (string, error) {
 	self, err := os.Executable()
 	if err != nil {
@@ -130,13 +156,13 @@ func cliPath() (string, error) {
 	if r, err := filepath.EvalSymlinks(self); err == nil {
 		self = r
 	}
-	name := "e5renew"
+	name := "e5extend"
 	if strings.HasSuffix(strings.ToLower(self), ".exe") {
 		name += ".exe"
 	}
 	p := filepath.Join(filepath.Dir(self), name)
 	if _, err := os.Stat(p); err != nil {
-		return "", errors.New("the background service needs the e5renew command-line program next to this app; it was not found in " + filepath.Dir(self))
+		return "", errors.New("the background service needs the e5extend command-line program next to this app; it was not found in " + filepath.Dir(self))
 	}
 	return p, nil
 }
@@ -171,7 +197,7 @@ func openMainWindow(log *slog.Logger, page string) {
 // passThroughArgs are the folder flags this process was started with.
 func passThroughArgs() []string {
 	var out []string
-	for _, a := range []struct{ flag, env string }{{"--config-dir", "E5RENEW_CONFIG_DIR"}, {"--data-dir", "E5RENEW_DATA_DIR"}} {
+	for _, a := range []struct{ flag, env string }{{"--config-dir", "E5EXTEND_CONFIG_DIR"}, {"--data-dir", "E5EXTEND_DATA_DIR"}} {
 		if v := os.Getenv(a.env); v != "" {
 			out = append(out, a.flag, v)
 		}
@@ -184,4 +210,43 @@ func openURL(url string) error {
 		return errors.New("refusing to open a non-web address")
 	}
 	return browser.OpenURL(url)
+}
+
+// backupFilter is the file type filter of the backup dialogs.
+const backupFilter = "*.e5backup"
+
+// saveDialogOptions describes the "save as" dialog of a backup: titled title,
+// starting on defaultName, offering only *.e5backup files. This version of the
+// toolkit has no SetTitle on the save dialog, so the title goes in the options;
+// the message is set too for macOS, which shows it instead of a title.
+func saveDialogOptions(title, defaultName string) *application.SaveFileDialogOptions {
+	return &application.SaveFileDialogOptions{
+		Title:                title,
+		Message:              title,
+		Filename:             defaultName,
+		CanCreateDirectories: true,
+		Filters:              []application.FileFilter{{DisplayName: "e5extend backup", Pattern: backupFilter}},
+	}
+}
+
+// pickSaveFile asks where to save a backup. It returns "" when the user cancels.
+func pickSaveFile(app *application.App, win *application.WebviewWindow, title, defaultName string) (string, error) {
+	opts := saveDialogOptions(title, defaultName)
+	if win != nil {
+		opts.Window = win
+	}
+	// The overwrite question is the dialog's own, and the backup service relies on it
+	// (it overwrites the exact path returned). The GTK3 build of Wails (linux_cgo_gtk3.go,
+	// build tag gtk3) does not turn that confirmation on; release builds use GTK4, which does.
+	return app.Dialog.SaveFileWithOptions(opts).PromptForSingleSelection()
+}
+
+// pickOpenFile asks which backup to open. It returns "" when the user cancels.
+func pickOpenFile(app *application.App, win *application.WebviewWindow, title string) (string, error) {
+	d := app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).CanChooseDirectories(false).
+		AddFilter("e5extend backup", backupFilter).AddFilter("All files", "*")
+	if win != nil {
+		d.AttachToWindow(win)
+	}
+	return d.PromptForSingleSelection()
 }

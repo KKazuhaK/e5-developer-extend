@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,7 +10,7 @@ import (
 
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 // cacheLocks serializes cache reads and writes per vault key within the process.
@@ -34,9 +35,31 @@ type Locker interface {
 }
 
 // vaultCache persists the MSAL token cache in the vault.
+//
+// Writes are optimistic. Replace remembers what it read (a digest, or that
+// nothing was stored); Export writes only when the stored value is still that.
+// Another writer in between, such as a backup import or another process,
+// wins, and this cache simply reloads the new value on its next Replace.
 type vaultCache struct {
 	store Store
 	key   string
+
+	mu   sync.Mutex // guards seen
+	seen *stored
+}
+
+// stored is what the cache last saw in the vault.
+type stored struct {
+	absent bool
+	digest [sha256.Size]byte
+}
+
+func storedOf(data []byte) *stored { return &stored{digest: sha256.Sum256(data)} }
+
+func (c *vaultCache) remember(s *stored) {
+	c.mu.Lock()
+	c.seen = s
+	c.mu.Unlock()
 }
 
 func newVaultCache(store Store, account string) *vaultCache {
@@ -73,11 +96,14 @@ func (c *vaultCache) Replace(ctx context.Context, u cache.Unmarshaler, _ cache.R
 	}
 	defer unlock()
 
+	c.remember(nil) // until this read succeeds, there is nothing to compare a write with
 	data, err := c.store.Get(c.key)
 	switch {
 	case err == nil:
+		c.remember(storedOf(data))
 		return u.Unmarshal(data)
 	case errors.Is(err, vault.ErrNotFound):
+		c.remember(&stored{absent: true})
 		return u.Unmarshal(emptyCache)
 	case errors.Is(err, vault.ErrWrongKey), errors.Is(err, vault.ErrCorrupt):
 		if ctx.Value(recoverKey{}) == nil {
@@ -87,6 +113,7 @@ func (c *vaultCache) Replace(ctx context.Context, u cache.Unmarshaler, _ cache.R
 		if derr := c.store.Delete(c.key); derr != nil && !errors.Is(derr, vault.ErrNotFound) {
 			return derr
 		}
+		c.remember(&stored{absent: true})
 		return u.Unmarshal(emptyCache)
 	default:
 		return err
@@ -104,7 +131,40 @@ func (c *vaultCache) Export(ctx context.Context, m cache.Marshaler, _ cache.Expo
 	if err != nil {
 		return err
 	}
-	return c.store.Put(c.key, data)
+	c.mu.Lock()
+	seen := c.seen
+	c.mu.Unlock()
+	if seen != nil {
+		changed, err := c.changedSince(seen)
+		if err != nil {
+			return err
+		}
+		if changed {
+			slog.Debug("token cache was changed by someone else; not overwriting it", "key", c.key)
+			return nil
+		}
+	}
+	if err := c.store.Put(c.key, data); err != nil {
+		return err
+	}
+	c.remember(storedOf(data))
+	return nil
+}
+
+// changedSince reports whether the stored value differs from seen. A value
+// that cannot be read counts as changed: it is not what was loaded.
+func (c *vaultCache) changedSince(seen *stored) (bool, error) {
+	now, err := c.store.Get(c.key)
+	switch {
+	case err == nil:
+		return seen.absent || storedOf(now).digest != seen.digest, nil
+	case errors.Is(err, vault.ErrNotFound):
+		return !seen.absent, nil
+	case errors.Is(err, vault.ErrWrongKey), errors.Is(err, vault.ErrCorrupt):
+		return true, nil
+	default:
+		return false, err
+	}
 }
 
 func (c *vaultCache) clear() error {
@@ -116,5 +176,6 @@ func (c *vaultCache) clear() error {
 	if err := c.store.Delete(c.key); err != nil && !errors.Is(err, vault.ErrNotFound) {
 		return err
 	}
+	c.remember(&stored{absent: true})
 	return nil
 }

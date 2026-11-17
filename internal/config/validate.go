@@ -87,6 +87,7 @@ func (c *Config) Validate() error {
 		}
 		seenEv[ev] = true
 	}
+	validateNotify(&c.Notify, add)
 	switch c.Vault.Backend {
 	case BackendAuto, BackendKeyring, BackendFile:
 	default:
@@ -96,6 +97,27 @@ func (c *Config) Validate() error {
 	seen := map[string]bool{}
 	for i := range c.Accounts {
 		validateAccount(&c.Accounts[i], i, seen, add)
+	}
+	for i, sku := range c.Subscription.Skus {
+		if strings.TrimSpace(sku) == "" || strings.ContainsAny(sku, " \t") {
+			add(fmt.Sprintf("subscription.skus[%d]", i), "must be a SKU part number such as DEVELOPERPACK_E5, got %q", sku)
+		}
+	}
+	// subscription_expires belongs to the tenant: accounts of one tenant must agree.
+	byTenant := map[string]int{}
+	for i := range c.Accounts {
+		a := &c.Accounts[i]
+		if a.SubscriptionExpires == "" {
+			continue
+		}
+		key := a.TenantKey()
+		if j, ok := byTenant[key]; ok && c.Accounts[j].SubscriptionExpires != a.SubscriptionExpires {
+			add(fmt.Sprintf("accounts[%d].subscription_expires", i),
+				"%s here but %s on account %q of the same tenant; the date belongs to the tenant, keep it on one account",
+				a.SubscriptionExpires, c.Accounts[j].SubscriptionExpires, c.Accounts[j].Name)
+		} else if !ok {
+			byTenant[key] = i
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -191,6 +213,11 @@ func validateAccount(a *Account, i int, seen map[string]bool, add func(path, for
 	if a.SecretExpires != "" {
 		if _, err := time.Parse("2006-01-02", a.SecretExpires); err != nil {
 			add(p("secret_expires"), "not a YYYY-MM-DD date: %q", a.SecretExpires)
+		}
+	}
+	if a.SubscriptionExpires != "" {
+		if _, err := time.Parse("2006-01-02", a.SubscriptionExpires); err != nil {
+			add(p("subscription_expires"), "not a YYYY-MM-DD date: %q", a.SubscriptionExpires)
 		}
 	}
 }

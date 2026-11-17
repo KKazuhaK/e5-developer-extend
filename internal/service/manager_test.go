@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,7 @@ func testOpts(t *testing.T, goos string) (InstallOptions, Env, *FakeRunner) {
 	home := t.TempDir()
 	fr := &FakeRunner{}
 	env := Env{GOOS: goos, Home: home, UID: "501", User: "alice", Runner: fr, DataDir: filepath.Join(home, "data")}
-	o := InstallOptions{Exe: filepath.Join(home, "bin", "e5renew"), ConfigDir: filepath.Join(home, "cfg"), DataDir: env.DataDir}
+	o := InstallOptions{Exe: filepath.Join(home, "bin", "e5extend"), ConfigDir: filepath.Join(home, "cfg"), DataDir: env.DataDir}
 	return o, env, fr
 }
 
@@ -27,13 +28,13 @@ func TestSystemdInstallCommandsAndFiles(t *testing.T) {
 	}
 	want := []string{
 		"systemctl --user daemon-reload",
-		"systemctl --user enable --now e5renew.service",
+		"systemctl --user enable --now e5extend.service",
 		"loginctl show-user alice -p Linger --value",
 	}
 	if got := fr.Commands(); strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Errorf("commands = %v, want %v", got, want)
 	}
-	unit := join(Linux, env.Home, ".config", "systemd", "user", "e5renew.service")
+	unit := join(Linux, env.Home, ".config", "systemd", "user", "e5extend.service")
 	b, err := os.ReadFile(unit)
 	if err != nil || !strings.Contains(string(b), "Type=notify") {
 		t.Fatalf("unit file: %v %s", err, b)
@@ -59,7 +60,7 @@ func TestSystemdReinstallRestarts(t *testing.T) {
 	if _, err := m.Install(o); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"systemctl --user daemon-reload", "systemctl --user enable --now e5renew.service", "systemctl --user restart e5renew.service", "loginctl show-user alice -p Linger --value"}
+	want := []string{"systemctl --user daemon-reload", "systemctl --user enable --now e5extend.service", "systemctl --user restart e5extend.service", "loginctl show-user alice -p Linger --value"}
 	if strings.Join(fr.Commands(), "|") != strings.Join(want, "|") {
 		t.Errorf("reinstall = %v", fr.Commands())
 	}
@@ -67,7 +68,7 @@ func TestSystemdReinstallRestarts(t *testing.T) {
 
 func TestSystemdKeyFileFallbackForOldSystemd(t *testing.T) {
 	read := func(env Env) string {
-		b, _ := os.ReadFile(join(Linux, env.Home, ".config", "systemd", "user", "e5renew.service"))
+		b, _ := os.ReadFile(join(Linux, env.Home, ".config", "systemd", "user", "e5extend.service"))
 		return string(b)
 	}
 	for _, c := range []struct {
@@ -84,7 +85,7 @@ func TestSystemdKeyFileFallbackForOldSystemd(t *testing.T) {
 			t.Fatal(err)
 		}
 		u := read(env)
-		if c.fallback != strings.Contains(u, "E5RENEW_MASTER_KEY_FILE=") || c.fallback == strings.Contains(u, "LoadCredential=") {
+		if c.fallback != strings.Contains(u, "E5EXTEND_MASTER_KEY_FILE=") || c.fallback == strings.Contains(u, "LoadCredential=") {
 			t.Errorf("%q: unit does not match the expected form:\n%s", c.version, u)
 		}
 		// An unreadable version takes the fallback too, with its own warning.
@@ -111,8 +112,8 @@ func TestSystemdKeyFile(t *testing.T) {
 	if runtimeIsUnix() && fi.Mode().Perm() != 0o600 {
 		t.Errorf("key file mode %v", fi.Mode().Perm())
 	}
-	b, _ := os.ReadFile(join(Linux, env.Home, ".config", "systemd", "user", "e5renew.service"))
-	if !strings.Contains(string(b), "LoadCredential=e5renew-master-key:") {
+	b, _ := os.ReadFile(join(Linux, env.Home, ".config", "systemd", "user", "e5extend.service"))
+	if !strings.Contains(string(b), "LoadCredential=e5extend-master-key:") {
 		t.Errorf("unit lacks LoadCredential:\n%s", b)
 	}
 
@@ -235,11 +236,11 @@ func TestSystemdUninstallAndStatus(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"systemctl --user disable --now e5renew.service", "systemctl --user daemon-reload"}
+	want := []string{"systemctl --user disable --now e5extend.service", "systemctl --user daemon-reload"}
 	if strings.Join(fr.Commands(), "|") != strings.Join(want, "|") {
 		t.Errorf("uninstall commands = %v", fr.Commands())
 	}
-	if _, err := os.Stat(join(Linux, env.Home, ".config", "systemd", "user", "e5renew.service")); !os.IsNotExist(err) {
+	if _, err := os.Stat(join(Linux, env.Home, ".config", "systemd", "user", "e5extend.service")); !os.IsNotExist(err) {
 		t.Errorf("unit file still there: %v", err)
 	}
 	if _, err := os.Stat(join(Linux, o.ConfigDir, "master.key")); err != nil {
@@ -259,17 +260,17 @@ func TestLaunchdInstallUninstallStatus(t *testing.T) {
 	if _, err := m.Install(o); err != nil {
 		t.Fatal(err)
 	}
-	plist := join(Darwin, env.Home, "Library", "LaunchAgents", "io.github.kkazuhak.e5renew.plist")
+	plist := join(Darwin, env.Home, "Library", "LaunchAgents", "io.github.kkazuhak.e5extend.plist")
 	if _, err := os.Stat(plist); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := os.Stat(join(Darwin, env.Home, "Library", "Logs", "e5renew")); err != nil {
+	if _, err := os.Stat(join(Darwin, env.Home, "Library", "Logs", "e5extend")); err != nil {
 		t.Errorf("log directory not created: %v", err)
 	}
 	// First install: no bootout; enable comes before bootstrap, because a
 	// disabled label cannot be bootstrapped.
 	want := []string{
-		"launchctl enable gui/501/io.github.kkazuhak.e5renew",
+		"launchctl enable gui/501/io.github.kkazuhak.e5extend",
 		"launchctl bootstrap gui/501 " + plist,
 	}
 	if strings.Join(fr.Commands(), "|") != strings.Join(want, "|") {
@@ -280,8 +281,8 @@ func TestLaunchdInstallUninstallStatus(t *testing.T) {
 	if _, err := m.Install(o); err != nil {
 		t.Fatal(err)
 	}
-	if got := fr.Commands(); len(got) != 3 || got[0] != "launchctl bootout gui/501/io.github.kkazuhak.e5renew" ||
-		got[1] != "launchctl enable gui/501/io.github.kkazuhak.e5renew" || !strings.HasPrefix(got[2], "launchctl bootstrap") {
+	if got := fr.Commands(); len(got) != 3 || got[0] != "launchctl bootout gui/501/io.github.kkazuhak.e5extend" ||
+		got[1] != "launchctl enable gui/501/io.github.kkazuhak.e5extend" || !strings.HasPrefix(got[2], "launchctl bootstrap") {
 		t.Errorf("reinstall = %v", got)
 	}
 	// The old job may still be exiting: bootstrap is tried once more.
@@ -312,13 +313,13 @@ func TestLaunchdInstallUninstallStatus(t *testing.T) {
 	fr.Calls = nil
 	fr.Replies = map[string]Output{
 		"launchctl print gui/501/": {Stdout: "state = running\n"},
-		"launchctl print-disabled": {Stdout: `"io.github.kkazuhak.e5renew" => enabled`},
+		"launchctl print-disabled": {Stdout: `"io.github.kkazuhak.e5extend" => enabled`},
 	}
 	st, err := m.Status()
 	if err != nil || !st.Installed || st.Enabled != Yes || st.Running != Yes {
 		t.Fatalf("status = %+v %v", st, err)
 	}
-	fr.Replies["launchctl print-disabled"] = Output{Stdout: `"io.github.kkazuhak.e5renew" => disabled`}
+	fr.Replies["launchctl print-disabled"] = Output{Stdout: `"io.github.kkazuhak.e5extend" => disabled`}
 	if st, _ = m.Status(); st.Enabled != No {
 		t.Errorf("disabled not detected: %+v", st)
 	}
@@ -331,7 +332,7 @@ func TestLaunchdInstallUninstallStatus(t *testing.T) {
 	if _, err := m.Uninstall(); err != nil {
 		t.Fatal(err)
 	}
-	if got := fr.Commands(); len(got) != 1 || got[0] != "launchctl bootout gui/501/io.github.kkazuhak.e5renew" {
+	if got := fr.Commands(); len(got) != 1 || got[0] != "launchctl bootout gui/501/io.github.kkazuhak.e5extend" {
 		t.Errorf("uninstall = %v", got)
 	}
 	if _, err := os.Stat(plist); !os.IsNotExist(err) {
@@ -347,7 +348,7 @@ func TestSchtasksInstallUninstallStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The XML on disk is UTF-16 with a byte order mark.
-	xmlPath := join(Windows, env.DataDir, "service", "e5renew-task.xml")
+	xmlPath := join(Windows, env.DataDir, "service", "e5extend-task.xml")
 	b, err := os.ReadFile(strings.ReplaceAll(xmlPath, `\`, string(filepath.Separator)))
 	if err != nil {
 		// On a non-Windows host join() yields backslashes in the file name.
@@ -357,22 +358,22 @@ func TestSchtasksInstallUninstallStatus(t *testing.T) {
 		t.Fatalf("task xml: %v % x", err, b[:min(len(b), 4)])
 	}
 	got := fr.Commands()
-	if len(got) != 3 || !strings.HasPrefix(got[0], "schtasks /Create /TN e5renew /XML ") || !strings.HasSuffix(got[0], " /F") ||
-		got[1] != "schtasks /End /TN e5renew" || got[2] != "schtasks /Run /TN e5renew" {
+	if len(got) != 3 || !strings.HasPrefix(got[0], "schtasks /Create /TN e5extend /XML ") || !strings.HasSuffix(got[0], " /F") ||
+		got[1] != "schtasks /End /TN e5extend" || got[2] != "schtasks /Run /TN e5extend" {
 		t.Errorf("commands = %v", got)
 	}
 
 	fr.Calls = nil
-	fr.Replies = map[string]Output{"schtasks /Query /TN e5renew /XML": {Stdout: "<Task><Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers><Settings><Enabled>true</Enabled></Settings></Task>"}}
+	fr.Replies = map[string]Output{"schtasks /Query /TN e5extend /XML": {Stdout: "<Task><Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers><Settings><Enabled>true</Enabled></Settings></Task>"}}
 	st, err := m.Status()
 	if err != nil || !st.Installed || st.Enabled != Yes || st.Running != Unknown {
 		t.Fatalf("status = %+v %v", st, err)
 	}
-	fr.Replies["schtasks /Query /TN e5renew /XML"] = Output{Stdout: "<Task><Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers><Settings><Enabled>false</Enabled></Settings></Task>"}
+	fr.Replies["schtasks /Query /TN e5extend /XML"] = Output{Stdout: "<Task><Triggers><LogonTrigger><Enabled>true</Enabled></LogonTrigger></Triggers><Settings><Enabled>false</Enabled></Settings></Task>"}
 	if st, _ = m.Status(); st.Enabled != No {
 		t.Errorf("disabled task not detected: %+v", st)
 	}
-	fr.Replies["schtasks /Query /TN e5renew /XML"] = Output{ExitCode: 1}
+	fr.Replies["schtasks /Query /TN e5extend /XML"] = Output{ExitCode: 1}
 	if st, _ = m.Status(); st.Installed {
 		t.Errorf("missing task reported installed: %+v", st)
 	}
@@ -382,7 +383,7 @@ func TestSchtasksInstallUninstallStatus(t *testing.T) {
 	if _, err := m.Uninstall(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"schtasks /Query /TN e5renew", "schtasks /End /TN e5renew", "schtasks /Delete /TN e5renew /F"}
+	want := []string{"schtasks /Query /TN e5extend", "schtasks /End /TN e5extend", "schtasks /Delete /TN e5extend /F"}
 	if strings.Join(fr.Commands(), "|") != strings.Join(want, "|") {
 		t.Errorf("uninstall = %v", fr.Commands())
 	}
@@ -461,3 +462,77 @@ func TestNewRejectsUnknownPlatform(t *testing.T) {
 }
 
 func runtimeIsUnix() bool { return filepath.Separator == '/' }
+
+func TestStartPerPlatform(t *testing.T) {
+	// Systemd: refuses when not installed, then only runs systemctl start.
+	o, env, fr := testOpts(t, Linux)
+	m, _ := New(env)
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) || len(fr.Commands()) != 0 {
+		t.Fatalf("systemd not installed: %v %v", err, fr.Commands())
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	fr.Replies = map[string]Output{"systemctl --user is-enabled": {Stdout: "enabled\n"}, "loginctl": {Stdout: "yes\n"}}
+	res, err := m.Start()
+	if err != nil || len(res.Warnings) != 0 || !strings.HasPrefix(strings.Join(fr.Commands(), "|"), "systemctl --user start e5extend.service|") {
+		t.Fatalf("systemd start: %+v %v %v", res, err, fr.Commands())
+	}
+	// Not enabled and no lingering: both are reported.
+	fr.Replies = map[string]Output{"systemctl --user is-enabled": {Stdout: "disabled\n", ExitCode: 1}, "loginctl": {Stdout: "no\n"}}
+	res, err = m.Start()
+	if err != nil || len(res.Warnings) != 2 || !strings.Contains(res.Warnings[0], "systemctl --user enable") || !strings.Contains(res.Warnings[1], "lingering is off") {
+		t.Fatalf("systemd warnings: %+v %v", res, err)
+	}
+	// A masked unit gets its own message, not the login-session hint.
+	fr.Replies = map[string]Output{"systemctl --user start": {Stderr: "Failed to start e5extend.service: Unit e5extend.service is masked.", ExitCode: 1}}
+	if _, err := m.Start(); err == nil || !strings.Contains(err.Error(), "unmask") || strings.Contains(err.Error(), "login session") {
+		t.Fatalf("masked: %v", err)
+	}
+	fr.Replies = nil
+	fr.FailOn = []string{"systemctl --user start"}
+	if _, err := m.Start(); err == nil || !strings.Contains(err.Error(), "login session") {
+		t.Fatalf("systemd start failure: %v", err)
+	}
+
+	// Launchd: kickstart, falling back to enable + bootstrap when not loaded.
+	o, env, fr = testOpts(t, Darwin)
+	m, _ = New(env)
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("launchd not installed: %v", err)
+	}
+	if _, err := m.Install(o); err != nil {
+		t.Fatal(err)
+	}
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "launchctl kickstart gui/501/io.github.kkazuhak.e5extend" {
+		t.Fatalf("launchd start: %v %v", err, fr.Commands())
+	}
+	// Loaded but disabled: the first kickstart fails, enable, then kickstart works.
+	fr.Calls = nil
+	fr.FailOnce = []string{"launchctl kickstart"}
+	tgt := "gui/501/io.github.kkazuhak.e5extend"
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "launchctl kickstart "+tgt+"|launchctl enable "+tgt+"|launchctl kickstart "+tgt {
+		t.Fatalf("launchd disabled: %v %v", err, fr.Commands())
+	}
+	// Not loaded: bootstrap is the last resort.
+	fr.Calls = nil
+	fr.FailOn = []string{"launchctl kickstart"}
+	if _, err := m.Start(); err != nil || len(fr.Commands()) != 4 || !strings.HasPrefix(fr.Commands()[3], "launchctl bootstrap") {
+		t.Fatalf("launchd fallback: %v %v", err, fr.Commands())
+	}
+
+	// Task Scheduler: a missing task is "not installed".
+	_, env, fr = testOpts(t, Windows)
+	m, _ = New(env)
+	fr.Replies = map[string]Output{"schtasks /Query": {ExitCode: 1, Stderr: "ERROR: The system cannot find the file specified."}}
+	if _, err := m.Start(); !errors.Is(err, ErrNotInstalled) {
+		t.Fatalf("schtasks not installed: %v", err)
+	}
+	fr.Replies = nil
+	fr.Calls = nil
+	if _, err := m.Start(); err != nil || strings.Join(fr.Commands(), "|") != "schtasks /Query /TN "+TaskName+"|schtasks /Run /TN "+TaskName {
+		t.Fatalf("schtasks start: %v %v", err, fr.Commands())
+	}
+}

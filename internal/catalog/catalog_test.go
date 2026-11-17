@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -190,5 +191,66 @@ func TestDocTableMatchesYAML(t *testing.T) {
 		if !seen[id] {
 			t.Errorf("%s is in apis.yaml but not in the doc table", id)
 		}
+	}
+}
+
+func TestRecommendedPermissionsAreUsedByTheCatalog(t *testing.T) {
+	apis := mustLoad(t)
+	used := map[string]map[string]bool{Delegated: {}, App: {}}
+	for _, a := range apis {
+		for _, k := range []string{Delegated, App} {
+			for _, s := range a.ScopesFor(k) {
+				used[k][s] = true
+			}
+		}
+	}
+	// Besides the catalog, the subscription expiry check (GET /directory/subscriptions)
+	// is a user of this permission, for both identities.
+	used[Delegated][SubscriptionPermission], used[App][SubscriptionPermission] = true, true
+	lists := map[string][]string{Delegated: RecommendedDelegated, App: RecommendedApplication}
+	for _, kind := range []string{Delegated, App} {
+		if !slices.Contains(lists[kind], SubscriptionPermission) {
+			t.Errorf("the subscription check needs %s, which is not recommended for %s", SubscriptionPermission, kind)
+		}
+	}
+	for kind, list := range lists {
+		seen := map[string]bool{}
+		for _, p := range list {
+			if seen[p] {
+				t.Errorf("%s: %s listed twice", kind, p)
+			}
+			seen[p] = true
+			if p == "offline_access" { // structural: makes the sign-in renewable
+				continue
+			}
+			if !used[kind][p] {
+				t.Errorf("recommended %s permission %s is used by no API in apis.yaml", kind, p)
+			}
+		}
+	}
+}
+
+// "An account without categories runs on the default categories" is only a
+// clean statement while a category is entirely default or entirely not.
+func TestCategoriesAreAllDefaultOrNone(t *testing.T) {
+	apis, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	on, off := map[string]int{}, map[string]int{}
+	for _, a := range apis {
+		if a.Default {
+			on[a.Category]++
+		} else {
+			off[a.Category]++
+		}
+	}
+	for c := range on {
+		if off[c] > 0 {
+			t.Errorf("category %q mixes default and non-default entries (%d on, %d off)", c, on[c], off[c])
+		}
+	}
+	if len(DefaultCategories(apis)) != len(on) {
+		t.Errorf("DefaultCategories = %v", DefaultCategories(apis))
 	}
 }

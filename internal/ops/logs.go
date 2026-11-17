@@ -3,8 +3,8 @@ package ops
 import (
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 // Store returns the store under the data directory.

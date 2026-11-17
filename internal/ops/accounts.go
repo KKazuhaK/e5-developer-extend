@@ -8,12 +8,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 // AccountInput describes an account for adding and editing. Secret is only
@@ -27,6 +27,9 @@ type AccountInput struct {
 	Categories    []string `json:"categories"`
 	SecretExpires string   `json:"secretExpires"`
 	Secret        string   `json:"secret,omitempty"`
+	// UseStoredSecret takes the secret already in the vault under this
+	// account's name (put there by automatic app setup) instead of Secret.
+	UseStoredSecret bool `json:"useStoredSecret,omitempty"`
 }
 
 // Account converts the input into a config entry (without the secret).
@@ -96,7 +99,7 @@ func (o *Ops) AddAccount(ctx context.Context, in AccountInput) error {
 	if err := checkCategories(acct.Categories); err != nil {
 		return err
 	}
-	if acct.NeedsSecret() && in.Secret == "" {
+	if acct.NeedsSecret() && in.Secret == "" && !in.UseStoredSecret {
 		return errors.New("the secret must not be empty")
 	}
 
@@ -118,7 +121,16 @@ func (o *Ops) AddAccount(ctx context.Context, in AccountInput) error {
 	}
 
 	var v *vault.Vault
-	if acct.NeedsSecret() {
+	if acct.NeedsSecret() && in.Secret == "" {
+		// UseStoredSecret: the secret is already in the vault.
+		sv, err := o.OpenVault(cfg)
+		if err != nil {
+			return err
+		}
+		if ok, _ := sv.Has(vault.SecretKey(acct.Name)); !ok {
+			return fmt.Errorf("no secret is stored for account %q", acct.Name)
+		}
+	} else if acct.NeedsSecret() {
 		if v, err = o.OpenVault(cfg); err != nil {
 			return err
 		}
@@ -168,6 +180,7 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 	}
 	next := in.Account()
 	next.Paused, next.HomeAccountID = cur.Paused, cur.HomeAccountID
+	next.SubscriptionExpires = cur.SubscriptionExpires // tenant-level; set with SetSubscriptionExpires
 	identityChanged := cur.Auth != next.Auth || cur.Tenant != next.Tenant ||
 		cur.ClientID != next.ClientID || cur.Username != next.Username
 	if identityChanged {
@@ -207,6 +220,9 @@ func (o *Ops) UpdateAccount(ctx context.Context, in AccountInput) error {
 		if err := v.Delete(vault.TokenCacheKey(next.Name)); err != nil && !errors.Is(err, vault.ErrNotFound) {
 			return err
 		}
+	}
+	if identityChanged || in.Secret != "" {
+		o.resetPasswordBlock(next.Name)
 	}
 	return nil
 }
@@ -253,10 +269,19 @@ func (o *Ops) SetSecret(ctx context.Context, name, secret, expires string) error
 	if err := v.Put(vault.SecretKey(name), []byte(secret)); err != nil {
 		return WithHint(fmt.Errorf("store secret: %w", err), name)
 	}
+	o.resetPasswordBlock(name)
 	if expires != "" {
 		return o.updateAccount(ctx, name, func(ac *config.Account) { ac.SecretExpires = expires })
 	}
 	return nil
+}
+
+// resetPasswordBlock lets the engine try automatic password sign-in again for
+// an account whose password or identity changed, or that a person signed in.
+func (o *Ops) resetPasswordBlock(name string) {
+	if dir, err := paths.DataDir(); err == nil {
+		_ = engine.TriggerPasswordReset(dir, name)
+	}
 }
 
 // updateAccount reloads the config under the lock, applies change to the named
@@ -430,6 +455,9 @@ func (o *Ops) Login(ctx context.Context, name string, ui auth.LoginUI) (LoginRes
 		if err != nil {
 			return LoginResult{}, fmt.Errorf("signed in, but saving the config failed: %w", err)
 		}
+	}
+	if acct.Auth == config.AuthPassword {
+		o.resetPasswordBlock(name)
 	}
 	return LoginResult{TokenInfo: tokenInfo(tok), Delegated: acct.Delegated()}, nil
 }

@@ -4,6 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { StatusBadge, Spinner } from "@/components/common";
+import { SignInFrequencyNotice } from "@/components/SignInFrequencyNotice";
+import { isSignInFrequency } from "@/lib/account";
 import { useI18n } from "@/i18n";
 import { daysUntil, formatRelative, formatWhen } from "@/lib/time";
 import { displayStatus, needsAction } from "@/lib/status";
@@ -16,6 +18,7 @@ export interface AccountCardActions {
   onResume: (name: string) => void;
   onEdit: (name: string) => void;
   onLogin: (name: string) => void;
+  onSwitchToApp: (name: string) => void;
 }
 
 export function SecretExpiry({ date }: { date: string | null }) {
@@ -47,7 +50,8 @@ export function AccountCard({ a, actions }: { a: AccountSummary; actions: Accoun
         <StatusBadge account={a} />
       </div>
 
-      {(a.reason || a.fix) && a.status !== "ok" && (
+      {a.status !== "ok" && isSignInFrequency(a.reason) && <SignInFrequencyNotice a={a} onSwitch={actions.onSwitchToApp} />}
+      {(a.reason || a.fix) && a.status !== "ok" && !isSignInFrequency(a.reason) && (
         <div className="space-y-0.5 rounded-md bg-muted/60 px-3 py-2 text-[13px]">
           {a.reason && <p>{a.reason}</p>}
           {a.fix && (

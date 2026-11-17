@@ -1,7 +1,7 @@
 package services
 
 import (
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 )
 
 // CatalogService lists the API calls the engine can make.
@@ -33,3 +33,7 @@ func (s *CatalogService) List(account string) ([]CatalogEntry, error) {
 
 // Categories returns the API categories an account can choose from.
 func (s *CatalogService) Categories() ([]string, error) { return s.b.Ops.Categories() }
+
+// DefaultCategories returns the categories an account without a categories
+// setting runs on (the catalog's default-on entries).
+func (s *CatalogService) DefaultCategories() ([]string, error) { return s.b.Ops.DefaultCategories() }

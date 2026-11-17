@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AccountCard } from "@/components/AccountCard";
+import { SubscriptionCard } from "@/pages/SubscriptionCard";
 import { EmptyBlock, ErrorBlock, LoadingBlock, PageHeader, Spinner, ToneIcon } from "@/components/common";
 import { engineState, engineTone, compareStatus, isHealthy, needsAction } from "@/lib/status";
 import { formatRelative, formatWhen } from "@/lib/time";
@@ -103,6 +104,10 @@ export function Overview() {
       </Card>
       )}
 
+      {accounts.length > 0 && (
+        <SubscriptionCard accounts={accounts} />
+      )}
+
       {eng === "stopped" && (
         <div className="mb-5 flex items-start gap-3 rounded-lg border border-warning/40 bg-warning-bg p-3 text-[13px]">
           <AlertTriangle className="mt-0.5 size-4 shrink-0 text-warning" aria-hidden />
@@ -136,7 +141,8 @@ export function Overview() {
                 onPause: (n) => void act.pause(n),
                 onResume: (n) => void act.resume(n),
                 onEdit: (n) => navigate("accounts", { wizard: { mode: "edit", name: n } }),
-                onLogin: (n) => navigate("accounts", { wizard: { mode: "edit", name: n, step: 4 } }),
+                onLogin: (n) => navigate("accounts", { wizard: { mode: "edit", name: n, step: 3 } }),
+                onSwitchToApp: (n) => navigate("accounts", { wizard: { mode: "add", from: n } }),
               }}
             />
           ))}

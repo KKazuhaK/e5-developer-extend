@@ -12,12 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 const guid = "11111111-2222-3333-4444-555555555555"
@@ -244,6 +245,7 @@ func TestTokenChecks(t *testing.T) {
 		detail string
 	}{
 		{auth.ErrLoginRequired, Fail, "login required"},
+		{fmt.Errorf("%w: AADSTS70043: sign-in frequency checks", auth.ErrLoginRequired), Fail, "sign-in frequency policy"},
 		{auth.ErrInvalidClient, Fail, "credentials rejected"},
 		{auth.ErrConsentRequired, Fail, "consent"},
 		{fmt.Errorf("dial: %w", auth.ErrTransient), Warn, "network"},
@@ -383,6 +385,94 @@ func TestNotifyCheck(t *testing.T) {
 	}
 }
 
+func TestNotifyChannelChecks(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.Channels = []config.Channel{
+		{ID: "tg", Type: config.ChannelTelegram, ChatID: "1"},
+		{ID: "hook", Type: config.ChannelSlack},
+	}
+	// Required secrets are missing.
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "telegram channel tg: bot_token is not set")
+	expect(t, got, "notify", Warn, "slack channel hook: url is not set")
+	// Both set: fine, and the count is shown.
+	r.v.has["notify/tg/bot_token"], r.v.has["notify/hook/url"] = true, true
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+	// One cannot be decrypted; nothing of the secret is shown.
+	r.v.err["notify/tg/bot_token"] = vault.ErrWrongKey
+	got = r.run(true)
+	expect(t, got, "notify", Warn, "tg")
+	expect(t, got, "notify", Warn, "cannot be decrypted")
+	r.v.err = map[string]error{}
+	// Plain http servers and unencrypted mail are flagged.
+	r.cfg.Notify.Channels = []config.Channel{
+		{ID: "ntfy", Type: config.ChannelNtfy, Topic: "t", Server: "http://ntfy.lan"},
+		{ID: "mail", Type: config.ChannelEmail, SMTPHost: "h", From: "a@b.co", To: []string{"c@d.co"}, Security: config.SecurityNone},
+	}
+	got = r.run(true)
+	expect(t, got, "notify", Warn, "over http")
+	expect(t, got, "notify", Warn, "not encrypted")
+	// A custom template that does not render is flagged.
+	r.cfg.Notify.Channels = []config.Channel{{ID: "hook", Type: config.ChannelSlack, Template: "{{.Nope}}"}}
+	r.v.has["notify/hook/url"] = true
+	expect(t, r.run(true), "notify", Warn, "custom template")
+	// The webhook of older versions counts as a channel next to the new ones.
+	r.cfg.Notify.Channels = []config.Channel{{ID: "hook", Type: config.ChannelSlack}}
+	r.v.has[notifyKey] = true
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+}
+
+func TestNotifyWarnsAboutAnHTTPLegacyWebhook(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.WebhookURL = "http://nas.lan/hook/SECRETTOKEN"
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "http")
+	if strings.Contains(got["notify"].Detail+got["notify"].Fix, "SECRETTOKEN") {
+		t.Error("address shown")
+	}
+	r.cfg.Notify.WebhookURL = "http://127.0.0.1:9000/hook"
+	got = r.run(true)
+	if strings.Contains(got["notify"].Detail, "unencrypted") {
+		t.Errorf("a local address was flagged: %s", got["notify"].Detail)
+	}
+}
+
+func TestNotifyKeepsWarningAboutExplicitExceptions(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.Channels = []config.Channel{
+		{ID: "webhook", Type: config.ChannelWebhook, AllowHTTP: true},
+		{ID: "mail", Type: config.ChannelEmail, SMTPHost: "h", From: "a@b.co", To: []string{"c@d.co"}, Security: config.SecurityNone, AllowPlainAuth: true},
+	}
+	r.v.has["notify/webhook/url"] = true
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "allow_http")
+	expect(t, got, "notify", Warn, "allow_plain_auth")
+}
+
+func TestNotifyWarnsAboutChannelsThatKeepFailing(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.Channels = []config.Channel{{ID: "tg", Type: config.ChannelTelegram, ChatID: "1"}, {ID: "sl", Type: config.ChannelSlack}}
+	r.v.has["notify/tg/bot_token"], r.v.has["notify/sl/url"] = true, true
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+	// Three failures in a row, with a success a day ago.
+	notify.RecordStatus(r.dir, "tg", nil)
+	for i := 0; i < 3; i++ {
+		notify.RecordStatus(r.dir, "tg", errors.New("telegram answered HTTP 401"))
+	}
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "channel tg: the last 3 deliveries failed (telegram answered HTTP 401)")
+	if strings.Contains(got["notify"].Detail, "sl") && strings.Contains(got["notify"].Detail, "channel sl") {
+		t.Error("a healthy channel was named")
+	}
+	// A single failure after a recent success is not worth a warning.
+	notify.RecordStatus(r.dir, "tg", nil)
+	notify.RecordStatus(r.dir, "tg", errors.New("telegram answered HTTP 500"))
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+	// A channel that never delivered anything and whose last attempt failed is flagged.
+	notify.RecordStatus(r.dir, "sl", errors.New("slack answered HTTP 404"))
+	expect(t, r.run(true), "notify", Warn, "channel sl: nothing delivered in the last 7 days")
+}
+
 func TestOutputAndExitCodes(t *testing.T) {
 	checks := []Check{{ID: "a", Title: "A", Level: OK, Detail: "fine"}, {ID: "b", Title: "B", Level: Warn, Detail: "hmm", Fix: "do x"}}
 	if ExitCode(checks) != 1 {
@@ -435,4 +525,145 @@ func TestPanicInACheckIsContained(t *testing.T) {
 	if !found {
 		t.Error("panic not reported as a failed check")
 	}
+}
+
+// logRound writes one round of calls (api -> status/class) to the call log.
+func (r *rig) logRound(round string, at time.Duration, calls map[string]int) {
+	r.t.Helper()
+	st := store.New(r.dir)
+	i := 0
+	for api, status := range calls {
+		class := "ok"
+		switch status {
+		case 404:
+			class = "not_found"
+		case 400:
+			class = "client_error"
+		case 403:
+			class = "forbidden"
+		}
+		i++
+		e := store.Entry{TS: now.Add(at + time.Duration(i)*time.Second), Account: "main", Round: round, API: api, Status: status, Class: class}
+		if err := st.Append(e); err != nil {
+			r.t.Fatal(err)
+		}
+	}
+}
+
+func TestKeepsFailingCategory(t *testing.T) {
+	const id = "account.main.apis"
+	t.Run("three rounds of 404 warn", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404, "mail.folders": 404, "user.me": 200})
+		r.logRound("r2", -4*time.Hour, map[string]int{"user.me": 200})
+		r.logRound("r3", -3*time.Hour, map[string]int{"mail.settings": 404})
+		r.logRound("r4", -2*time.Hour, map[string]int{"mail.rules": 404, "drive.info": 400})
+		got := r.run(true)
+		expect(t, got, id, Warn, "category mail keeps failing (not found; no mailbox?)")
+		if c := got[id]; !strings.Contains(c.Fix, "e5extend account test main --recommend") || strings.Contains(c.Detail, "category user") {
+			t.Errorf("check = %+v", c)
+		}
+	})
+	t.Run("a success in between resets", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404})
+		r.logRound("r2", -4*time.Hour, map[string]int{"mail.messages": 404})
+		r.logRound("r3", -3*time.Hour, map[string]int{"mail.folders": 200, "mail.settings": 404})
+		r.logRound("r4", -2*time.Hour, map[string]int{"mail.rules": 404})
+		expect(t, r.run(true), id, OK, "no category")
+	})
+	t.Run("two rounds are not enough", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404})
+		r.logRound("r2", -4*time.Hour, map[string]int{"mail.messages": 404})
+		expect(t, r.run(true), id, OK, "no category")
+	})
+	t.Run("other failures do not count", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"mail.messages": 403})
+		}
+		expect(t, r.run(true), id, OK, "no category")
+	})
+	t.Run("a disabled category is ignored", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"mail.messages": 404})
+		}
+		// Before: the default selection includes mail, so it warns.
+		expect(t, r.run(true), id, Warn, "category mail")
+		// After `account test --recommend --apply` removed mail: no warning.
+		r.cfg.Accounts[0].Categories = []string{"user", "files"}
+		expect(t, r.run(true), id, OK, "no category")
+		// An explicit list that still has mail keeps warning.
+		r.cfg.Accounts[0].Categories = []string{"user", "Mail"}
+		expect(t, r.run(true), id, Warn, "category mail")
+	})
+	t.Run("empty log", func(t *testing.T) {
+		expect(t, newRig(t).run(true), id, OK, "no category")
+	})
+	t.Run("onedrive hint and 400", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"drive.info": 400})
+		}
+		expect(t, r.run(true), id, Warn, "category files keeps failing (not found; no OneDrive?)")
+	})
+}
+
+func TestSubscriptionChecks(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Accounts[0].Tenant = "contoso.onmicrosoft.com"
+	id := "subscription.contoso.onmicrosoft.com"
+	save := func(ts *store.TenantState) {
+		st := store.NewState()
+		st.Tenants = map[string]*store.TenantState{"contoso.onmicrosoft.com": ts}
+		if err := store.New(r.dir).SaveState(st); err != nil {
+			t.Fatal(err)
+		}
+	}
+	sub := func(status string, days int) *store.TenantState {
+		return &store.TenantState{Access: store.AccessOK, Checked: now, Attempted: now, Subscriptions: map[string]*store.SubscriptionState{
+			"s1": {SKU: "DEVELOPERPACK_E5", Status: status, CheckedAt: now, NextLifecycle: now.AddDate(0, 0, days)},
+			"s2": {SKU: "ENTERPRISEPACK", Status: "Suspended", CheckedAt: now, NextLifecycle: now.AddDate(0, 0, 1)}}}
+	}
+
+	expect(t, r.run(true), id, OK, "not checked yet")
+	save(sub("Enabled", 89))
+	got := r.run(true)
+	expect(t, got, id, OK, "DEVELOPERPACK_E5 Enabled, ends 2027-02-14 (in 89 days)")
+	if strings.Contains(got[id].Detail, "ENTERPRISEPACK") {
+		t.Errorf("an unwatched SKU is judged: %q", got[id].Detail)
+	}
+	save(sub("Enabled", 7))
+	expect(t, r.run(true), id, Warn, "in 7 days")
+	save(sub("Enabled", 8))
+	expect(t, r.run(true), id, OK, "in 8 days")
+	save(sub("Warning", 60))
+	c := r.run(true)[id]
+	if c.Level != Warn || c.Fix == "" {
+		t.Errorf("a status other than Enabled: %+v", c)
+	}
+
+	// Without the permission: explained, not a problem; a manual date is judged.
+	save(&store.TenantState{Access: store.AccessNoPermission, Attempted: now})
+	expect(t, r.run(true), id, OK, "Organization.Read.All")
+	r.cfg.Accounts[0].SubscriptionExpires = "2026-11-20"
+	expect(t, r.run(true), id, Warn, "date you entered (2026-11-20) is in 3 days")
+	r.cfg.Accounts[0].SubscriptionExpires = "2027-02-14"
+	expect(t, r.run(true), id, OK, "date you entered (2027-02-14)")
+
+	// Real data present and a manual date: say it can go.
+	r.cfg.Accounts[0].SubscriptionExpires = "2027-02-14"
+	save(sub("Enabled", 89))
+	expect(t, r.run(true), id, OK, "remove subscription_expires")
+
+	// The last check failed: a note, unless nothing was ever read.
+	r.cfg.Accounts[0].SubscriptionExpires = ""
+	ts := sub("Enabled", 89)
+	ts.Access, ts.Detail = store.AccessError, "could not reach Microsoft Graph"
+	save(ts)
+	expect(t, r.run(true), id, OK, "could not reach Microsoft Graph")
+	save(&store.TenantState{Access: store.AccessError, Detail: "could not sign in", Attempted: now})
+	expect(t, r.run(true), id, Warn, "could not sign in")
 }

@@ -50,7 +50,7 @@ func TestMessagesOverPathSocket(t *testing.T) {
 }
 
 func TestAbstractSocket(t *testing.T) {
-	name := fmt.Sprintf("e5renew-test-%d-%d", os.Getpid(), time.Now().UnixNano())
+	name := fmt.Sprintf("e5extend-test-%d-%d", os.Getpid(), time.Now().UnixNano())
 	c := listen(t, "\x00"+name)
 	t.Setenv("NOTIFY_SOCKET", "@"+name)
 	if err := Ready(); err != nil {

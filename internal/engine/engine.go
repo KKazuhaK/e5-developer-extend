@@ -18,13 +18,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 // Tunables that are not worth a config option.
@@ -71,6 +72,11 @@ type Options struct {
 	Clock   Clock
 	Logger  *slog.Logger
 
+	// SaveHomeAccount stores the home account ID a password sign-in returned
+	// into the configuration (under the configuration lock), provided the
+	// account on disk still has the identity it signed in with; nil skips it.
+	SaveHomeAccount func(ctx context.Context, signedIn config.Account, homeAccountID string) error
+
 	// Hint returns a suggested next step for a sign-in error, or "".
 	Hint func(err error, account string) string
 	// OnEntry sees every call-log entry as it is written.
@@ -79,6 +85,9 @@ type Options struct {
 	Hooks Hooks
 	// Notifier receives alerts; nil turns alerts off.
 	Notifier Notifier
+	// NoSubscriptionCheck turns the daily subscription check off; tests that
+	// count token requests use it.
+	NoSubscriptionCheck bool
 
 	Tick             time.Duration // how often the main loop wakes
 	ConfigCheckEvery int           // ticks between config file checks
@@ -130,11 +139,19 @@ type Engine struct {
 	sched *schedule
 	state *store.State
 	rt    map[string]*accountRT
+	// unsaved is set when the state in memory differs from state.json because a save failed.
+	unsaved bool
+	// roundsDone is set when the first round has finished; the subscription
+	// checks wait for it. subRunning marks tenants being checked now.
+	roundsDone bool
+	subRunning map[string]bool
+	subMu      sync.Mutex // one subscription check at a time
 
 	// Touched by the tick goroutine only.
 	lastTick  time.Time
 	ticks     int
 	lastPrune string
+	forceSub  map[string]bool // tenants a trigger asked to check now
 	cfgMod    time.Time
 	started   time.Time // engine start, for the stale-alert grace period
 
@@ -241,10 +258,117 @@ func (e *Engine) event(account, name, msg string) {
 	e.log.Info("event", "event", name, "account", account, "detail", msg)
 }
 
-// saveLocked writes the state; e.mu must be held.
-func (e *Engine) saveLocked() {
+// saveLocked writes the state; e.mu must be held. It reports whether the write worked.
+func (e *Engine) saveLocked() bool {
 	if err := e.store.SaveState(e.state); err != nil {
 		e.log.Error("save state", "err", err)
+		return false
+	}
+	return true
+}
+
+// Limits of a state handed over by `backup import` (store.PendingImportFile).
+const (
+	// importWait is how long entries for accounts that are not in the config yet are kept.
+	importWait = 24 * time.Hour
+	// importMaxAge is the age after which a handover file is ignored and deleted.
+	importMaxAge = 7 * 24 * time.Hour
+)
+
+// hasActivity reports whether an account's state records any round. A state
+// without one is what the engine creates for an account it has just learned
+// about, so an imported state may take its place.
+func hasActivity(as *store.AccountState) bool {
+	return as.Totals != (store.Totals{}) || !as.LastSuccess.IsZero()
+}
+
+// adoptPending applies the state an import handed over. The file is claimed
+// by renaming it first (see store.ClaimPendingImports), so a second import
+// during this call writes a new file for the next call. Adoption is one-shot:
+// a claimed file is deleted once applied, even if the save that follows fails
+// (the state is then saved on the next tick). Entries it cannot apply yet stay
+// in a new pending file: those of accounts that are not in the config (an
+// import writes the handover just before the config, so a reload may not have
+// seen the account yet; dropped after importWait) and those of accounts with a
+// round in flight (applied on the first tick after it ends).
+func (e *Engine) adoptPending() {
+	files, err := store.ClaimPendingImports(e.o.DataDir)
+	if err != nil {
+		e.log.Warn("claim the imported state", "err", err)
+		return
+	}
+	for _, f := range files {
+		e.adoptFile(f)
+		_ = os.Remove(f)
+	}
+}
+
+func (e *Engine) adoptFile(path string) {
+	p, err := store.ReadPendingFile(path)
+	if err != nil {
+		e.log.Warn("ignoring the imported state", "err", err)
+		return
+	}
+	if p == nil {
+		// The importer withdrew its handover (its config save failed) after we claimed it.
+		return
+	}
+	now := e.clock.Now()
+	age := now.Sub(p.Written)
+	if age > importMaxAge {
+		e.event("", "state_import_expired", "an imported state older than 7 days was ignored")
+		return
+	}
+	later := map[string]*store.AccountState{}
+	var adopted []string
+	expired := 0
+	var fixed []string
+	e.withLock(func() {
+		for name, as := range p.Accounts {
+			rt := e.rt[name]
+			switch _, inCfg := e.cfg.Find(name); {
+			case !inCfg:
+				if age < importWait {
+					later[name] = as
+				} else {
+					expired++
+				}
+				continue
+			case rt != nil && rt.running:
+				later[name] = as
+				continue
+			}
+			// A merge never replaces what an account has recorded here; the
+			// empty state the engine made for a new account is not that.
+			if have := e.state.Accounts[name]; have != nil && p.Mode == store.PendingMerge && hasActivity(have) {
+				continue
+			}
+			e.state.Accounts[name] = as
+			adopted = append(adopted, name)
+			// An imported next run in the past would start a round at once, as after a restart.
+			if (as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention) && !as.NextRun.After(now) {
+				e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
+			}
+		}
+		if len(adopted) > 0 {
+			fixed = e.fixFarFutureLocked(now)
+			if !e.saveLocked() {
+				e.unsaved = true
+			}
+		}
+	})
+	e.reportClockFix(fixed)
+	if len(later) > 0 {
+		err := store.SavePendingImport(e.o.DataDir, &store.PendingImport{Mode: p.Mode, Written: p.Written, Accounts: later})
+		if err != nil {
+			e.log.Warn("keep the imported state for later", "err", err)
+		}
+	}
+	if len(adopted) > 0 {
+		e.event("", "state_import", "adopted the state of an imported backup")
+	}
+	if expired > 0 {
+		e.event("", "state_import_expired", "dropped the imported state of accounts that never appeared in the configuration")
 	}
 }
 
@@ -267,7 +391,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			e.hook("stopping", e.o.Hooks.Stopping)
 			e.wg.Wait()
-			e.withLock(e.saveLocked)
+			e.withLock(func() { e.saveLocked() })
 			e.event("", "stop", "")
 			return nil
 		case <-e.reload:
@@ -300,6 +424,7 @@ func (e *Engine) evalNotify() {
 		return
 	}
 	var evs []notify.Event
+	calls := e.recentCalls(e.clock.Now())
 	e.withLock(func() {
 		if e.state == nil {
 			return
@@ -307,7 +432,8 @@ func (e *Engine) evalNotify() {
 		var changed bool
 		evs, changed = notify.Evaluate(notify.Input{
 			Now: e.clock.Now(), Start: e.started, Config: e.cfg.Notify,
-			Accounts: e.cfg.Accounts, State: e.state,
+			Accounts: e.cfg.Accounts, State: e.state, Calls: calls, APIs: e.apis,
+			Subscription: e.cfg.Subscription,
 		})
 		if changed {
 			e.saveLocked()
@@ -315,17 +441,45 @@ func (e *Engine) evalNotify() {
 	})
 	for _, ev := range evs {
 		n.Send(ev, func(err error) {
-			if err != nil {
+			settle := ev
+			var pe *notify.PartialError
+			switch {
+			case err == nil:
+			case errors.As(err, &pe) && len(pe.Delivered) > 0:
+				// Some alerts of a split digest arrived: settle those, retry the rest.
+				settle = notify.Event{Event: notify.Digest, Items: pe.Delivered}
+			default:
 				return
 			}
 			e.withLock(func() {
-				if e.state != nil && notify.MarkDelivered(e.state, ev.Account, ev.Event, ev.Time) {
+				if e.state != nil && notify.MarkEvent(e.state, settle) {
 					e.saveLocked()
 				}
 			})
 		})
 		e.event(ev.Account, "alert", ev.Event)
 	}
+}
+
+// callWindow is how far back the call log is read to judge a failure spike.
+const callWindow = 48 * time.Hour
+
+// recentCalls returns the call-log entries of the last callWindow, per
+// account. It is nil when the log cannot be read, which tells Evaluate not to
+// judge failure spikes this time.
+func (e *Engine) recentCalls(now time.Time) map[string][]store.Entry {
+	entries, err := e.store.Read(store.Filter{Since: now.Add(-callWindow)})
+	if err != nil {
+		e.log.Warn("call log not read for the failure check", "err", err.Error())
+		return nil
+	}
+	calls := map[string][]store.Entry{}
+	for _, en := range entries {
+		if callstat.IsCall(en) {
+			calls[en.Account] = append(calls[en.Account], en)
+		}
+	}
+	return calls
 }
 
 // acquire takes the engine lock, waiting briefly: `status` probes the lock and
@@ -383,10 +537,13 @@ func (e *Engine) init() {
 		now := e.clock.Now()
 		e.started = now
 		e.syncAccountsLocked(now, true)
+		e.pruneTenantsLocked()
 		fixed = e.fixFarFutureLocked(now)
 		e.saveLocked()
 	})
 	e.reportClockFix(fixed)
+	e.applyPasswordResets()
+	e.adoptPending()
 	if e.o.ConfigPath != "" {
 		if fi, err := os.Stat(e.o.ConfigPath); err == nil {
 			e.cfgMod = fi.ModTime()
@@ -505,7 +662,11 @@ func (e *Engine) tick(ctx context.Context) {
 			e.reloadConfig()
 		}
 	}
+	if store.HasPendingImport(e.o.DataDir) {
+		e.adoptPending() // also when the reload trigger of the import was lost, or a round was in flight
+	}
 
+	e.forceSub = map[string]bool{}
 	manual := e.processTriggers(now)
 
 	var fixed []string
@@ -550,12 +711,13 @@ func (e *Engine) tick(ctx context.Context) {
 				go e.round(ctx, acct, manual[acct.Name])
 			}
 		}
-		if changed {
-			e.saveLocked()
+		if changed || e.unsaved {
+			e.unsaved = !e.saveLocked()
 		}
 	})
 	e.reportClockFix(fixed)
 
+	e.subscriptionTick(ctx, now, e.forceSub)
 	e.evalNotify()
 
 	if day := now.Format("2006-01-02"); day != e.lastPrune {
@@ -592,6 +754,10 @@ func (e *Engine) processTriggers(now time.Time) map[string]bool {
 		switch {
 		case name == ".reload":
 			e.reloadConfig()
+		case strings.HasSuffix(name, passwordSuffix):
+			e.resetPasswordGate(strings.TrimSuffix(name, passwordSuffix))
+		case strings.HasSuffix(name, subscriptionSuffix):
+			e.handleSubscriptionTrigger(name, e.forceSub)
 		case strings.HasSuffix(name, ".resume"):
 			e.resumeAccount(strings.TrimSuffix(name, ".resume"), now)
 		default:
@@ -655,8 +821,10 @@ func (e *Engine) reloadConfig() {
 		restart = cfg.Network.Proxy != e.cfg.Network.Proxy || cfg.Vault.Backend != e.cfg.Vault.Backend
 		e.cfg, e.sched = cfg, sc
 		e.syncAccountsLocked(e.clock.Now(), false)
+		e.pruneTenantsLocked()
 		e.saveLocked()
 	})
+	e.adoptPending()
 	msg := ""
 	if restart {
 		msg = "restart required for network/vault changes"
@@ -716,9 +884,9 @@ func RunOnce(ctx context.Context, o Options, names []string) error {
 			}
 			switch as := e.state.Accounts[a.Name]; {
 			case a.Paused:
-				skip[a.Name] = "account is paused; run: e5renew account resume " + a.Name
+				skip[a.Name] = "account is paused; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPaused:
-				skip[a.Name] = "account was paused automatically; run: e5renew account resume " + a.Name
+				skip[a.Name] = "account was paused automatically; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPeriodEnded:
 				skip[a.Name] = "the run period has ended"
 			}

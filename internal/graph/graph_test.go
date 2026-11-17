@@ -54,7 +54,7 @@ func TestClassAndHeaders(t *testing.T) {
 			t.Errorf("%s: got %s retry %v", tc.path, r.Class, r.RetryAfter)
 		}
 	}
-	if gotAuth != "Bearer tok" || !strings.HasPrefix(gotUA, "e5renew/") || gotCL != "eventual" {
+	if gotAuth != "Bearer tok" || !strings.HasPrefix(gotUA, "e5extend/") || gotCL != "eventual" {
 		t.Errorf("headers: %q %q %q", gotAuth, gotUA, gotCL)
 	}
 	if !strings.Contains(gotQuery, "$top=5") {
@@ -153,5 +153,56 @@ func TestParseRetryAfterClamps(t *testing.T) {
 	far := time.Now().Add(1000 * time.Hour).UTC().Format(http.TimeFormat)
 	if got := parseRetryAfter(far); got != time.Hour {
 		t.Errorf("far date: %v", got)
+	}
+}
+
+func TestListSubscriptionsFollowsNextLink(t *testing.T) {
+	var calls []string
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.URL.Path+"?"+r.URL.RawQuery)
+		if r.Header.Get("Authorization") != "Bearer T" || r.URL.Path != "/v1.0/directory/subscriptions" {
+			t.Errorf("request %s auth %q", r.URL.Path, r.Header.Get("Authorization"))
+		}
+		if r.URL.Query().Get("$skiptoken") == "" {
+			_, _ = w.Write([]byte(`{"value":[{"id":"a","skuPartNumber":"DEVELOPERPACK_E5","status":"Enabled","nextLifecycleDateTime":"2027-02-14T12:00:00Z"}],"@odata.nextLink":"` + srv.URL + `/v1.0/directory/subscriptions?$skiptoken=P2"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"value":[{"id":"b","skuPartNumber":"POWER_BI_STANDARD","status":"Warning","isTrial":true,"totalLicenses":5}]}`))
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL + "/v1.0"}
+	subs, res := c.ListSubscriptions(context.Background(), "T")
+	if res.Class != OK || len(subs) != 2 || subs[0].ID != "a" || subs[1].ID != "b" || !subs[1].IsTrial || subs[0].NextLifecycleDateTime.Year() != 2027 {
+		t.Fatalf("%+v %+v", subs, res)
+	}
+	if len(calls) != 2 || !strings.Contains(calls[0], "$select=") || !strings.Contains(calls[1], "skiptoken=P2") {
+		t.Errorf("calls = %v", calls)
+	}
+	// A refusal stops the walk and hands back the class.
+	forbidden := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(403) }))
+	defer forbidden.Close()
+	if subs, res := (&Client{Base: forbidden.URL}).ListSubscriptions(context.Background(), "T"); res.Class != Forbidden || subs != nil {
+		t.Errorf("forbidden: %+v %+v", subs, res)
+	}
+}
+
+func TestListSubscriptionsFailsInsteadOfReturningAPartialList(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every page points to another one.
+		_, _ = w.Write([]byte(`{"value":[{"id":"a","skuPartNumber":"X","status":"Enabled"}],"@odata.nextLink":"` + srv.URL + `/v1.0/directory/subscriptions?$skiptoken=n"}`))
+	}))
+	defer srv.Close()
+	subs, res := (&Client{Base: srv.URL + "/v1.0"}).ListSubscriptions(context.Background(), "T")
+	if res.Class == OK || subs != nil || res.Err == nil {
+		t.Errorf("page cap: %+v %+v", subs, res)
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"value":[],"@odata.nextLink":"::not a url"}`))
+	}))
+	defer bad.Close()
+	if subs, res := (&Client{Base: bad.URL}).ListSubscriptions(context.Background(), "T"); res.Class == OK || subs != nil {
+		t.Errorf("bad link: %+v %+v", subs, res)
 	}
 }

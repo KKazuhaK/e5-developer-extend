@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // StateVersion is the current state.json format version.
@@ -50,6 +50,18 @@ type Notice struct {
 	Pending bool      `json:"pending,omitempty"`
 	Tried   time.Time `json:"tried,omitzero"`
 	Msg     string    `json:"msg,omitempty"`
+	// Held means the alert is waiting for the quiet hours to end; it is sent
+	// then, together with the others that were held.
+	Held bool `json:"held,omitempty"`
+	// Cooled means the cooldown kept the alert back while its condition still
+	// holds; it is sent (Msg) once the cooldown ends. Nothing was announced yet.
+	Cooled bool `json:"cooled,omitempty"`
+}
+
+// PasswordBlock records why automatic password sign-in stopped.
+type PasswordBlock struct {
+	Code string    `json:"code"` // AADSTS code of the failure
+	At   time.Time `json:"at"`
 }
 
 // AccountState is the persisted state of one account.
@@ -64,14 +76,37 @@ type AccountState struct {
 	APISkipUntil           map[string]time.Time `json:"api_skip_until,omitempty"`
 	APIForbiddenCount      map[string]int       `json:"api_forbidden_count,omitempty"`
 	Totals                 Totals               `json:"totals"`
+	// PasswordBlocked is set after a password sign-in failed in a way that
+	// retrying cannot fix; the engine then stops signing the account in with
+	// its password until the person acts (set-secret, login, editing the account).
+	PasswordBlocked *PasswordBlock `json:"password_blocked,omitempty"`
+	// LastPasswordAttempt is when the engine last tried an automatic password sign-in.
+	LastPasswordAttempt time.Time `json:"last_password_attempt,omitzero"`
+	// LastPasswordCode is the AADSTS code the last automatic password sign-in failed with ("" when it worked),
+	// so the reason shown inside the interval is the real cause.
+	LastPasswordCode string `json:"last_password_code,omitempty"`
 	// Notified maps an alert kind to its last notice; only the engine writes it.
 	Notified map[string]Notice `json:"notified,omitempty"`
+	// LastSent is when an alert of each kind was last handed out, which is
+	// what the cooldown is measured from; unlike Notified it outlives the
+	// condition.
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
 }
 
 // State is the content of state.json.
 type State struct {
 	Version  int                      `json:"version"`
 	Accounts map[string]*AccountState `json:"accounts"`
+	// Notified and LastSent are the notices of alerts that belong to no
+	// single account (all_failing).
+	Notified map[string]Notice    `json:"notified,omitempty"`
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
+	// Tenants holds what the subscription check saw, per tenant (see config.Account.TenantKey).
+	Tenants map[string]*TenantState `json:"tenants,omitempty"`
+	// TenantAliases maps the key an account's configured tenant gives (a
+	// domain, or "account:<name>") to the tenant GUID a token revealed, so
+	// accounts that name one tenant in different ways share one state.
+	TenantAliases map[string]string `json:"tenant_aliases,omitempty"`
 }
 
 // NewState returns an empty state.
@@ -281,4 +316,59 @@ func (s *Store) Prune(now time.Time, keepDays int) (int, error) {
 		}
 	}
 	return n, errors.Join(errs...)
+}
+
+// Access says what the last subscription check of a tenant could do.
+const (
+	AccessOK           = "ok"            // the subscriptions were read
+	AccessNoPermission = "no_permission" // Graph refused: Organization.Read.All is missing
+	AccessError        = "error"         // could not be checked (network, sign-in, server)
+)
+
+// MaxRenewals is how many renewals a subscription keeps.
+const MaxRenewals = 20
+
+// Renewal records that a subscription's next lifecycle date moved later.
+type Renewal struct {
+	From   time.Time `json:"from"`
+	To     time.Time `json:"to"`
+	SeenAt time.Time `json:"seen_at"`
+}
+
+// SubscriptionState is the last thing seen of one subscription of a tenant.
+type SubscriptionState struct {
+	SKU           string    `json:"sku,omitempty"`
+	Status        string    `json:"status"`
+	NextLifecycle time.Time `json:"next_lifecycle,omitzero"`
+	CheckedAt     time.Time `json:"checked_at"`
+	IsTrial       bool      `json:"is_trial,omitempty"`
+	TotalLicenses int       `json:"total_licenses,omitempty"`
+	History       []Renewal `json:"history,omitempty"`
+
+	// AnnouncedStatus is the status the alerts have caught up with ("" before
+	// the first evaluation); RenewalNotified is the SeenAt of the newest
+	// renewal that was announced. Only the alert evaluation writes them.
+	AnnouncedStatus string    `json:"announced_status,omitempty"`
+	RenewalNotified time.Time `json:"renewal_notified,omitzero"`
+	// Notified and LastSent are the alert notices of this subscription.
+	Notified map[string]Notice    `json:"notified,omitempty"`
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
+}
+
+// TenantState is the subscription knowledge of one tenant.
+type TenantState struct {
+	// TenantID is the tenant's GUID when a token or Graph told it.
+	TenantID string `json:"tenant_id,omitempty"`
+	// Access is the outcome of the last check; Detail explains AccessError
+	// without secrets. Checked is the last successful read, Attempted the last try.
+	Access    string    `json:"access,omitempty"`
+	Detail    string    `json:"detail,omitempty"`
+	Checked   time.Time `json:"checked_at,omitzero"`
+	Attempted time.Time `json:"attempted_at,omitzero"`
+	// Failures counts the failed checks in a row, for the backoff.
+	Failures      int                           `json:"failures,omitempty"`
+	Subscriptions map[string]*SubscriptionState `json:"subscriptions,omitempty"`
+	// Notified and LastSent are the notices of the manual expiry date.
+	Notified map[string]Notice    `json:"notified,omitempty"`
+	LastSent map[string]time.Time `json:"last_sent,omitempty"`
 }

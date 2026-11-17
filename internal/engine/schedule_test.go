@@ -7,7 +7,7 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
 
 func lo(l, h time.Duration) time.Duration { return l }

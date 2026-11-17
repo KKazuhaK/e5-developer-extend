@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 func inRange(t *testing.T, what string, got, lo, hi time.Duration) {
@@ -126,12 +126,12 @@ func TestNetworkErrorIsNotAFailure(t *testing.T) {
 
 func TestLoginRequiredNeedsAttentionThenRecovers(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
-	f.opts.Hint = func(err error, name string) string { return "run: e5renew account login " + name }
+	f.opts.Hint = func(err error, name string) string { return "run: e5extend account login " + name }
 	f.auths["main"].setErr(fmt.Errorf("refresh: %w", auth.ErrLoginRequired))
 	f.start()
 	f.round("main")
 	as := f.acct("main")
-	if as.Status != store.StatusNeedsAttention || !strings.Contains(as.Reason, "e5renew account login main") {
+	if as.Status != store.StatusNeedsAttention || !strings.Contains(as.Reason, "e5extend account login main") {
 		t.Fatalf("got %+v", as)
 	}
 	if got := as.NextRun.Sub(f.clock.now); got != attentionRetry {

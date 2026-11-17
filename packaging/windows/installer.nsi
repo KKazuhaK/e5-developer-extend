@@ -1,16 +1,16 @@
-; E5 Renew installer: per-user, no administrator rights. Built by
+; E5 Developer Extend installer: per-user, no administrator rights. Built by
 ; scripts/release/windows.sh, which passes:
 ;   /DVERSION=1.2.3          numeric version for the file properties
 ;   /DDISPLAY_VERSION=...    version shown to the user (may be a pre-release)
 ;   /DARCH=amd64|arm64
-;   /DSRC=<dir>              e5renew-gui.exe, e5renew.exe, e5renew-bg.exe,
+;   /DSRC=<dir>              e5extend-gui.exe, e5extend.exe, e5extend-bg.exe,
 ;                            LICENSE.txt, MicrosoftEdgeWebview2Setup.exe
 ;   /DOUTFILE=<installer path>
 ;
 ; Long-running notes (docs/design/release.md, section 3.5):
 ; - Upgrades stop the tray app and the scheduled task first (their files are
 ;   locked while they run) and start the task again afterwards.
-; - Uninstall removes the scheduled task through `e5renew service uninstall`
+; - Uninstall removes the scheduled task through `e5extend service uninstall`
 ;   and the login item, but keeps the user's config, vault and logs.
 
 Unicode true
@@ -24,13 +24,13 @@ RequestExecutionLevel user
 !include "LogicLib.nsh"
 !include "FileFunc.nsh"
 
-!define PRODUCT "E5 Renew"
+!define PRODUCT "E5 Developer Extend"
 !define COMPANY "KKazuhaK"
-!define GUI_EXE "e5renew-gui.exe"
-!define TASK_NAME "e5renew"
+!define GUI_EXE "e5extend-gui.exe"
+!define TASK_NAME "e5extend"
 ; The login item's Run value (autostartID in gui/shared.go).
-!define RUN_VALUE "io.github.kkazuhak.e5renew.tray"
-!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\io.github.kkazuhak.e5renew"
+!define RUN_VALUE "io.github.kkazuhak.e5extend.tray"
+!define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\io.github.kkazuhak.e5extend"
 !define RUN_KEY "Software\Microsoft\Windows\CurrentVersion\Run"
 !define WV2_GUID "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
 
@@ -56,7 +56,7 @@ VIAddVersionKey "LegalCopyright" "MIT License"
 !define MUI_ABORTWARNING
 !define MUI_FINISHPAGE_RUN "$INSTDIR\${GUI_EXE}"
 !define MUI_FINISHPAGE_RUN_TEXT "$(RunNow)"
-!define MUI_FINISHPAGE_SHOWREADME "https://github.com/KKazuhaK/e5-renew/blob/main/docs/user/getting-started.md"
+!define MUI_FINISHPAGE_SHOWREADME "https://github.com/KKazuhaK/e5-developer-extend/blob/main/docs/user/getting-started.md"
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "$(OpenGuide)"
 !define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
 !define MUI_UNFINISHPAGE_NOAUTOCLOSE
@@ -88,8 +88,8 @@ LangString WebView ${LANG_ENGLISH} "Installing the Microsoft Edge WebView2 Runti
 LangString WebView ${LANG_SIMPCHINESE} "正在安装 Microsoft Edge WebView2 运行时"
 LangString RemovingService ${LANG_ENGLISH} "Removing the background service"
 LangString RemovingService ${LANG_SIMPCHINESE} "正在删除后台服务"
-LangString DataKept ${LANG_ENGLISH} "Your settings, keys and logs are kept in $APPDATA\e5renew and $LOCALAPPDATA\e5renew. Delete these folders to remove them."
-LangString DataKept ${LANG_SIMPCHINESE} "你的配置、密钥和日志保留在 $APPDATA\e5renew 和 $LOCALAPPDATA\e5renew。要彻底清除，请手动删除这两个文件夹。"
+LangString DataKept ${LANG_ENGLISH} "Your settings, keys and logs are kept in $APPDATA\e5extend and $LOCALAPPDATA\e5extend. Delete these folders to remove them."
+LangString DataKept ${LANG_SIMPCHINESE} "你的配置、密钥和日志保留在 $APPDATA\e5extend 和 $LOCALAPPDATA\e5extend。要彻底清除，请手动删除这两个文件夹。"
 
 Var TaskExisted
 Var GuiWasRunning
@@ -157,7 +157,7 @@ Function ${un}StopRunning
 	; which writes its state atomically, so a hard stop loses nothing.
 	nsExec::Exec 'taskkill /F /IM "${GUI_EXE}"'
 	Pop $0
-	nsExec::Exec 'taskkill /F /IM e5renew-bg.exe'
+	nsExec::Exec 'taskkill /F /IM e5extend-bg.exe'
 	Pop $0
 	Sleep 1500
 FunctionEnd
@@ -219,8 +219,8 @@ Section "Install"
 
 	SetOutPath "$INSTDIR"
 	File "${SRC}\${GUI_EXE}"
-	File "${SRC}\e5renew.exe"
-	File "${SRC}\e5renew-bg.exe"
+	File "${SRC}\e5extend.exe"
+	File "${SRC}\e5extend-bg.exe"
 	File "${SRC}\LICENSE.txt"
 
 	; WebView2 is part of Windows 11 and of almost every Windows 10; install it
@@ -245,7 +245,7 @@ Section "Install"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "${PRODUCT}"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${DISPLAY_VERSION}"
 	WriteRegStr HKCU "${UNINST_KEY}" "Publisher" "${COMPANY}"
-	WriteRegStr HKCU "${UNINST_KEY}" "URLInfoAbout" "https://github.com/KKazuhaK/e5-renew"
+	WriteRegStr HKCU "${UNINST_KEY}" "URLInfoAbout" "https://github.com/KKazuhaK/e5-developer-extend"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayIcon" "$INSTDIR\${GUI_EXE}"
 	WriteRegStr HKCU "${UNINST_KEY}" "InstallLocation" "$INSTDIR"
 	WriteRegStr HKCU "${UNINST_KEY}" "UninstallString" '"$INSTDIR\uninstall.exe"'
@@ -256,7 +256,7 @@ Section "Install"
 	IntFmt $0 "0x%08X" $0
 	WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" "$0"
 
-	; The task runs $INSTDIR\e5renew-bg.exe, which was just replaced.
+	; The task runs $INSTDIR\e5extend-bg.exe, which was just replaced.
 	${If} $TaskExisted == "1"
 		DetailPrint "$(Restarting)"
 		Call EnableTask
@@ -275,14 +275,14 @@ Section "Uninstall"
 	Call un.StopRunning
 	DetailPrint "$(RemovingService)"
 	; Idempotent: reports "nothing to remove" when no task is installed.
-	nsExec::ExecToLog '"$INSTDIR\e5renew.exe" service uninstall'
+	nsExec::ExecToLog '"$INSTDIR\e5extend.exe" service uninstall'
 	Pop $0
 
 	DeleteRegValue HKCU "${RUN_KEY}" "${RUN_VALUE}"
 	Delete "$SMPROGRAMS\${PRODUCT}.lnk"
 	Delete "$INSTDIR\${GUI_EXE}"
-	Delete "$INSTDIR\e5renew.exe"
-	Delete "$INSTDIR\e5renew-bg.exe"
+	Delete "$INSTDIR\e5extend.exe"
+	Delete "$INSTDIR\e5extend-bg.exe"
 	Delete "$INSTDIR\LICENSE.txt"
 	Delete "$INSTDIR\uninstall.exe"
 	RMDir "$INSTDIR"

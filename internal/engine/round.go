@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 type outcome struct {
@@ -78,6 +78,7 @@ func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
 			return
 		}
 		skipped, msg, follow = e.bookLocked(as, acct, out, now)
+		e.roundsDone = true
 		e.saveLocked()
 	})
 	if !found {
@@ -124,7 +125,7 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 			as.ConsecutiveFailedRound++
 			if as.ConsecutiveFailedRound >= AutoPauseRounds {
 				as.Status = store.StatusPaused
-				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); fix the cause, then run: e5renew account resume %s",
+				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); fix the cause, then run: e5extend account resume %s",
 					as.ConsecutiveFailedRound, out.lastFail, acct.Name)
 				as.NextRun = time.Time{}
 				follow = append(follow, "auto_pause")
@@ -155,17 +156,23 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 				force, rt.forceTok = rt.forceTok, false
 			}
 		})
+		// Only here may a password account sign in with its password again.
+		ctx := e.gateContext(ctx, acct.Name)
 		tctx := ctx
 		if force {
 			tctx = auth.ForceRefresh(ctx)
 		}
 		tok, err = au.Token(tctx)
-		if err != nil && force && ctx.Err() == nil && !errors.Is(err, auth.ErrTransient) {
+		if err != nil && force && ctx.Err() == nil && !errors.Is(err, auth.ErrTransient) && auth.CredentialFailure(err) == "" {
 			// A forced refresh is a recovery attempt; if the identity service
 			// rejects it, fall back to a normal silent request before raising
-			// attention.
+			// attention. A credential failure of the password sign-in is not
+			// tried again: that would repeat a wrong password.
 			e.log.Warn("forced token refresh failed; retrying without force", "account", acct.Name)
 			tok, err = au.Token(ctx)
+		}
+		if err == nil {
+			e.saveHomeAccount(ctx, acct, tok)
 		}
 		if err == nil {
 			return e.callAPIs(ctx, acct, roundID, tok)
@@ -188,6 +195,8 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 func (e *Engine) attentionReason(err error, name string) string {
 	var label string
 	switch {
+	case auth.IsSignInFrequency(err):
+		label = auth.SignInFrequencyLabel
 	case errors.Is(err, auth.ErrLoginRequired):
 		label = "login required"
 	case errors.Is(err, auth.ErrInvalidClient):
@@ -254,7 +263,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 		}
 	}
 	if len(cands) == 0 {
-		out.attention = "no usable APIs: check the app's granted permissions and the account's categories (e5renew account test " + acct.Name + ")"
+		out.attention = "no usable APIs: check the app's granted permissions and the account's categories (e5extend account test " + acct.Name + ")"
 		return out
 	}
 
@@ -465,4 +474,21 @@ func (e *Engine) sleep(ctx context.Context, d time.Duration) bool {
 	case <-e.clock.After(d):
 		return true
 	}
+}
+
+// saveHomeAccount stores the home account ID a password sign-in returned, which
+// the configuration lacks (the first login did not get it written back).
+func (e *Engine) saveHomeAccount(ctx context.Context, acct config.Account, tok auth.Token) {
+	if !acct.Delegated() || tok.HomeAccountID == "" || tok.HomeAccountID == acct.HomeAccountID || e.o.SaveHomeAccount == nil {
+		return
+	}
+	if err := e.o.SaveHomeAccount(ctx, acct, tok.HomeAccountID); err != nil {
+		e.log.Warn("save home account id", "account", acct.Name, "err", err)
+		return
+	}
+	e.withLock(func() {
+		if a, ok := e.cfg.Find(acct.Name); ok {
+			a.HomeAccountID = tok.HomeAccountID
+		}
+	})
 }
