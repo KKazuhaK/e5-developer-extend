@@ -208,6 +208,8 @@ export const zh = {
   "rec.reason.needs_admin_role": "需要管理员角色，未检查",
   "rec.reason.not_supported": "这种登录方式不支持",
   "rec.reason.probe_failed": "暂时无法确认",
+  "rec.reason.probe_arbitrary_user": "只用任意一个用户检查过；填写用户后才可靠",
+  "rec.partial": "有些检查暂时失败，这些分类保持你当前的选择。可以稍后重新检查。",
   "wizard.savedConsent": "账号已保存，等待管理员同意",
   "wizard.savedConsentHint": "应用已经创建，但还需要管理员批准它的权限。批准之后再登录。",
   "auto.route.auto": "自动创建应用注册（推荐）",

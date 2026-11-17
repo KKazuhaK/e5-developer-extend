@@ -516,11 +516,12 @@ export const mockApi: Api = {
       if (variant === "nomailbox") for (const c of ["mail", "calendar", "contacts", "tasks"]) unavailable[c] = "no_mailbox";
       if (variant === "noonedrive") for (const c of ["files", "notes"]) unavailable[c] = "no_onedrive";
       const list: CategoryAdvice[] = categories().map((category) => {
-        if (unavailable[category]) return { category, status: "unavailable", reason: unavailable[category] };
-        if (category === "reports") return { category, status: "maybe", reason: "needs_admin_role" };
-        if (category === "apps") return { category, status: "unavailable", reason: "missing_permission:Application.Read.All" };
-        if (variant === "noonedrive" && category === "sites") return { category, status: "maybe", reason: "probe_failed" };
-        return { category, status: "recommended", reason: "" };
+        const dflt = category !== "reports";
+        if (unavailable[category]) return { category, status: "unavailable", reason: unavailable[category], default: dflt };
+        if (category === "reports") return { category, status: "maybe", reason: "needs_admin_role", default: dflt };
+        if (category === "apps") return { category, status: "unavailable", reason: "missing_permission:Application.Read.All", default: dflt };
+        if (variant === "noonedrive" && category === "sites") return { category, status: "maybe", reason: "probe_failed", default: dflt };
+        return { category, status: "recommended", reason: "", default: dflt };
       });
       return { needsLogin: false, categories: list, recommended: list.filter((c) => c.status === "recommended").map((c) => c.category) };
     },
@@ -792,6 +793,10 @@ export const mockApi: Api = {
     async categories() {
       await lag();
       return categories();
+    },
+    async defaultCategories() {
+      await lag();
+      return categories().filter((c) => c !== "reports");
     },
   },
   system: {

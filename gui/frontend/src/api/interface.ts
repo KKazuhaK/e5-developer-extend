@@ -83,6 +83,8 @@ export interface Api {
   catalog: {
     list(account: string): Promise<CatalogEntry[]>;
     categories(): Promise<string[]>;
+    /** The categories an account without a categories setting runs on. */
+    defaultCategories(): Promise<string[]>;
   };
   system: {
     openExternal(url: string): Promise<void>;

@@ -168,8 +168,10 @@ export type AdviceStatus = "recommended" | "unavailable" | "maybe";
 export interface CategoryAdvice {
   category: string;
   status: AdviceStatus;
-  /** "", or a code: no_mailbox, no_onedrive, no_teams_license, no_sharepoint, needs_admin_role, not_supported, probe_failed, missing_permission:<scopes> */
+  /** "", or a code: no_mailbox, no_onedrive, no_teams_license, no_sharepoint, needs_admin_role, not_supported, probe_failed, probe_arbitrary_user, missing_permission:<scopes> */
   reason: string;
+  /** True when the category runs for an account without a categories setting (catalog default). */
+  default: boolean;
 }
 /** AccountService.Recommend result. With needsLogin there is no advice. */
 export interface RecommendResult {

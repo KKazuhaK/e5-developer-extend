@@ -26,16 +26,33 @@ export function reasonMsg(reason: string): Msg | null {
       return { key: "rec.reason.not_supported" };
     case "probe_failed":
       return { key: "rec.reason.probe_failed" };
+    case "probe_arbitrary_user":
+      return { key: "rec.reason.probe_arbitrary_user" };
     default:
       return null;
   }
 }
 
-/** The categories to tick by default: the recommended ones that exist, in the order of all. */
-export function preselect(all: string[], rec: RecommendResult | null): string[] {
-  if (!rec) return [...all];
-  const ok = new Set(rec.categories.filter((c) => c.status === "recommended").map((c) => c.category));
-  return all.filter((c) => ok.has(c));
+/**
+ * The categories to select: every recommended one plus every "maybe" one the account has now.
+ * current is the account's selection; empty means it runs on the catalog defaults (the advice's
+ * `default` flag), so uncertain defaults stay ticked. Unavailable ones are never kept, and an
+ * uncertain one is never dropped. Without a result only the current selection is returned.
+ */
+export function preselect(all: string[], rec: RecommendResult | null, current: string[] = []): string[] {
+  if (!rec) return all.filter((c) => current.includes(c));
+  const have = new Set(current);
+  return all.filter((c) => {
+    const a = rec.categories.find((x) => x.category === c);
+    if (!a) return false;
+    if (a.status === "recommended") return true;
+    return a.status === "maybe" && (current.length ? have.has(c) : a.default);
+  });
+}
+
+/** True when some category could not be checked because a probe failed (probably temporarily). */
+export function hasFailedProbes(rec: RecommendResult | null): boolean {
+  return !!rec?.categories.some((c) => c.reason === "probe_failed");
 }
 
 /** Advice by category id; empty without a result. */

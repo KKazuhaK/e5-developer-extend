@@ -209,6 +209,8 @@ export const en: Dict = {
   "rec.reason.needs_admin_role": "Needs an administrator role; not checked",
   "rec.reason.not_supported": "Not supported by this sign-in type",
   "rec.reason.probe_failed": "Could not be confirmed right now",
+  "rec.reason.probe_arbitrary_user": "Checked with an arbitrary user only; set a user for a reliable answer",
+  "rec.partial": "Some checks failed for now; those categories keep your current selection. You can check again later.",
   "wizard.savedConsent": "Account saved, waiting for administrator consent",
   "wizard.savedConsentHint": "The app was created, but an administrator still has to approve its permissions. Sign in once that is done.",
   "auto.route.auto": "Create the app registration automatically",

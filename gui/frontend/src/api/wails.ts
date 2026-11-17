@@ -115,6 +115,7 @@ export const wailsApi: Api = {
   catalog: {
     list: async (a) => arr(await CatalogService.List(a)).map((e) => ({ ...e, scopes: arr(e.scopes) })),
     categories: async () => arr(await CatalogService.Categories()),
+    defaultCategories: async () => arr(await CatalogService.DefaultCategories()),
   },
   system: {
     openExternal: async (url) => {

@@ -17,7 +17,7 @@ import type { AccountErrorCode } from "@/lib/account";
 import { cn, errMsg } from "@/lib/utils";
 import { BrowserPrompt, DevicePrompt } from "@/components/signin";
 import { progressMsg, validateAutoStart } from "@/lib/appsetup";
-import { adviceByCategory, diffFromRecommended, preselect, reasonMsg } from "@/lib/recommend";
+import { adviceByCategory, diffFromRecommended, hasFailedProbes, preselect, reasonMsg } from "@/lib/recommend";
 import { AppSetupStep, AutoStartForm, ChoiceCard, ConsentNotice, type AdminMethod } from "./AppSetupFlow";
 
 type Mode = "add" | "edit";
@@ -112,12 +112,17 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
       .catch((e) => setLoadError(errMsg(e)));
   }, [mode, name]);
 
-  useEffect(() => {
-    api.catalog
-      .categories()
-      .then(setAllCategories)
+  const [defaultCategories, setDefaultCategories] = useState<string[]>([]);
+  const loadCategories = useCallback(() => {
+    setCatError(null);
+    Promise.all([api.catalog.categories(), api.catalog.defaultCategories()])
+      .then(([all, dflt]) => {
+        setAllCategories(all);
+        setDefaultCategories(dflt);
+      })
       .catch((e) => setCatError(errMsg(e)));
   }, []);
+  useEffect(() => loadCategories(), [loadCategories]);
 
   // What the API step knows about the account. It is kept across steps so going back does not undo the user's choice.
   const [rec, setRec] = useState<RecState | null>(null);
@@ -131,19 +136,19 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
       if (seq !== probeSeq.current) return;
       if (result.needsLogin) {
         setRec({ phase: "login", result: null, message: "" });
-        // Without advice a new account starts with everything ticked, an existing one keeps its choice.
-        setInput((i) => (i.categories.length ? i : { ...i, categories: [...allCategories] }));
+        // Without advice an account with no choice yet gets the catalog defaults (what it runs on anyway), not everything.
+        setInput((i) => (i.categories.length ? i : { ...i, categories: defaultCategories.filter((c) => allCategories.includes(c)) }));
       } else {
         setRec({ phase: "ok", result, message: "" });
         // A fresh account (no categories yet) starts from the recommendation; an existing choice is kept and compared.
-        setInput((i) => (i.categories.length ? i : { ...i, categories: preselect(allCategories, result) }));
+        setInput((i) => (i.categories.length ? i : { ...i, categories: preselect(allCategories, result, []) }));
       }
     } catch (e) {
       if (seq !== probeSeq.current) return;
       setRec({ phase: "fail", result: null, message: errMsg(e) });
-      setInput((i) => (i.categories.length ? i : { ...i, categories: [...allCategories] }));
+      setInput((i) => (i.categories.length ? i : { ...i, categories: defaultCategories.filter((c) => allCategories.includes(c)) }));
     }
-  }, [allCategories, input.name]);
+  }, [allCategories, defaultCategories, input.name]);
   useEffect(() => {
     if (step === 4 && loaded && allCategories && !rec) void probe();
   }, [step, loaded, allCategories, rec, probe]);
@@ -410,6 +415,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
           <CategoriesStep
             categories={allCategories}
             error={catError}
+            onReload={loadCategories}
             selected={input.categories}
             onChange={(c) => set("categories", c)}
             rec={rec}
@@ -434,7 +440,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         </Button>
         <div className="flex gap-2">
           {step < 6 ? (
-            <Button onClick={() => void next()} disabled={saving || cleaning || (step === 3 && !canContinue) || (step === 4 && (!rec || rec.phase === "run")) || (step === 2 && auto && !setup)}>
+            <Button onClick={() => void next()} disabled={saving || cleaning || (step === 3 && !canContinue) || (step === 4 && (!!catError || !rec || rec.phase === "run")) || (step === 2 && auto && !setup)}>
               {saving && <Spinner />}
               {step === 2 ? t("wizard.saveAndLogin") : step === 4 ? t("wizard.saveAndTest") : t("wizard.next")} {!saving && <ArrowRight />}
             </Button>
@@ -462,13 +468,13 @@ const BADGE: Record<string, { key: DictKey; cls: string }> = {
 };
 
 function CategoriesStep({
-  categories, error, selected, onChange, rec, onRetry, invalid,
+  categories, error, onReload, selected, onChange, rec, onRetry, invalid,
 }: {
-  categories: string[] | null; error: string | null; selected: string[]; onChange: (c: string[]) => void;
+  categories: string[] | null; error: string | null; onReload: () => void; selected: string[]; onChange: (c: string[]) => void;
   rec: RecState | null; onRetry: () => void; invalid: boolean;
 }) {
   const { t, tl, lang } = useI18n();
-  if (error) return <ErrorBlock message={error} />;
+  if (error) return <ErrorBlock message={error} onRetry={onReload} />;
   if (!categories || !rec || rec.phase === "run") {
     return (
       <div className="flex min-h-[18rem] flex-col items-center justify-center gap-3" role="status">
@@ -478,19 +484,20 @@ function CategoriesStep({
     );
   }
   const advice = adviceByCategory(rec.result);
-  const recommended = preselect(categories, rec.result);
+  const nRecommended = rec.result?.categories.filter((c) => c.status === "recommended").length ?? 0;
   const diff = rec.phase === "ok" ? diffFromRecommended(categories, selected, rec.result) : { drop: [], add: [] };
   const names = (ids: string[]) => ids.map((c) => tl(`cat.${c}`, c)).join(lang === "zh" ? "、" : ", ");
   return (
     <div>
       <p className="mb-3 text-[13px] text-muted-foreground">{t("wizard.categoriesHint")}</p>
-      {rec.phase === "ok" && <p className="mb-3 text-[13px] text-muted-foreground">{t("rec.summary", { n: recommended.length })}</p>}
+      {rec.phase === "ok" && <p className="mb-3 text-[13px] text-muted-foreground">{t("rec.summary", { n: nRecommended })}</p>}
       {(diff.drop.length > 0 || diff.add.length > 0) && (
         <p role="status" className="mb-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">
           {diff.drop.length > 0 && <span className="block">{t("rec.diff.drop", { names: names(diff.drop) })}</span>}
           {diff.add.length > 0 && <span className="block">{t("rec.diff.add", { names: names(diff.add) })}</span>}
         </p>
       )}
+      {rec.phase === "ok" && hasFailedProbes(rec.result) && <p role="status" className="mb-3 text-[13px] text-warning">{t("rec.partial")}</p>}
       {rec.phase === "login" && <p role="status" className="mb-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">{t("rec.needsLogin")}</p>}
       {rec.phase === "fail" && (
         <div role="alert" className="mb-3 flex items-center gap-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">
@@ -502,7 +509,7 @@ function CategoriesStep({
       )}
       <div className="mb-3 flex gap-2">
         {rec.phase === "ok" ? (
-          <Button size="sm" variant="outline" onClick={() => onChange(recommended)}>{t("wizard.selectRecommended")}</Button>
+          <Button size="sm" variant="outline" onClick={() => onChange(preselect(categories, rec.result, selected))}>{t("wizard.selectRecommended")}</Button>
         ) : (
           <Button size="sm" variant="outline" onClick={() => onChange([...categories])}>{t("wizard.selectAll")}</Button>
         )}
