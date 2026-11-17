@@ -199,3 +199,47 @@ func TestAccountTestApplyKeepsUncertainDefault(t *testing.T) {
 		t.Error("--force without --apply accepted")
 	}
 }
+
+// When the suggestion is exactly the catalog defaults the list stays empty, so
+// default categories added later still apply; a different one is written out.
+func TestAccountTestApplyKeepsDefaultsEmpty(t *testing.T) {
+	e := recommendEnv(t)
+	full := append(append([]string{}, catalog.RecommendedDelegated...), "Application.Read.All", "Domain.Read.All", "Organization.Read.All", "Reports.Read.All")
+	fa := &fakeAuth{tok: auth.Token{AccessToken: "T", Account: "x", ExpiresOn: time.Now().Add(time.Hour), Scopes: full}}
+	e.newAuth = func(config.Account, auth.Store, *http.Client) (auth.Authenticator, error) { return fa, nil }
+	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	t.Cleanup(srv.Close)
+	e.graphBase = srv.URL
+
+	// Nothing set and everything default is recommended: nothing to change.
+	out := e.mustRun("", "account", "test", "main", "--recommend", "--apply", "--yes")
+	if !strings.Contains(out, "nothing to change") || len(e.loadCfg().Accounts[0].Categories) != 0 {
+		t.Fatalf("out: %s\ncats: %v", out, e.loadCfg().Accounts[0].Categories)
+	}
+
+	// An explicit shorter list is brought back to "follow the defaults", i.e. empty.
+	if err := ops.New().SetCategories(context.Background(), "main", []string{"user"}); err != nil {
+		t.Fatal(err)
+	}
+	out = e.mustRun("", "account", "test", "main", "--recommend", "--apply", "--yes")
+	if !strings.Contains(out, "catalog defaults") || len(e.loadCfg().Accounts[0].Categories) != 0 {
+		t.Fatalf("out: %s\ncats: %v", out, e.loadCfg().Accounts[0].Categories)
+	}
+	if strings.Contains(out, "explicit list does not pick up") {
+		t.Errorf("note shown for a defaults-following account: %s", out)
+	}
+
+	// A different result is written as an explicit list, with the note.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/me/drive" {
+			w.WriteHeader(404)
+		}
+	}))
+	t.Cleanup(srv2.Close)
+	e.graphBase = srv2.URL
+	out = e.mustRun("", "account", "test", "main", "--recommend", "--apply", "--yes")
+	got := e.loadCfg().Accounts[0].Categories
+	if len(got) == 0 || slices.Contains(got, "files") || !strings.Contains(out, "explicit list does not pick up") {
+		t.Fatalf("out: %s\ncats: %v", out, got)
+	}
+}

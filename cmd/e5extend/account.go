@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -12,6 +11,7 @@ import (
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 	"github.com/KKazuhaK/e5-developer-extend/internal/recommend"
@@ -257,6 +257,11 @@ func reasonText(code string) string {
 		return "not available for this sign-in type"
 	case recommend.ReasonArbitraryUser:
 		return "checked with an arbitrary user; set username for a reliable answer"
+	case recommend.ReasonCannotProbe:
+		if rest == "user" {
+			return "could not be checked: no user to look at (set username or grant User.Read.All)"
+		}
+		return "could not be checked: no allowed API to try, needs " + strings.ReplaceAll(strings.TrimPrefix(rest, "scopes:"), ",", " or ")
 	case recommend.ReasonProbeFailed:
 		return "could not be checked (try again later)"
 	}
@@ -306,20 +311,29 @@ func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes, forc
 	}
 
 	if rec.HasFailedProbes() && !force {
-		return errors.New("some probes failed temporarily; try again later (nothing saved; --force saves anyway, keeping the categories that could not be checked)")
+		return errors.New("some probes failed temporarily; try again later (nothing saved; --force saves anyway, keeping the categories the account already has among those that could not be checked)")
 	}
 	if len(cats) == 0 {
 		return errors.New("no category is recommended; nothing saved (check the granted permissions above)")
 	}
-	if slices.Equal(sortedCopy(cur.Categories), sortedCopy(cats)) {
+	apis, err := catalog.Load()
+	if err != nil {
+		return err
+	}
+	defaults := catalog.DefaultCategories(apis)
+	if ops.SameCategories(catalog.EffectiveCategories(apis, cur.Categories), cats) {
 		fmt.Fprintln(out, "the account already uses these categories; nothing to change")
 		return nil
 	}
-	was := "(default selection)"
+	was := "(catalog defaults)"
 	if len(cur.Categories) > 0 {
 		was = strings.Join(cur.Categories, ", ")
 	}
-	fmt.Fprintf(out, "categories of %s: %s -> %s\n", name, was, strings.Join(cats, ", "))
+	now := strings.Join(cats, ", ")
+	if ops.SameCategories(cats, defaults) {
+		now = "(catalog defaults; the list stays empty so new default categories apply)"
+	}
+	fmt.Fprintf(out, "categories of %s: %s -> %s\n", name, was, now)
 	if !yes {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Save these categories? [y/N] ")
 		ans, err := readLineCtx(ctx, cmd.InOrStdin())
@@ -333,18 +347,16 @@ func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes, forc
 			return errors.New("aborted")
 		}
 	}
-	if err := a.ops().SetCategories(ctx, name, cats); err != nil {
+	explicit, err := a.ops().ApplyCategories(ctx, name, cats)
+	if err != nil {
 		return err
 	}
 	a.ops().ReloadEngine()
 	fmt.Fprintf(out, "saved the categories of account %q\n", name)
+	if explicit {
+		fmt.Fprintln(out, "note: an explicit list does not pick up categories added to e5extend later; run this again after an update")
+	}
 	return nil
-}
-
-func sortedCopy(in []string) []string {
-	out := slices.Clone(in)
-	slices.Sort(out)
-	return out
 }
 
 func (a *app) newAccountRemoveCmd() *cobra.Command {
