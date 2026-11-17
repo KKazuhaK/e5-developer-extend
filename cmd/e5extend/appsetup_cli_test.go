@@ -356,7 +356,7 @@ func TestAccountAddAutoRevokesTheSecretWhenAddingTheAccountFails(t *testing.T) {
 	// secret was stored, and there the vault entry vanishes, so adding the account fails.
 	id := g.AddApp(map[string]any{"displayName": "x", "tags": []string{"e5extend", "e5extend:app"}})
 	g.Do(func() {
-		g.Passwords[id] = []map[string]any{{"keyId": "k-old", "displayName": "e5extend dev-box 2026-01-01", "endDateTime": "2027-01-01T00:00:00Z"}}
+		g.Passwords[id] = []map[string]any{{"keyId": "k-old", "displayName": "e5extend dev-box app1 2026-01-01", "endDateTime": "2027-01-01T00:00:00Z"}}
 	})
 	once := false
 	g.OnRequest = func(method, path string) {

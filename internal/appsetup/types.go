@@ -139,6 +139,10 @@ type Result struct {
 	// RemovedSecrets are the key IDs of this computer's earlier secrets that
 	// were deleted from the app after the new one was stored.
 	RemovedSecrets []string `json:"removedSecrets,omitempty"`
+	// NotRemovedSecrets are earlier secrets in the old per-host name format
+	// that could belong to another account sharing the app (ambiguous), so they
+	// were left alone.
+	NotRemovedSecrets []string `json:"notRemovedSecrets,omitempty"`
 }
 
 // AdminConsentURL is the link an administrator opens to grant consent.

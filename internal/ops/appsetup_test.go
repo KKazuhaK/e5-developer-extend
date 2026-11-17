@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -366,5 +367,37 @@ func TestLoginAfterSetupWaitsForReplication(t *testing.T) {
 	progress = nil
 	if _, err := e.LoginAfterSetup(context.Background(), "dev", &recUI{}, func(m string) { progress = append(progress, m) }); err == nil || len(progress) != 0 {
 		t.Errorf("err = %v, progress %q", err, progress)
+	}
+}
+
+func TestAppSetupLegacySecretsAreOnlyRemovedForTheSoleAccountOfTheApp(t *testing.T) {
+	e := newSetupEnv(t)
+	ctx := context.Background()
+	id := e.g.AddApp(map[string]any{"displayName": "x", "appId": testGUID, "tags": []string{"e5extend", "e5extend:app"}})
+	legacy := map[string]any{"keyId": "k-legacy", "displayName": "e5extend dev-box 2026-01-01", "endDateTime": "2027-01-01T00:00:00Z"}
+	run := func() *appsetup.Result {
+		e.g.Do(func() { e.g.Passwords[id] = []map[string]any{legacy} })
+		s, err := e.BeginAppSetup(ctx, AppSetupOptions{AppOnly: true, Account: "app1"}, &recUI{}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := s.Apply(ctx, appsetup.Choice{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	add := func(name string) {
+		if err := e.AddAccount(ctx, AccountInput{Name: name, Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "S"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("app1")
+	if res := run(); fmt.Sprint(res.RemovedSecrets) != "[k-legacy]" {
+		t.Errorf("sole account: removed %v, not removed %v", res.RemovedSecrets, res.NotRemovedSecrets)
+	}
+	add("app2")
+	if res := run(); len(res.RemovedSecrets) != 0 || fmt.Sprint(res.NotRemovedSecrets) != "[k-legacy]" {
+		t.Errorf("two accounts: removed %v, not removed %v", res.RemovedSecrets, res.NotRemovedSecrets)
 	}
 }

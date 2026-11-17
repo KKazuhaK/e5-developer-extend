@@ -32,7 +32,7 @@ func newRig(t *testing.T) *rig {
 func (r *rig) setup(kind appsetup.Kind) *appsetup.Setup {
 	return &appsetup.Setup{
 		Kind: kind, Token: fakegraph.Token, TenantID: tenant, Base: r.g.Base(),
-		Version: "1.2.3", Hostname: "dev-box",
+		Version: "1.2.3", Hostname: "dev-box", Account: "acct",
 		Now:      func() time.Time { return time.Date(2026, 11, 16, 12, 0, 0, 0, time.UTC) },
 		Progress: func(m string) { r.progress = append(r.progress, m) },
 		Backoff:  []time.Duration{time.Second, 2 * time.Second, 3 * time.Second},
@@ -482,7 +482,7 @@ func TestApplicationIdentity(t *testing.T) {
 	if len(r.g.Assigned) != len(catalog.RecommendedApplication) {
 		t.Errorf("%d role assignments", len(r.g.Assigned))
 	}
-	if res.SecretName != "e5extend dev-box 2026-11-16" || res.SecretExpires != "2027-11-16" {
+	if res.SecretName != "e5extend dev-box acct 2026-11-16" || res.SecretExpires != "2027-11-16" {
 		t.Errorf("secret = %q expires %q", res.SecretName, res.SecretExpires)
 	}
 	end := r.g.Passwords[res.ObjectID][0]["endDateTime"]

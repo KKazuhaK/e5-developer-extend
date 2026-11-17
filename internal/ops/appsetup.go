@@ -111,11 +111,12 @@ func (o *Ops) BeginAppSetup(ctx context.Context, opts AppSetupOptions, ui auth.L
 	s := &AppSetupSession{o: o, opts: opts, admin: tok.Account, tenant: tok.TenantID}
 	s.setup = &appsetup.Setup{
 		Kind: kind, Token: tok.AccessToken, TenantID: tok.TenantID, Base: o.GraphBase, HTTP: httpClient,
-		Version: version.Version, Hostname: host, Progress: progress, Backoff: o.SetupBackoff,
+		Version: version.Version, Hostname: host, Account: opts.Account, Progress: progress, Backoff: o.SetupBackoff,
 	}
 	if opts.AppOnly {
 		s.setup.StoreSecret = s.storeSecret
 		s.setup.BeforeSecret = s.checkSecretTarget
+		s.setup.LegacyOwner = s.soleAccountOf
 	}
 	return s, nil
 }
@@ -162,6 +163,22 @@ func (s *AppSetupSession) checkSecretTarget(app appsetup.AppRef) error {
 			"Choose another --account name (nothing was changed)", name, acct.ClientID, app.ClientID, app.DisplayName)
 	}
 	return nil
+}
+
+// soleAccountOf reports whether exactly one client_secret account on this
+// machine uses the app, and it is the one being set up.
+func (s *AppSetupSession) soleAccountOf(app appsetup.AppRef) bool {
+	cfg, _, err := s.o.LoadConfigOrDefault()
+	if err != nil {
+		return false
+	}
+	var names []string
+	for _, a := range cfg.Accounts {
+		if a.Auth == config.AuthClientSecret && strings.EqualFold(a.ClientID, app.ClientID) {
+			names = append(names, a.Name)
+		}
+	}
+	return len(names) == 1 && names[0] == s.opts.Account
 }
 
 // storeSecret is the sink for the client secret: straight into the vault.

@@ -307,7 +307,7 @@ func TestSecretExpiresIsTheUTCDateThatWasSent(t *testing.T) {
 	if end != "2027-11-17T07:30:00Z" || res.SecretExpires != "2027-11-17" {
 		t.Errorf("endDateTime %s, SecretExpires %s", end, res.SecretExpires)
 	}
-	if res.SecretName != "e5extend dev-box 2026-11-16" {
+	if res.SecretName != "e5extend dev-box acct 2026-11-16" {
 		t.Errorf("name = %s", res.SecretName)
 	}
 }
@@ -330,20 +330,22 @@ func TestConsentRoleMessageNamesTheRightRoles(t *testing.T) {
 	}
 }
 
-func TestEarlierSecretsOfThisComputerAreRemovedAfterTheNewOneIsStored(t *testing.T) {
+func credFor(key, name string) map[string]any {
+	return map[string]any{"keyId": key, "displayName": name, "endDateTime": "2027-01-01T00:00:00Z", "secretText": "old"}
+}
+
+func TestEarlierSecretsOfThisAccountAreRemovedAfterTheNewOneIsStored(t *testing.T) {
 	r := newRig(t)
 	id := r.g.AddApp(map[string]any{"displayName": "x", "tags": []string{"e5extend:app"}})
-	cred := func(key, name string) map[string]any {
-		return map[string]any{"keyId": key, "displayName": name, "endDateTime": "2027-01-01T00:00:00Z", "secretText": "old"}
-	}
 	r.g.Do(func() {
 		r.g.Passwords[id] = []map[string]any{
-			cred("k-ours-1", "e5extend dev-box 2026-01-01"),
-			cred("k-ours-2", "e5extend dev-box 2026-06-30"),
-			cred("k-other-host", "e5extend dev-box-2 2026-01-01"),
-			cred("k-prefix", "e5extend dev-boxer 2026-01-01"),
-			cred("k-suffix", "e5extend dev-box 2026-01-01 manual"),
-			cred("k-mine", "my own secret"),
+			credFor("k-ours-1", "e5extend dev-box acct 2026-01-01"),
+			credFor("k-ours-2", "e5extend dev-box acct 2026-06-30"),
+			credFor("k-other-account", "e5extend dev-box acct2 2026-01-01"),
+			credFor("k-other-host", "e5extend dev-box-2 acct 2026-01-01"),
+			credFor("k-suffix", "e5extend dev-box acct 2026-01-01 manual"),
+			credFor("k-mine", "my own secret"),
+			credFor("k-legacy", "e5extend dev-box 2026-01-01"),
 		}
 	})
 
@@ -353,13 +355,14 @@ func TestEarlierSecretsOfThisComputerAreRemovedAfterTheNewOneIsStored(t *testing
 	if _, err := s.Apply(context.Background(), appsetup.Choice{}); err == nil {
 		t.Fatal("expected an error")
 	}
-	if got := len(r.g.PasswordNames(id)); got != 6 {
+	if got := len(r.g.PasswordNames(id)); got != 7 {
 		t.Fatalf("%d secrets after a failed store: %v", got, r.g.PasswordNames(id))
 	}
 
+	// Without a sole owner the old per-host secret is only reported.
 	res := apply(t, r.setup(appsetup.KindApp), appsetup.Choice{})
 	names := r.g.PasswordNames(id)
-	if len(names) != 5 || names[res.SecretKeyID] != res.SecretName {
+	if len(names) != 6 || names[res.SecretKeyID] != res.SecretName {
 		t.Fatalf("secrets = %v", names)
 	}
 	for _, gone := range []string{"k-ours-1", "k-ours-2"} {
@@ -367,20 +370,47 @@ func TestEarlierSecretsOfThisComputerAreRemovedAfterTheNewOneIsStored(t *testing
 			t.Errorf("%s was not removed", gone)
 		}
 	}
-	for _, kept := range []string{"k-other-host", "k-prefix", "k-suffix", "k-mine"} {
+	for _, kept := range []string{"k-other-account", "k-other-host", "k-suffix", "k-mine", "k-legacy"} {
 		if _, ok := names[kept]; !ok {
 			t.Errorf("%s was removed", kept)
 		}
 	}
-	if fmt.Sprint(res.RemovedSecrets) != "[k-ours-1 k-ours-2]" {
-		t.Errorf("RemovedSecrets = %v", res.RemovedSecrets)
+	if fmt.Sprint(res.RemovedSecrets) != "[k-ours-1 k-ours-2]" || fmt.Sprint(res.NotRemovedSecrets) != "[k-legacy]" {
+		t.Errorf("removed %v, not removed %v", res.RemovedSecrets, res.NotRemovedSecrets)
 	}
 
-	// Run again on the same day: the new secret of the first run goes, not the one just made.
-	res2 := apply(t, r.setup(appsetup.KindApp), appsetup.Choice{})
+	// With the account as the sole user of the app the old format goes too.
+	s = r.setup(appsetup.KindApp)
+	s.LegacyOwner = func(appsetup.AppRef) bool { return true }
+	res2 := apply(t, s, appsetup.Choice{})
 	names = r.g.PasswordNames(id)
-	if _, ok := names[res2.SecretKeyID]; !ok || len(names) != 5 || fmt.Sprint(res2.RemovedSecrets) != fmt.Sprintf("[%s]", res.SecretKeyID) {
+	if _, ok := names["k-legacy"]; ok || len(res2.NotRemovedSecrets) != 0 {
+		t.Errorf("legacy secret kept: %v, not removed %v", names, res2.NotRemovedSecrets)
+	}
+	if _, ok := names[res2.SecretKeyID]; !ok || fmt.Sprint(res2.RemovedSecrets) != fmt.Sprintf("[k-legacy %s]", res.SecretKeyID) && fmt.Sprint(res2.RemovedSecrets) != fmt.Sprintf("[%s k-legacy]", res.SecretKeyID) {
 		t.Errorf("second run: %v removed %v", names, res2.RemovedSecrets)
+	}
+}
+
+func TestTwoAccountsSharingOneAppKeepTheirOwnSecrets(t *testing.T) {
+	r := newRig(t)
+	id := r.g.AddApp(map[string]any{"displayName": "x", "tags": []string{"e5extend:app"}})
+	run := func(account string) *appsetup.Result {
+		s := r.setup(appsetup.KindApp)
+		s.Account = account
+		return apply(t, s, appsetup.Choice{})
+	}
+	a1, b1 := run("a"), run("b")
+	if a1.SecretName != "e5extend dev-box a 2026-11-16" || b1.SecretName != "e5extend dev-box b 2026-11-16" {
+		t.Fatalf("names %q %q", a1.SecretName, b1.SecretName)
+	}
+	a2 := run("a")
+	names := r.g.PasswordNames(id)
+	if _, ok := names[b1.SecretKeyID]; !ok {
+		t.Error("rerunning a removed b's secret")
+	}
+	if _, ok := names[a1.SecretKeyID]; ok || len(names) != 2 || fmt.Sprint(a2.RemovedSecrets) != fmt.Sprintf("[%s]", a1.SecretKeyID) {
+		t.Errorf("secrets %v, removed %v", names, a2.RemovedSecrets)
 	}
 }
 
@@ -398,7 +428,7 @@ func TestRevokeFailureSaysTheSecretIsStillLive(t *testing.T) {
 	for k := range r.g.PasswordNames(id) {
 		key = k
 	}
-	for _, want := range []string{"vault is locked", "still live in Entra", key, "e5extend dev-box 2026-11-16"} {
+	for _, want := range []string{"vault is locked", "still live in Entra", key, "e5extend dev-box acct 2026-11-16"} {
 		if want == "" || !strings.Contains(err.Error(), want) {
 			t.Errorf("error lacks %q: %v", want, err)
 		}

@@ -245,6 +245,9 @@ func printSetupResult(cmd *cobra.Command, r *appsetup.Result) {
 	if len(r.RemovedSecrets) > 0 {
 		fmt.Fprintf(out, "removed %d earlier client secret(s) of this computer (key ID %s)\n", len(r.RemovedSecrets), strings.Join(r.RemovedSecrets, ", "))
 	}
+	if len(r.NotRemovedSecrets) > 0 {
+		fmt.Fprintf(out, "not removed (ambiguous: the old name has no account, another account may use it), key ID %s\n", strings.Join(r.NotRemovedSecrets, ", "))
+	}
 	if r.ConsentGranted {
 		fmt.Fprintln(out, "administrator consent is granted")
 	} else {

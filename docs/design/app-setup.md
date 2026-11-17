@@ -79,9 +79,11 @@
    返回的密钥**直接存进 vault**，不显示、不打印；`secret_expires` 写进配置（到期前会提醒）。
    每台机器各建一个 Secret，所以 Secret 的名字里带机器名，便于以后在后台识别、吊销。
    `secret_expires` 取实际发送的 UTC `endDateTime` 的日期。
-   **重复执行**：新 Secret 存进 vault 成功**之后**，删除应用上本机以前建的 Secret（`displayName` 恰为 `e5extend <机器名> <YYYY-MM-DD>`，别的机器和手工建的不动），
-   结果里列出被删的 key ID。存储失败则不删旧的，并吊销刚建的新 Secret；吊销也失败时，错误信息写明名为 X、key ID 为 Y 的 Secret 仍然有效、需要到 Entra 里手工删除（不含密钥内容）。
-   注意：同一台机器上用不同账号名指向同一个应用时，重新执行会删掉另一个账号的 Secret（它们的名字相同格式），那个账号要重新生成。
+   Secret 的名字是 `e5extend <机器名> <账号名> <YYYY-MM-DD>`，同一台机器上两个账号共用一个应用时互不影响。
+   **重复执行**：新 Secret 存进 vault 成功**之后**，只删除应用上名字恰好以本机和**本账号**为前缀的旧 Secret（`e5extend <机器名> <账号名> ` 加日期；别的账号、别的机器和手工建的不动），
+   结果里列出被删的 key ID。旧格式 `e5extend <机器名> <YYYY-MM-DD>`（不带账号）只有在本机恰好只有一个 client_secret 账号指向该应用、并且就是本账号时才删；
+   否则不动，在结果里列为“未删除（有歧义）”（`NotRemovedSecrets`）。
+   存储失败则不删旧的，并吊销刚建的新 Secret；吊销也失败时，错误信息写明名为 X、key ID 为 Y 的 Secret 仍然有效、需要到 Entra 里手工删除（不含密钥内容）。
    **写入前检查**：vault 里的 `secret/<账号>` 只在账号还不存在，或账号是 client_secret 且租户 ID、客户端 ID 都和被设置的应用相同时才会被写入；
    否则（例如密码账号、别的应用的账号）在创建 Secret 之前就报错，不留孤立的 Secret。`account add --auto` 在加账号失败时同样会吊销刚建的 Secret 并删除 vault 条目。
 7. 需要 `--username`（读取哪个用户的数据）时照常询问。

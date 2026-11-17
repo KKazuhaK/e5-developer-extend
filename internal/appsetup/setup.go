@@ -33,7 +33,15 @@ type Setup struct {
 	// Version and Hostname go into the app's notes and the client secret's name.
 	Version  string
 	Hostname string
-	Now      func() time.Time
+	// Account is the account the client secret is for; it is part of the
+	// secret's name so two accounts sharing one app keep apart. Empty means the
+	// older per-host name.
+	Account string
+	// LegacyOwner reports whether the older secrets named without an account
+	// ("e5extend <host> <date>") are safe to remove for app: only when exactly
+	// one account on this machine uses it, and it is Account. Nil means no.
+	LegacyOwner func(app AppRef) bool
+	Now         func() time.Time
 
 	// StoreSecret receives the client secret of KindApp. It is the only place
 	// the secret ever goes; if it fails the secret is revoked again.
@@ -481,7 +489,7 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 		}
 		text := "create a client secret named for this computer and store it in the vault (12 months)"
 		if app != nil {
-			if old := s.ownSecrets(app, ""); len(old) > 0 {
+			if old, _ := s.ownSecrets(app, ""); len(old) > 0 {
 				text += fmt.Sprintf("; then delete this computer's %d earlier secret(s) from the app", len(old))
 			}
 		}
@@ -574,18 +582,38 @@ func (s *Setup) host() string {
 
 var dateSuffix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 
-// ownSecrets returns the key IDs of the secrets this computer created earlier:
-// named exactly "e5extend <hostname> <date>". Nobody else's secret matches.
-func (s *Setup) ownSecrets(app *application, except string) []string {
-	prefix := "e5extend " + s.host() + " "
-	var out []string
+// secretPrefix is the start of the names of this account's secrets on this computer.
+func (s *Setup) secretPrefix() string {
+	if s.Account == "" {
+		return "e5extend " + s.host() + " "
+	}
+	return "e5extend " + s.host() + " " + s.Account + " "
+}
+
+// ownSecrets returns the key IDs of the secrets this account created earlier on
+// this computer: named exactly "e5extend <host> <account> <date>". Secrets in
+// the older format "e5extend <host> <date>" are returned in remove only when
+// LegacyOwner says they can only be this account's, otherwise in ambiguous.
+// Nobody else's secret matches either.
+func (s *Setup) ownSecrets(app *application, except string) (remove, ambiguous []string) {
+	legacy := "e5extend " + s.host() + " "
+	legacyOK := s.Account != "" && s.LegacyOwner != nil && s.LegacyOwner(app.ref())
 	for _, pc := range app.PasswordCredentials {
-		if pc.KeyID != "" && pc.KeyID != except && strings.HasPrefix(pc.DisplayName, prefix) &&
-			dateSuffix.MatchString(strings.TrimPrefix(pc.DisplayName, prefix)) {
-			out = append(out, pc.KeyID)
+		if pc.KeyID == "" || pc.KeyID == except {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(pc.DisplayName, s.secretPrefix()) && dateSuffix.MatchString(strings.TrimPrefix(pc.DisplayName, s.secretPrefix())):
+			remove = append(remove, pc.KeyID)
+		case s.Account != "" && strings.HasPrefix(pc.DisplayName, legacy) && dateSuffix.MatchString(strings.TrimPrefix(pc.DisplayName, legacy)):
+			if legacyOK {
+				remove = append(remove, pc.KeyID)
+			} else {
+				ambiguous = append(ambiguous, pc.KeyID)
+			}
 		}
 	}
-	return out
+	return remove, ambiguous
 }
 
 // ---- apply ----
@@ -913,7 +941,7 @@ func (s *Setup) RevokeSecret(ctx context.Context, objectID, keyID, name string) 
 
 func (s *Setup) createSecret(ctx context.Context, c *client, app *application, res *Result) error {
 	now := s.now()
-	name := fmt.Sprintf("e5extend %s %s", s.host(), now.Format("2006-01-02"))
+	name := s.secretPrefix() + now.Format("2006-01-02")
 	end := now.AddDate(0, 12, 0).UTC()
 	s.progress("creating a client secret %q...", name)
 	var out struct {
@@ -951,7 +979,9 @@ func (s *Setup) createSecret(ctx context.Context, c *client, app *application, r
 	res.SecretExpires = end.Format("2006-01-02")
 
 	// The new secret is safe in the vault: drop this computer's earlier ones.
-	for _, k := range s.ownSecrets(app, out.KeyID) {
+	remove, ambiguous := s.ownSecrets(app, out.KeyID)
+	res.NotRemovedSecrets = ambiguous
+	for _, k := range remove {
 		err := c.do(ctx, "remove an earlier client secret", http.MethodPost, "/applications/"+app.ID+"/removePassword",
 			map[string]any{"keyId": k}, nil)
 		if err != nil {
