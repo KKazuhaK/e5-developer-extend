@@ -186,3 +186,23 @@ func TestListSubscriptionsFollowsNextLink(t *testing.T) {
 		t.Errorf("forbidden: %+v %+v", subs, res)
 	}
 }
+
+func TestListSubscriptionsFailsInsteadOfReturningAPartialList(t *testing.T) {
+	var srv *httptest.Server
+	srv = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Every page points to another one.
+		_, _ = w.Write([]byte(`{"value":[{"id":"a","skuPartNumber":"X","status":"Enabled"}],"@odata.nextLink":"` + srv.URL + `/v1.0/directory/subscriptions?$skiptoken=n"}`))
+	}))
+	defer srv.Close()
+	subs, res := (&Client{Base: srv.URL + "/v1.0"}).ListSubscriptions(context.Background(), "T")
+	if res.Class == OK || subs != nil || res.Err == nil {
+		t.Errorf("page cap: %+v %+v", subs, res)
+	}
+	bad := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"value":[],"@odata.nextLink":"::not a url"}`))
+	}))
+	defer bad.Close()
+	if subs, res := (&Client{Base: bad.URL}).ListSubscriptions(context.Background(), "T"); res.Class == OK || subs != nil {
+		t.Errorf("bad link: %+v %+v", subs, res)
+	}
+}

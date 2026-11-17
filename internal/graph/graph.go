@@ -134,14 +134,20 @@ func (c *Client) ListSubscriptions(ctx context.Context, token string) ([]Subscri
 		if res.Class != OK {
 			return nil, res
 		}
-		if next == "" || page+1 >= maxSubscriptionPages {
+		if next == "" {
 			return subs, res
+		}
+		// A partial list would look like a complete one: fail instead.
+		u, err := url.Parse(next)
+		switch {
+		case page+1 >= maxSubscriptionPages:
+			res.Class, res.Err = ClientError, errors.New("the subscription list has too many pages")
+			return nil, res
+		case err != nil || !strings.HasPrefix(u.Path, "/"):
+			res.Class, res.Err = ClientError, errors.New("the subscription list has an unusable next page link")
+			return nil, res
 		}
 		// The link is absolute and carries its own query; keep it on this client's base.
-		u, err := url.Parse(next)
-		if err != nil || !strings.HasPrefix(u.Path, "/") {
-			return subs, res
-		}
 		path, query = "/"+strings.TrimPrefix(strings.TrimPrefix(u.Path, "/v1.0"), "/"), u.Query()
 	}
 }

@@ -303,7 +303,9 @@ func (s *AppSetupSession) repairPlan(ctx context.Context) (*appsetup.Plan, appse
 				"add the permissions to that app in the Entra admin center instead (nothing was changed)",
 				ErrRepairTarget, p.Existing.DisplayName, p.Existing.ClientID, s.repair.Name, want)
 		}
-		return p, appsetup.Choice{}, nil
+		// Adopt even when the app is tagged: if it vanishes before Apply looks
+		// again, setup then finds nothing to adopt and stops, never creating an app.
+		return p, appsetup.Choice{Adopt: want}, nil
 	default:
 		for _, c := range p.Candidates {
 			if strings.EqualFold(c.ClientID, want) {

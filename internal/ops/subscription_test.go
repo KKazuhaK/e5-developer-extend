@@ -200,7 +200,7 @@ func TestRefreshSubscriptionsSkipsTheCallWhenTheTokenLacksThePermission(t *testi
 		t.Fatalf("hits %d, %+v, %v", hits.Load(), res, err)
 	}
 	tv := res.Tenants[0]
-	if tv.FixAccount != "main" || tv.FixKind != "delegated" || !strings.Contains(tv.FixCommand, "e5extend app setup --tenant t.example --adopt "+testGUID) {
+	if tv.FixAccount != "main" || tv.FixKind != "delegated" || tv.FixCommand != "e5extend app setup --repair --account main" {
 		t.Errorf("fix advice: %+v", tv)
 	}
 }
@@ -236,7 +236,7 @@ func TestSubscriptionFixAdviceForAClientSecretAccount(t *testing.T) {
 		t.Fatal(err)
 	}
 	tv, _ := e.Subscriptions("")
-	if tv[0].FixKind != "app" || tv[0].FixCommand != "e5extend app setup --app-only --account app1 --no-new-secret" {
+	if tv[0].FixKind != "app" || tv[0].FixCommand != "e5extend app setup --repair --account app1" {
 		t.Errorf("fix advice: %+v", tv[0])
 	}
 }

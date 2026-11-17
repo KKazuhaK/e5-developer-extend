@@ -360,3 +360,43 @@ func TestSubscriptionEventsCarryTenantAndSubscriptionFields(t *testing.T) {
 		t.Errorf("custom template: %v %q", err, rd.Body)
 	}
 }
+
+func TestSubscriptionLocalDatesDoNotReannounceWhatWasAnnouncedByUTCDate(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skip("no tzdata")
+	}
+	r := newSubRig()
+	r.now = time.Date(2026, 11, 17, 10, 0, 0, 0, la)
+	r.sub.NextLifecycle = time.Date(2026, 11, 20, 0, 0, 0, 0, time.UTC) // the 19th in Los Angeles
+	r.sub.AnnouncedStatus = StatusEnabled
+	// An older version recorded the UTC date.
+	r.sub.Notified = map[string]store.Notice{SubscriptionExpiring: {At: r.now.Add(-time.Hour), Key: "7@2026-11-20"}}
+	if evs := r.eval(); len(evs) != 0 {
+		t.Fatalf("the same instant was announced again: %+v", evs)
+	}
+	// A real renewal still starts over.
+	r.sub.NextLifecycle = time.Date(2026, 12, 20, 0, 0, 0, 0, time.UTC)
+	r.now = time.Date(2026, 12, 15, 10, 0, 0, 0, la)
+	if evs := r.eval(); kinds(evs) != "subscription_expiring" || !strings.Contains(evs[0].Message, "2026-12-19") {
+		t.Fatalf("renewed: %+v", evs)
+	}
+}
+
+func TestAnUnresolvedAccountTenantIsNotShown(t *testing.T) {
+	r := newSubRig()
+	r.acct.Tenant = "organizations"
+	r.st.Tenants = map[string]*store.TenantState{"account:main": r.st.Tenants[subTenant]}
+	r.at("2026-11-19")
+	evs := r.eval()
+	if len(evs) != 1 || evs[0].Tenant != "account:main" || evs[0].PublicTenant() != "" || !strings.Contains(evs[0].Message, "of account main") {
+		t.Fatalf("events = %+v", evs)
+	}
+	if d := NewData(evs[0], "en", "box", time.UTC); d.Tenant != "" || strings.Contains(d.Message, "account:main") {
+		t.Errorf("data = %+v", d)
+	}
+	b, _ := json.Marshal(evs[0])
+	if strings.Contains(string(b), "account:main") {
+		t.Errorf("payload: %s", b)
+	}
+}

@@ -590,3 +590,36 @@ func TestSubscriptionForcedCheckWithoutAUsableAccount(t *testing.T) {
 		t.Error("the engine did not say that nobody could be asked")
 	}
 }
+
+func TestSubscriptionAnOrganizationsAccountOnlyResolvesItsOwnKey(t *testing.T) {
+	const t1, t2 = "11111111-aaaa-4aaa-8aaa-111111111111", "22222222-bbbb-4bbb-8bbb-222222222222"
+	f := newSubFixture(t, tenantAcct("x", "organizations"), tenantAcct("y", "t1.example"))
+	f.auths["x"].tok.TenantID, f.auths["y"].tok.TenantID = t2, t1
+	f.start()
+	// An earlier run already knew t1.example is tenant t1.
+	f.e.mu.Lock()
+	f.e.state.TenantAliases = map[string]string{"t1.example": t1}
+	f.e.mu.Unlock()
+	f.round("x")
+	f.round("y")
+	f.e.mu.Lock()
+	aliases, tenants := f.e.state.TenantAliases, len(f.e.state.Tenants)
+	f.e.mu.Unlock()
+	if aliases["t1.example"] != t1 || aliases["account:x"] != t2 || tenants != 2 || f.hits() != 2 {
+		t.Errorf("aliases %v tenants %d hits %d", aliases, tenants, f.hits())
+	}
+	// Even when x's token names the tenant y already has, y's alias stays as it is.
+	g := newSubFixture(t, tenantAcct("x", "organizations"), tenantAcct("y", "t1.example"))
+	g.auths["x"].tok.TenantID, g.auths["y"].tok.TenantID = t2, t1
+	g.start()
+	g.e.mu.Lock()
+	g.e.state.TenantAliases = map[string]string{"t1.example": t2} // stale or wrong: not for x to correct
+	g.e.mu.Unlock()
+	g.round("x")
+	g.round("y")
+	g.e.mu.Lock()
+	defer g.e.mu.Unlock()
+	if g.e.state.TenantAliases["t1.example"] != t2 {
+		t.Errorf("an existing alias was re-pointed: %v", g.e.state.TenantAliases)
+	}
+}

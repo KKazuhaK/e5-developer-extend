@@ -86,8 +86,7 @@ e5extend subscription --cached   # 不联网，只看引擎上次保存的结果
 没有这个权限时卡片和命令行会说明原因，不算错误也不告警（之后每小时再看一次）。补齐权限只是给账号**正在用的那个**应用注册加上缺的权限，不新建账号、不新建客户端密钥：
 
 - 桌面版：卡片上的“补齐权限”，用租户管理员登录一次，只补缺的权限并授予同意；找不到该账号的应用注册、或租户里的应用与账号用的不是同一个时会拒绝，什么也不改；
-- 命令行（委托账号）：`e5extend app setup --tenant <租户>`（手工建的应用再加 `--adopt <客户端 ID>`）；
-- 命令行（Client Secret 账号）：`e5extend app setup --app-only --account <账号> --no-new-secret`，只补应用权限和角色分配，不生成也不删除 Secret；
+- 命令行（任何账号）：`e5extend app setup --repair --account <账号>`，租户和应用都取自这个账号，只补缺的权限（Client Secret 账号是应用权限和角色分配），不新建账号，不生成也不删除 Secret；`--no-new-secret`（加 `--app-only`）是 Client Secret 账号的旧写法；`--repair` 不能和 `--tenant`、`--adopt`、`--new`、`--no-rename` 一起用；
 - 或在 Entra 的“API 权限”里手动添加后授予管理员同意。
 
 委托账号登录的用户还需要能读目录，开发者租户的管理员满足。补齐后点“立即刷新”（或运行 `e5extend subscription`）会向正在运行的引擎要一个新令牌再读。

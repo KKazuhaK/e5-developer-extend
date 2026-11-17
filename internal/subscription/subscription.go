@@ -135,7 +135,8 @@ func Watched(ts *store.TenantState, c config.Subscription) []string {
 
 // permissionScopes are the permissions (delegated scopes or application roles)
 // that let GET /directory/subscriptions through, the least privileged first.
-var permissionScopes = []string{"Organization.Read.All", "Organization.ReadWrite.All", "Directory.Read.All", "Directory.ReadWrite.All", "Directory.AccessAsUser.All"}
+var permissionScopes = []string{"Organization.Read.All", "Organization.ReadWrite.All", "Directory.Read.All", "Directory.ReadWrite.All", "Directory.AccessAsUser.All",
+	"LicenseAssignment.Read.All", "LicenseAssignment.ReadWrite.All"}
 
 // MissingPermission reports whether a token's permissions are known and none of
 // them can read the subscriptions. A token with no permission claims is not
@@ -284,9 +285,7 @@ func Merge(st *store.State, from, to string) {
 		if dst.Subscriptions == nil {
 			dst.Subscriptions = map[string]*store.SubscriptionState{}
 		}
-		if have := dst.Subscriptions[id]; have == nil || s.CheckedAt.After(have.CheckedAt) {
-			dst.Subscriptions[id] = s
-		}
+		dst.Subscriptions[id] = mergeSubscription(dst.Subscriptions[id], s)
 	}
 	for k, n := range src.Notified {
 		if dst.Notified == nil {
@@ -304,4 +303,67 @@ func Merge(st *store.State, from, to string) {
 			dst.LastSent[k] = t
 		}
 	}
+}
+
+// mergeSubscription unites two copies of one subscription: the newer reading
+// wins, the renewal histories are combined (the same renewal once, the newest
+// MaxRenewals kept), and the alert markers keep the later of the two so nothing
+// already announced is announced again.
+func mergeSubscription(a, b *store.SubscriptionState) *store.SubscriptionState {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+	base, other := a, b
+	if b.CheckedAt.After(a.CheckedAt) {
+		base, other = b, a
+	}
+	out := *base
+	out.History = append([]store.Renewal(nil), base.History...)
+	for _, r := range other.History {
+		if !slices.ContainsFunc(out.History, func(x store.Renewal) bool { return x.From.Equal(r.From) && x.To.Equal(r.To) }) {
+			out.History = append(out.History, r)
+		}
+	}
+	slices.SortStableFunc(out.History, func(x, y store.Renewal) int { return x.SeenAt.Compare(y.SeenAt) })
+	if over := len(out.History) - store.MaxRenewals; over > 0 {
+		out.History = out.History[over:]
+	}
+	if other.RenewalNotified.After(out.RenewalNotified) {
+		out.RenewalNotified = other.RenewalNotified
+	}
+	if out.AnnouncedStatus == "" {
+		out.AnnouncedStatus = other.AnnouncedStatus
+	}
+	out.Notified = mergeNotices(base.Notified, other.Notified)
+	out.LastSent = map[string]time.Time{}
+	for _, m := range []map[string]time.Time{base.LastSent, other.LastSent} {
+		for k, t := range m {
+			if t.After(out.LastSent[k]) {
+				out.LastSent[k] = t
+			}
+		}
+	}
+	if len(out.LastSent) == 0 {
+		out.LastSent = nil
+	}
+	return &out
+}
+
+// mergeNotices keeps, per kind, the later notice.
+func mergeNotices(a, b map[string]store.Notice) map[string]store.Notice {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	out := map[string]store.Notice{}
+	for _, m := range []map[string]store.Notice{a, b} {
+		for k, n := range m {
+			if have, ok := out[k]; !ok || n.At.After(have.At) {
+				out[k] = n
+			}
+		}
+	}
+	return out
 }

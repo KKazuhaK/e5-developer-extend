@@ -153,14 +153,56 @@ func TestViewShowsLocalDatesAndFixCommands(t *testing.T) {
 	if s.Expires != "2026-11-19" || s.DaysLeft == nil || *s.DaysLeft != 2 || s.Renewals[0].From != "2026-08-19" {
 		t.Errorf("dates: %+v", s)
 	}
-	if v.FixAccount != "main" || v.FixKind != "delegated" || v.FixCommand != "e5extend app setup --tenant contoso.onmicrosoft.com --adopt cid" {
+	if v.FixAccount != "main" || v.FixKind != "delegated" || v.FixCommand != "e5extend app setup --repair --account main" {
 		t.Errorf("fix: %+v", v)
 	}
-	_, _, cmd := FixFor(config.Account{Name: "app1", Auth: config.AuthClientSecret})
-	if cmd != "e5extend app setup --app-only --account app1 --no-new-secret" {
-		t.Errorf("app fix: %s", cmd)
+	if _, kind, cmd := FixFor(config.Account{Name: "app1", Auth: config.AuthClientSecret}); kind != "app" || cmd != "e5extend app setup --repair --account app1" {
+		t.Errorf("app fix: %s %s", kind, cmd)
 	}
-	if _, _, cmd := FixFor(config.Account{Name: "x", Auth: config.AuthBrowser, Tenant: "organizations", ClientID: "c"}); cmd != "e5extend app setup --adopt c" {
-		t.Errorf("unnamed tenant fix: %s", cmd)
+	// The account named is one that can sign in, not just the first.
+	cfg.Accounts = []config.Account{{Name: "paused", Auth: config.AuthDeviceCode, Tenant: "contoso.onmicrosoft.com", Paused: true}, cfg.Accounts[0]}
+	if v := Build(cfg, st, now)[0]; v.FixAccount != "main" {
+		t.Errorf("fix account = %s", v.FixAccount)
+	}
+}
+
+func TestMergeCombinesHistoryAndKeepsTheLaterMarkers(t *testing.T) {
+	d := func(day int) time.Time { return time.Date(2027, 1, day, 12, 0, 0, 0, time.UTC) }
+	st := store.NewState()
+	st.Tenants = map[string]*store.TenantState{
+		"a": {Subscriptions: map[string]*store.SubscriptionState{"s": {
+			SKU: "X", CheckedAt: at.Add(time.Hour), AnnouncedStatus: "Enabled", RenewalNotified: at,
+			History:  []store.Renewal{{From: d(1), To: d(2), SeenAt: at}, {From: d(2), To: d(3), SeenAt: at.Add(time.Hour)}},
+			Notified: map[string]store.Notice{"subscription_expiring": {At: at, Key: "30@x"}}}}},
+		"b": {Subscriptions: map[string]*store.SubscriptionState{"s": {
+			SKU: "X", CheckedAt: at, AnnouncedStatus: "Warning", RenewalNotified: at.Add(2 * time.Hour),
+			History:  []store.Renewal{{From: d(2), To: d(3), SeenAt: at.Add(time.Hour)}, {From: d(0 + 3), To: d(4), SeenAt: at.Add(2 * time.Hour)}},
+			Notified: map[string]store.Notice{"subscription_expiring": {At: at.Add(time.Minute), Key: "7@x"}, "subscription_status": {At: at}}}}},
+	}
+	Merge(st, "b", "a")
+	s := st.Tenants["a"].Subscriptions["s"]
+	if len(s.History) != 3 || s.History[0].To != d(2) || s.History[2].To != d(4) {
+		t.Errorf("history = %+v", s.History)
+	}
+	if !s.RenewalNotified.Equal(at.Add(2*time.Hour)) || s.AnnouncedStatus != "Enabled" {
+		t.Errorf("markers: %v %q", s.RenewalNotified, s.AnnouncedStatus)
+	}
+	if s.Notified["subscription_expiring"].Key != "7@x" || s.Notified["subscription_status"].At.IsZero() {
+		t.Errorf("notices = %+v", s.Notified)
+	}
+	// Twenty at most, the newest.
+	var many []store.Renewal
+	for i := 0; i < 30; i++ {
+		many = append(many, store.Renewal{From: d(1).AddDate(0, 0, i), To: d(1).AddDate(0, 0, i+1), SeenAt: at.Add(time.Duration(i) * time.Hour)})
+	}
+	x := mergeSubscription(&store.SubscriptionState{History: many[:15]}, &store.SubscriptionState{History: many[10:]})
+	if len(x.History) != store.MaxRenewals || !x.History[len(x.History)-1].SeenAt.Equal(many[29].SeenAt) {
+		t.Errorf("history has %d, last %v", len(x.History), x.History[len(x.History)-1].SeenAt)
+	}
+}
+
+func TestMissingPermissionAcceptsLicenseAssignment(t *testing.T) {
+	if MissingPermission([]string{"LicenseAssignment.Read.All"}) || MissingPermission([]string{"LicenseAssignment.ReadWrite.All"}) {
+		t.Error("LicenseAssignment scopes are accepted")
 	}
 }

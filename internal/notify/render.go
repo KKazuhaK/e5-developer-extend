@@ -156,15 +156,15 @@ func NewData(ev Event, lang, host string, loc *time.Location) Data {
 	}
 	d := Data{
 		App: AppName, Host: host, Event: ev.Event, EventLabel: EventLabel(ev.Event, lang),
-		Level: ev.Level(), LevelLabel: levelLabel(ev.Level(), lang), Account: ev.Account, Tenant: ev.Tenant,
+		Level: ev.Level(), LevelLabel: levelLabel(ev.Level(), lang), Account: ev.Account, Tenant: ev.PublicTenant(),
 		Message: ev.Message, Time: t.In(loc).Format("2006-01-02 15:04 MST"), Hint: Hint(ev.Event, ev.Account, lang),
 		Failures: ev.Failures, Rounds: ev.Rounds, Origin: ev.Origin,
 	}
 	if ev.Subscription != "" {
 		d.SKU, d.SubStatus, d.EndDate = ev.SKU, ev.SubStatus, ev.EndDate
 		// The message names the tenant the way the configuration does; add its ID when that is another string.
-		if ev.Tenant != "" && !strings.Contains(ev.Message, ev.Tenant) {
-			d.Message += " (tenant " + ev.Tenant + ")"
+		if t := ev.PublicTenant(); t != "" && !strings.Contains(ev.Message, t) {
+			d.Message += " (tenant " + t + ")"
 		}
 	}
 	if ev.IsTest {

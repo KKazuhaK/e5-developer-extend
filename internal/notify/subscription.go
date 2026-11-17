@@ -29,6 +29,9 @@ func (ev *evaluator) evalSubscriptions() {
 	in := ev.in
 	for _, g := range subscription.Group(&config.Config{Accounts: in.Accounts}, in.State) {
 		key, where := g.Key, "of tenant "+g.Label
+		if onlyUnnamed(g.Accounts) {
+			where = "of account " + g.Label // no tenant is known by name
+		}
 		manual := ""
 		for _, a := range g.Accounts {
 			if a.SubscriptionExpires != "" && manual == "" {
@@ -63,7 +66,7 @@ func (ev *evaluator) evalSubscriptions() {
 		}
 		s := scope{ev: ev, tenant: key, subscription: manualID, notified: &ts.Notified, sent: &ts.LastSent, end: manual}
 		if !haveReal && manual != "" {
-			s.expiry(SubscriptionExpiring, in.Now, manual, func(days int) string {
+			s.expiry(SubscriptionExpiring, in.Now, manual, "", func(days int) string {
 				return expiryMessage("E5 subscription "+where, "", days, manual)
 			})
 			s.retry()
@@ -120,7 +123,7 @@ func (ev *evaluator) evalSubscription(key, where, id string, sub *store.Subscrip
 	if sub.Status != statusDeleted && !sub.NextLifecycle.IsZero() {
 		date := ymd(sub.NextLifecycle)
 		status := sub.Status
-		s.expiry(SubscriptionExpiring, now, date, func(days int) string {
+		s.expiry(SubscriptionExpiring, now, date, sub.NextLifecycle.UTC().Format("2006-01-02"), func(days int) string {
 			return expiryMessage(subject, status, days, date)
 		})
 	} else {
@@ -130,8 +133,10 @@ func (ev *evaluator) evalSubscription(key, where, id string, sub *store.Subscrip
 }
 
 // expiry announces an end date at the 30, 7 and 1 day thresholds, once each;
-// a changed date starts over (the subscription was renewed).
-func (s scope) expiry(kind string, now time.Time, date string, msg func(days int) string) {
+// a changed date starts over (the subscription was renewed). date is the end
+// date in the local zone; sameInstant is the same moment as a UTC date, which
+// older versions recorded: it is the same date, not a renewal.
+func (s scope) expiry(kind string, now time.Time, date, sameInstant string, msg func(days int) string) {
 	days, ok := daysLeft(now, date)
 	if !ok {
 		return
@@ -147,7 +152,7 @@ func (s scope) expiry(kind string, now time.Time, date string, msg func(days int
 	switch {
 	case level < 0:
 		s.del(kind)
-	case had && prevDate != date:
+	case had && prevDate != date && (sameInstant == "" || prevDate != sameInstant):
 		s.del(kind)
 		_, _ = s.announce(kind, key, msg(days))
 	case !had || level < prevLevel:
@@ -171,4 +176,14 @@ func expiryMessage(subject, status string, days int, date string) string {
 		return fmt.Sprintf("%s %s tomorrow (%s)%s", subject, verb, date, act)
 	}
 	return fmt.Sprintf("%s %s in %d days (%s)%s", subject, verb, days, date, act)
+}
+
+// onlyUnnamed reports whether none of the accounts names its tenant.
+func onlyUnnamed(accts []config.Account) bool {
+	for _, a := range accts {
+		if !strings.HasPrefix(a.TenantKey(), "account:") {
+			return false
+		}
+	}
+	return true
 }

@@ -138,7 +138,7 @@ function Tenant({ tv, onFix, onChanged }: { tv: TenantSubscriptions; onFix: (acc
         <h3 className="min-w-0 truncate text-[14px] font-semibold" title={tv.tenantId || tv.label}>{tv.label}</h3>
         <span className="text-xs text-muted-foreground">
           {tv.checkedAt ? t("sub.checked", { when: formatRelative(tv.checkedAt, lang) }) : t("sub.neverChecked")}
-          {tv.accounts.length > 0 && <> · {t("sub.accounts", { names: tv.accounts.join("、") })}</>}
+          {tv.accounts.length > 0 && <> · {t("sub.accounts", { names: tv.accounts.join(lang === "zh" ? "、" : ", ") })}</>}
         </span>
       </div>
 
@@ -225,7 +225,7 @@ function RepairPanel({ account, onClose, onRepaired }: { account: string; onClos
 
 /** The "E5 subscription" card of the overview: one block per tenant. */
 export function SubscriptionCard({ accounts }: { accounts: AccountSummary[] }) {
-  const { t } = useI18n();
+  const { t, lang } = useI18n();
   const toast = useToast();
   const [tenants, setTenants] = useState<TenantSubscriptions[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -264,7 +264,7 @@ export function SubscriptionCard({ accounts }: { accounts: AccountSummary[] }) {
       <div className="mb-3 flex items-start justify-between gap-3">
         <div className="min-w-0">
           <h2 id="sub-title" className="text-[15px] font-semibold">{t("sub.title")}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.desc", { skus: (tenants?.[0]?.watchedSkus ?? ["DEVELOPERPACK"]).join("、") })}</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">{t("sub.desc", { skus: (tenants?.[0]?.watchedSkus ?? ["DEVELOPERPACK"]).join(lang === "zh" ? "、" : ", ") })}</p>
         </div>
         <Button size="sm" variant="outline" onClick={() => void refresh()} disabled={refreshing || !tenants?.length}>
           {refreshing ? <Spinner /> : <RefreshCw />} {t("sub.refresh")}

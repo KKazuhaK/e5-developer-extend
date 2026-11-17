@@ -140,8 +140,8 @@ function mockTenants(): TenantSubscriptions[] {
       fixAccount: names[0],
       fixKind: (accounts.find((a) => a.input.name === names[0])?.input.auth === "client_secret" ? "app" : "delegated") as "app" | "delegated",
       fixCommand: accounts.find((a) => a.input.name === names[0])?.input.auth === "client_secret"
-        ? `e5extend app setup --app-only --account ${names[0]} --no-new-secret`
-        : `e5extend app setup --tenant ${tenant} --adopt ${accounts.find((a) => a.input.name === names[0])?.input.clientId ?? ""}`,
+        ? `e5extend app setup --repair --account ${names[0]}`
+        : `e5extend app setup --repair --account ${names[0]}`,
       watchedSkus: ["DEVELOPERPACK"],
     };
     let t: TenantSubscriptions;

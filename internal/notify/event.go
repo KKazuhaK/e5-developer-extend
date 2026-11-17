@@ -157,7 +157,7 @@ func (e Event) payload() payload {
 		Level: e.Level(), Origin: e.Origin, Test: e.IsTest,
 	}
 	if e.Subscription != "" {
-		p.Tenant, p.Subscription, p.SKU, p.SubStatus, p.EndDate = e.Tenant, e.Subscription, e.SKU, e.SubStatus, e.EndDate
+		p.Tenant, p.Subscription, p.SKU, p.SubStatus, p.EndDate = e.PublicTenant(), e.Subscription, e.SKU, e.SubStatus, e.EndDate
 	}
 	for _, it := range e.Items {
 		p.Items = append(p.Items, it.payload())
@@ -207,4 +207,13 @@ func IsChannelSecretKey(cfg *config.Config, key string) bool {
 		}
 	}
 	return false
+}
+
+// PublicTenant is the tenant to show: empty while it is only an account that
+// names no tenant (the state key "account:<name>"), a domain or GUID otherwise.
+func (e Event) PublicTenant() string {
+	if strings.HasPrefix(e.Tenant, "account:") {
+		return ""
+	}
+	return e.Tenant
 }

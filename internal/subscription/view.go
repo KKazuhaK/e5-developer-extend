@@ -116,7 +116,16 @@ func Build(cfg *config.Config, st *store.State, now time.Time) []TenantView {
 				v.ManualExpires = a.SubscriptionExpires
 			}
 		}
-		v.FixAccount, v.FixKind, v.FixCommand = FixFor(g.Accounts[0])
+		// The first account that can sign in now (it is the one the check asks
+		// first), else the first of the tenant.
+		fix := g.Accounts[0]
+		for _, a := range g.Accounts {
+			if Usable(st, a, true) {
+				fix = a
+				break
+			}
+		}
+		v.FixAccount, v.FixKind, v.FixCommand = FixFor(fix)
 		v.WatchedSKUs = cfg.Subscription.SKUPrefixes()
 		out = append(out, v)
 	}
@@ -177,16 +186,12 @@ func Build(cfg *config.Config, st *store.State, now time.Time) []TenantView {
 }
 
 // FixFor says how to give an account's app registration the permission that
-// reads the subscriptions, without adding an account or a client secret.
+// reads the subscriptions, without adding an account or a client secret. The
+// command is the same for both kinds of account.
 func FixFor(a config.Account) (account, kind, command string) {
+	kind = "delegated"
 	if a.Auth == config.AuthClientSecret {
-		return a.Name, "app", "e5extend app setup --app-only --account " + a.Name + " --no-new-secret"
+		kind = "app"
 	}
-	cmd := "e5extend app setup"
-	switch strings.ToLower(a.Tenant) {
-	case "organizations", "common", "consumers", "":
-	default:
-		cmd += " --tenant " + a.Tenant
-	}
-	return a.Name, "delegated", cmd + " --adopt " + a.ClientID
+	return a.Name, kind, "e5extend app setup --repair --account " + a.Name
 }

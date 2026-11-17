@@ -538,3 +538,30 @@ func TestRepairDelegatedAdoptsTheAccountsOwnApp(t *testing.T) {
 		t.Error("a repair created an app")
 	}
 }
+
+func TestRepairNeverCreatesAnAppWhenTheTaggedOneVanishes(t *testing.T) {
+	e := newSetupEnv(t)
+	e.testT = t
+	e.repairBootstrap("tid-123")
+	ctx := context.Background()
+	e.g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "appId": testGUID, "tags": []string{"e5extend", "e5extend:app"}})
+	if err := e.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{Repair: true, Account: "app1"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	_, choice, err := s.repairPlan(ctx)
+	if err != nil || choice.Adopt != testGUID || choice.CreateNew {
+		t.Fatalf("choice %+v %v", choice, err)
+	}
+	e.g.Do(func() { e.g.Apps = nil }) // deleted between the plan and the apply
+	if _, err := s.setup.Apply(ctx, choice); err == nil {
+		t.Fatal("setup went on without the app")
+	}
+	if e.g.Count("POST /v1.0/applications") != 0 || len(e.g.Apps) != 0 {
+		t.Errorf("an app was created: %v", e.g.Writes())
+	}
+}

@@ -126,8 +126,13 @@ func (e *Engine) checkTenant(ctx context.Context, key string, accts []config.Acc
 				if e.state == nil {
 					return
 				}
-				if tid != key {
-					subscription.Merge(e.state, key, tid)
+				// Only this account's own tenant string is resolved: an account
+				// that names no tenant (organizations, common) says nothing
+				// about another account's, and an alias that exists is not re-pointed.
+				switch own, cur := acct.TenantKey(), subscription.KeyOf(e.state, acct); {
+				case cur == tid || cur != own:
+				default:
+					subscription.Merge(e.state, own, tid)
 					key = tid
 					e.saveLocked()
 				}

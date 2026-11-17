@@ -419,3 +419,33 @@ func TestAppSetupNoNewSecretRepairsTheAccountsOwnApp(t *testing.T) {
 		t.Errorf("output:\n%s", out)
 	}
 }
+
+func TestAppSetupRepairWorksForBothKindsAndRejectsCreateFlags(t *testing.T) {
+	e, g, _ := setupEnv(t)
+	t.Setenv(vault.EnvMasterKey, vault.EncodeKey(make([]byte, 32)))
+	g.AddApp(map[string]any{"displayName": "E5 Developer Extend", "appId": testGUID, "tags": []string{"e5extend", "e5extend:delegated"}})
+	e.mustRun("", "account", "add", "dev", "--auth", "device_code", "--tenant", "tid-123", "--client-id", testGUID)
+	for _, bad := range [][]string{
+		{"app", "setup", "--repair", "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--tenant", "x", "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--adopt", testGUID, "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--new", "--yes"},
+		{"app", "setup", "--repair", "--account", "dev", "--no-rename", "--yes"},
+		{"app", "setup", "--repair", "--app-only", "--account", "dev", "--yes"},
+		{"app", "setup", "--no-new-secret", "--account", "dev", "--yes"},
+	} {
+		if _, _, err := e.run("", bad...); err == nil {
+			t.Errorf("%v must be refused", bad)
+		}
+	}
+	if len(g.Writes()) != 0 {
+		t.Fatalf("a refused command wrote: %v", g.Writes())
+	}
+	out, errOut, err := e.run("", "app", "setup", "--repair", "--account", "dev", "--yes")
+	if err != nil {
+		t.Fatalf("%v\n%s\n%s", err, out, errOut)
+	}
+	if !strings.Contains(out, `account "dev"`) || len(g.Apps) != 1 {
+		t.Errorf("out:\n%s (apps %d)", out, len(g.Apps))
+	}
+}
