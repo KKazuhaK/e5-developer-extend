@@ -100,6 +100,32 @@ WantedBy=default.target
 
 安装后立即执行一次 `schtasks /Run /TN e5extend`。查询状态用 `schtasks /Query /TN e5extend /XML`，再结合引擎的心跳判断是否在运行。
 
+#### 1.4.1 `--headless`：无人登录也运行
+
+默认任务是 `InteractiveToken`，用户注销后停止，开机无人登录时不会启动（Windows Server / Server Core 的常态）。Linux 用 `--key-file --enable-linger` 解决同一个问题；Windows 对应 `service install --headless`（其他平台报错，Linux 上的消息指向 `--key-file`/`--enable-linger`）。
+
+**任务定义**：`Principal/LogonType` 改成 `S4U`（“不论用户是否登录都运行”，不保存密码），仍是当前用户、`LeastPrivilege`；`Triggers` 在原有的 `LogonTrigger`、`TimeTrigger`（`PT5M`）之外加 `BootTrigger`（`Delay` 为 `PT30S`）。`Settings`（失败重启 1 分钟 999 次、不限时、电池、`IgnoreNew`、`StartWhenAvailable`）不变。`Actions` 的参数多一个 `--dpapi-key-file <路径>`。非 headless 的 XML 与以前逐字节相同（golden 测试保证）。
+
+**要求（调研结论）**：
+- S4U 需要账户有 `SeBatchLogonRight`（作为批处理作业登录）；Administrators 默认有。被“拒绝作为批处理作业登录”挡住时注册/启动失败，安装失败的消息会提到这项权利。
+- 注册带开机触发器或 S4U 的任务通常需要管理员权限。安装失败时：错误含 “denied”（英文消息）或 `Env.Elevated()` 报告不是提升的进程，就在 `Result.Manual` 里给出完整命令（用 `e5extend.exe`，不是没有控制台的 `e5extend-bg.exe`；自定义目录时带 `--config-dir`/`--data-dir`），并强调要用同一个用户。其他错误不猜测，只在含 1385 / logon failure / logon type / batch job 时追加权利提示（schtasks 的消息是本地化的，不能依赖更多文字）。
+- S4U 令牌没有网络凭据：访问不了需要用户 Windows 凭据的网络资源；出站 HTTPS（只调用 Microsoft Graph 和通知渠道）不受影响。安装成功时在结果里写明。
+- S4U 会话没有口令，系统不会为它解开用户的 DPAPI 主密钥，用户的凭据管理器也读不到。所以不能依赖钥匙串。
+
+**主密钥文件（`internal/vault/keyfile*.go`）**：
+- 位置 `<ConfigDir>\master.key.dpapi`。内容：一行头 `E5EXTEND-DPAPI-KEY v1 machine`，下一行是 DPAPI 密文的 base64。密文由 `CryptProtectData` 以 `CRYPTPROTECT_LOCAL_MACHINE | CRYPTPROTECT_UI_FORBIDDEN` 生成，附带一个固定的 entropy 字符串。
+- **为什么是本机范围**：用户范围的 DPAPI 在 S4U 会话里解不开（没有密码就没有用户主密钥）。代价是本机任何账户的进程都能解密这份密文，所以不能把它当成加密边界；entropy 也只是防止通用工具照单全收，不是秘密。
+- **ACL 才是保护**：写文件前先在空文件上设置 ACL（`D:P(A;;FA;;;SY)(A;;FA;;;BA)(A;;FA;;;<当前用户 SID>)`，`P` = 不继承），再写内容，最后原子改名（改名保留文件的 ACL）；所以没有“先写入再收紧”的窗口。当前用户是明确授予的 SID，因为在 UAC 下低权限令牌里的 Administrators 只是“仅拒绝”，只靠 BA 会把任务自己挡在外面。
+- **加载**：`fromEnvOrCredential` 在 `E5EXTEND_MASTER_KEY`、`E5EXTEND_MASTER_KEY_FILE` 之后读 `E5EXTEND_MASTER_KEY_DPAPI_FILE`（来源名 `DPAPI key file`），优先于钥匙串。全局隐藏参数 `--dpapi-key-file` 只是设置这个环境变量（和 `--config-dir` 一样，任务动作不能设环境变量）。错误信息里不带路径和密钥。
+- **平台隔离**：`keyFileOS` 接口（`protect`/`unprotect`/`create`/`readACL`）在 Windows 上用 `golang.org/x/sys/windows`，其他平台是“不支持”的桩；单元测试在 Linux 上用假实现覆盖格式、原子写、审计和环境变量来源，`keyfile_windows_test.go` 在 Windows CI 上测真实的 DPAPI 和 ACL。
+- **审计**（`vault.AuditDPAPIKeyFile`）：文件不存在 / 读不了或解不开 / ACL 里除了当前用户、SYSTEM、Administrators 以外还有允许项（没有 DACL 视为 Everyone）。拒绝项不算。
+
+**状态与 doctor**：`Status` 增加 `Headless`（任务 XML 的 `LogonType` 是 S4U）和从 `--dpapi-key-file` 参数解析出的 `KeyFile`、`KeyFileMissing`、`KeyFileErr`（不含路径）、`KeyFileBroad`。`service status` 多一行 `headless:`，key 文件缺失、读不了或 ACL 过宽时给出提示。`doctor` 在 Windows 上对 headless 任务多一项 `headless`：文件缺失或读不了 → fail，ACL 过宽 → warn，否则 ok；消息有代码（`headless.*`、`fix.headlessInstall`），桌面版有中英文文本。`Running` 仍是“未知”，设置页和健康页用 `lib/service.ts` 的引擎心跳判断，S4U 任务与普通任务走同一条路径。
+
+**卸载**：先 `schtasks /Query /TN e5extend /XML` 读任务定义；只有登录类型是 S4U 且参数里带 `--dpapi-key-file` 时才删这个文件，而且只删文件名正好是 `master.key.dpapi` 的（不会按任务里写的任意路径删文件），并说明主密钥本身没有动。安装失败时，本次新建的密钥文件会被删掉，不留下一份没有任务使用的密钥副本。
+
+测试：任务 XML 的 golden（`task_headless*.golden`）、`FakeRunner` 下的安装/卸载/状态/拒绝访问、vault 的密钥文件来源（假 DPAPI）、doctor 的 headless 项；Windows 专用测试在 CI 的 windows-latest 上跑。`scripts/service-e2e-headless.sh`（`service-e2e.yml` 的 Windows 步骤）装 headless 任务，检查 `LogonType`、触发器、ACL、doctor 和 `e5extend-bg.exe` 是否启动，再卸载。
+
 ### 1.5 Docker
 
 - 仓库根目录放 `Dockerfile`：多阶段构建，最终镜像基于 `gcr.io/distroless/static`，以非 root 用户运行。
@@ -112,7 +138,7 @@ WantedBy=default.target
 ### 1.6 CLI
 
 ```
-e5extend service install [--key-file] [--enable-linger]
+e5extend service install [--key-file] [--enable-linger] [--headless]
 e5extend service uninstall
 e5extend service status
 ```
@@ -128,6 +154,7 @@ e5extend service status
 | engine | 引擎是否在运行（锁和心跳）；心跳在 2 分钟内 | 没运行 → fail；心跳过期 → warn |
 | service | 后台服务是否已安装并启用（`service.Status`） | 没安装 → warn（也可能是 GUI 在负责运行） |
 | linger | 仅 Linux：已安装用户服务但没开 linger | warn |
+| headless | 仅 Windows 且任务是 `--headless` 装的：主密钥文件 `master.key.dpapi` 存在、能解密、ACL 不比“用户 + SYSTEM + Administrators”更宽 | 缺失或读不了 → fail；ACL 过宽 → warn |
 | account.<n>.token | 静默取令牌（`--offline` 时跳过） | 需要登录、凭据错误 → fail；网络问题 → warn |
 | account.<n>.scopes | 令牌里的权限能用上几个 API | 0 个 → fail；少于 5 个 → warn |
 | account.<n>.activity | `last_success` 的时间 | 超过 72 小时 → warn；超过 7 天 → fail；从来没成功过 → warn |
