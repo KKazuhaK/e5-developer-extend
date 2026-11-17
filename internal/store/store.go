@@ -39,6 +39,18 @@ type Totals struct {
 	Failed int `json:"failed"`
 }
 
+// APIStat counts the calls of one API for one account. Only the engine writes it.
+type APIStat struct {
+	OK         int       `json:"ok"`
+	Failed     int       `json:"failed"`
+	LastClass  string    `json:"last_class,omitempty"` // graph.Class of the last call
+	LastStatus int       `json:"last_status,omitempty"`
+	LastAt     time.Time `json:"last_at,omitzero"`
+}
+
+// Total is the number of counted calls.
+func (a APIStat) Total() int { return a.OK + a.Failed }
+
 // Notice records the last time an alert of one kind was sent for an account,
 // so the same condition is not announced again. Key holds the value the
 // decision was based on (a threshold, a reason); it never holds secrets.
@@ -76,6 +88,8 @@ type AccountState struct {
 	APISkipUntil           map[string]time.Time `json:"api_skip_until,omitempty"`
 	APIForbiddenCount      map[string]int       `json:"api_forbidden_count,omitempty"`
 	Totals                 Totals               `json:"totals"`
+	// APIStats counts calls per catalog API id; ids that left the catalog are dropped.
+	APIStats map[string]*APIStat `json:"api_stats,omitempty"`
 	// PasswordBlocked is set after a password sign-in failed in a way that
 	// retrying cannot fix; the engine then stops signing the account in with
 	// its password until the person acts (set-secret, login, editing the account).

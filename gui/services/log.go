@@ -32,3 +32,7 @@ func (s *LogService) Read(account string, sinceHours int, limit int) ([]LogEntry
 	}
 	return out, nil
 }
+
+// APIStats returns the per-API call counters of one account, or summed over
+// all accounts when account is empty. Only APIs that were called are listed.
+func (s *LogService) APIStats(account string) ([]APIStat, error) { return s.b.Ops.APIStats(account) }

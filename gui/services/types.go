@@ -246,7 +246,7 @@ type TestResult struct {
 
 // CategoryAdvice is the verdict on one API category: Status is "recommended",
 // "unavailable" or "maybe"; Reason is a code (no_mailbox, no_onedrive,
-// no_teams_license, no_sharepoint, needs_admin_role, not_supported,
+// no_teams_license, no_sharepoint, needs_admin_role, optional, not_supported,
 // probe_failed, or missing_permission:<scopes>) or "".
 type CategoryAdvice = ops.CategoryAdvice
 
@@ -291,3 +291,6 @@ type BackupImportResult struct {
 	Summary   ImportSummary  `json:"summary"`
 	Problem   *BackupProblem `json:"problem"`
 }
+
+// APIStat is the call statistics of one API.
+type APIStat = ops.APIStatRow
