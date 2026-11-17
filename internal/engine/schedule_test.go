@@ -16,6 +16,9 @@ func hi(l, h time.Duration) time.Duration { return h }
 func mustSched(t *testing.T, mod func(*config.Schedule)) *schedule {
 	t.Helper()
 	c := config.Default().Schedule
+	// These tests were written for working days only (the default before 0.2.1),
+	// which exercises skipping weekends; the every-day default has its own test.
+	c.WorkDays = []string{"mon", "tue", "wed", "thu", "fri"}
 	if mod != nil {
 		mod(&c)
 	}
@@ -123,6 +126,20 @@ func TestNextRunJitterStaysInWindow(t *testing.T) {
 		if ended || !got.After(now) || !s.within(got) {
 			t.Fatalf("now %s -> %s (within=%v ended=%v)", now, got, s.within(got), ended)
 		}
+	}
+}
+
+func TestDefaultScheduleRunsEveryDay(t *testing.T) {
+	c := config.Default().Schedule
+	s, err := newSchedule(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A Saturday morning inside the default hours is a valid time to run.
+	sat := time.Date(2026, 11, 21, 10, 0, 0, 0, nyLoc(t))
+	got, ended := s.next(sat, lo)
+	if ended || got.Weekday() != time.Saturday || got.Sub(sat) > 3*time.Hour {
+		t.Fatalf("default schedule on a Saturday: next run %s", got)
 	}
 }
 
