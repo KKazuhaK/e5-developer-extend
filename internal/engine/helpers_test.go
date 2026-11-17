@@ -263,7 +263,7 @@ func (f *fixture) tickWait() {
 func (f *fixture) round(name string) {
 	f.t.Helper()
 	f.clock.Advance(time.Minute)
-	f.e.updateAccount(name, func(as *store.AccountState) {
+	f.e.updateAccount(context.Background(), name, func(as *store.AccountState) {
 		if as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention {
 			as.NextRun = f.clock.Now().Add(-time.Second)
 		}

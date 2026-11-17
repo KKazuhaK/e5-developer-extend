@@ -134,7 +134,7 @@ func TestPasswordSignInSavesTheHomeAccountID(t *testing.T) {
 func TestForcedRefreshDoesNotRepeatAFailedPasswordSignIn(t *testing.T) {
 	ra := &ropcAuth{failure: fmt.Errorf("%w: AADSTS50076: MFA", auth.ErrLoginRequired)}
 	f := passwordFixture(t, ra)
-	f.e.updateAccount("pw", func(*store.AccountState) {})
+	f.e.updateAccount(context.Background(), "pw", func(*store.AccountState) {})
 	f.e.withLock(func() { f.e.rt["pw"] = &accountRT{forceTok: true} })
 	f.round("pw")
 	if ra.ropc != 1 {

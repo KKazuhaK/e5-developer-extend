@@ -121,6 +121,25 @@ type accountRT struct {
 	userDay   string
 	userFail  string // day on which the user lookup failed; not retried that day
 	forceTok  bool   // fetch a fresh token next round (Graph rejected the last one)
+	// name is the account's name after a rename ("" until it was renamed); a
+	// round that began under the old name finds its state by it. Guarded by Engine.mu.
+	name string
+}
+
+type rtKey struct{}
+
+// rtOf returns the runtime record of the round ctx belongs to, nil outside one.
+func rtOf(ctx context.Context) *accountRT {
+	rt, _ := ctx.Value(rtKey{}).(*accountRT)
+	return rt
+}
+
+// nameInLocked is the current name of the account a round began for; the caller holds e.mu.
+func nameInLocked(ctx context.Context, name string) string {
+	if rt := rtOf(ctx); rt != nil && rt.name != "" {
+		return rt.name
+	}
+	return name
 }
 
 // Engine runs rounds for all accounts of a configuration.
@@ -139,6 +158,10 @@ type Engine struct {
 	sched *schedule
 	state *store.State
 	rt    map[string]*accountRT
+	// detached holds the state of accounts the loaded configuration lacks (see rename.go);
+	// renamedTo are the names accounts were renamed to.
+	detached  map[string]*detachedState
+	renamedTo map[string]bool
 	// unsaved is set when the state in memory differs from state.json because a save failed.
 	unsaved bool
 	// roundsDone is set when the first round has finished; the subscription
@@ -582,9 +605,14 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 		names[a.Name] = true
 		as := e.state.Accounts[a.Name]
 		if as == nil {
-			as = &store.AccountState{Status: store.StatusOK}
-			e.state.Accounts[a.Name] = as
-			e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
+			if back := e.recoverLocked(a.Name, now); back != nil {
+				as = back // a rename made it this account's after the configuration was loaded
+				e.state.Accounts[a.Name] = as
+			} else {
+				as = &store.AccountState{Status: store.StatusOK}
+				e.state.Accounts[a.Name] = as
+				e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
+			}
 		} else if startup && (as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention) && !as.NextRun.After(now) {
 			e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		}
@@ -592,8 +620,9 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 			e.rt[a.Name] = &accountRT{}
 		}
 	}
-	for n := range e.state.Accounts {
+	for n, as := range e.state.Accounts {
 		if !names[n] {
+			e.detachLocked(n, as, now)
 			delete(e.state.Accounts, n)
 			delete(e.rt, n)
 		}
@@ -682,6 +711,9 @@ func (e *Engine) tick(ctx context.Context) {
 		if fi, err := os.Stat(e.o.ConfigPath); err == nil && !fi.ModTime().Equal(e.cfgMod) {
 			e.reloadConfig()
 		}
+	}
+	if e.ticks%10 == 0 && store.HasPendingRename(e.o.DataDir) {
+		e.reloadConfig() // a rename waits: the reload trigger may have been lost
 	}
 	if store.HasPendingImport(e.o.DataDir) {
 		e.adoptPending() // also when the reload trigger of the import was lost, or a round was in flight
@@ -828,18 +860,20 @@ func (e *Engine) reloadConfig() {
 	if fi, err := os.Stat(e.o.ConfigPath); err == nil {
 		e.cfgMod = fi.ModTime()
 	}
+	// Before the load: the configuration read below has every rename claimed here.
+	claimed := e.claimRenames()
 	cfg, err := config.Load(e.o.ConfigPath)
 	var sc *schedule
 	if err == nil {
 		sc, err = newSchedule(cfg.Schedule)
 	}
 	if err != nil {
+		e.unclaimRenames(claimed)
 		e.event("", "config_error", "keeping the previous configuration: "+firstLine(err.Error()))
 		return
 	}
 	var restart bool
 	var renamed []store.Rename
-	claimed := e.claimRenames()
 	e.withLock(func() {
 		restart = cfg.Network.Proxy != e.cfg.Network.Proxy || cfg.Vault.Backend != e.cfg.Vault.Backend
 		e.cfg, e.sched = cfg, sc

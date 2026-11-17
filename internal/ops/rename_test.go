@@ -211,20 +211,31 @@ func TestRenameAccountRejectsBadNames(t *testing.T) {
 
 func TestRenameAccountRollsBackWhenTheConfigCannotBeSaved(t *testing.T) {
 	m := renameFixture(t)
+	m.use()
+	if err := engine.TriggerRun(m.dataDir, "old"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SavePendingImport(m.dataDir, &store.PendingImport{Mode: store.PendingMerge,
+		Accounts: map[string]*store.AccountState{"old": {Status: store.StatusOK}}}); err != nil {
+		t.Fatal(err)
+	}
 	before := m.snapshot()
-	var pendingSeen bool
+	var followed bool
 	m.Ops.SaveConfig = func(c *config.Config, path string) error {
-		pendingSeen = store.HasPendingRename(m.dataDir)
+		// Triggers and a waiting import already follow the account when the config is saved.
+		p, _ := store.ReadPendingImport(m.dataDir)
+		_, terr := os.Stat(filepath.Join(m.dataDir, "trigger", "fresh"))
+		followed = terr == nil && p != nil && p.Accounts["fresh"] != nil
 		return errors.New("disk full")
 	}
 	_, err := m.rename("old", "fresh")
 	if err == nil || !strings.Contains(err.Error(), "nothing was changed") {
 		t.Fatalf("rename: %v", err)
 	}
-	if !pendingSeen {
-		t.Error("the state was not handed over before the config was saved")
+	if !followed {
+		t.Error("the triggers and the waiting import were not renamed before the config was saved")
 	}
-	m.mustNotChange(before) // config, vault entries, state and no hand-over file
+	m.mustNotChange(before) // config, vault entries, state, triggers, the waiting import and no hand-over file
 	if m.mustGet("secret/old") != bkSecretOld || m.mustGet("tokencache/old") != "TOKENCACHE-OLD" {
 		t.Error("old vault entries changed")
 	}
@@ -255,12 +266,16 @@ func TestRenameAccountDropsAnUnreadableTokenCacheWithAWarning(t *testing.T) {
 	if err := m.vault(other).Put("tokencache/old", []byte("x")); err != nil { // encrypted with another key
 		t.Fatal(err)
 	}
+	m.put("tokencache/fresh", "LEFTOVER") // of an account removed earlier: must not survive either
 	warns, err := m.rename("old", "fresh")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(warns) != 1 || !strings.Contains(warns[0], "account login fresh") {
 		t.Errorf("warnings: %v", warns)
+	}
+	if ok, _ := m.vault(m.key).Has("tokencache/fresh"); ok {
+		t.Error("a token cache appeared")
 	}
 	if m.mustGet("secret/fresh") != bkSecretOld {
 		t.Error("secret not moved")
@@ -319,8 +334,8 @@ func TestRenameAccountGivesUpWhenTheLockIsNotReleased(t *testing.T) {
 	m.mustNotChange(before)
 }
 
-// The engine holds the lock: the state goes to it in a file, written before
-// config.toml, and state.json is not touched.
+// The engine holds the lock: the rename goes to it in a file, written after
+// config.toml (so every rename in it is one the config has), and state.json is not touched.
 func TestRenameAccountWhileEngineHoldsTheLockHandsTheRenameOver(t *testing.T) {
 	m := renameFixture(t)
 	release, err := engine.AcquireLock(m.dataDir)
@@ -337,8 +352,8 @@ func TestRenameAccountWhileEngineHoldsTheLockHandsTheRenameOver(t *testing.T) {
 	if _, err := m.rename("old", "fresh"); err != nil {
 		t.Fatal(err)
 	}
-	if !seen {
-		t.Error("no hand-over file when the config was saved")
+	if seen {
+		t.Error("the hand-over file existed before the config was saved")
 	}
 	if string(mustRead(t, filepath.Join(m.dataDir, "state.json"))) != string(stateBefore) {
 		t.Error("state.json was written under a running engine")
@@ -349,15 +364,13 @@ func TestRenameAccountWhileEngineHoldsTheLockHandsTheRenameOver(t *testing.T) {
 	}
 }
 
-// A real engine in the loop: it keeps its own copy of the state, the rename
-// arrives, and what ends up in state.json is the renamed state, also after the
-// engine has saved again. Nothing may alert because of the rename.
-func TestRenameAccountIntoARunningEngine(t *testing.T) {
-	m := renameFixture(t)
+// startEngine runs a real engine on the machine's config and data, with a
+// short tick, and returns the function that stops it.
+func startEngine(t *testing.T, m *machine) (stop func()) {
+	t.Helper()
 	m.use()
-	cfg := m.config()
 	opts := engine.DefaultOptions()
-	opts.Config, opts.ConfigPath, opts.DataDir = cfg, filepath.Join(m.cfgDir, "config.toml"), m.dataDir
+	opts.Config, opts.ConfigPath, opts.DataDir = m.config(), filepath.Join(m.cfgDir, "config.toml"), m.dataDir
 	opts.NewAuth = func(config.Account) (auth.Authenticator, error) { return nil, errors.New("no sign-in in this test") }
 	opts.Tick, opts.ConfigCheckEvery = 20*time.Millisecond, 1
 	e, err := engine.New(opts)
@@ -368,7 +381,7 @@ func TestRenameAccountIntoARunningEngine(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- e.Run(ctx) }()
 	stopped := false
-	stop := func() {
+	stop = func() {
 		if !stopped {
 			stopped = true
 			cancel()
@@ -377,8 +390,17 @@ func TestRenameAccountIntoARunningEngine(t *testing.T) {
 			}
 		}
 	}
-	defer stop()
+	t.Cleanup(stop)
 	waitFor(t, "the engine to start", func() bool { return engine.Running(m.dataDir) && hasEvent(m.dataDir, "start") })
+	return stop
+}
+
+// A real engine in the loop: it keeps its own copy of the state, the rename
+// arrives, and what ends up in state.json is the renamed state, also after the
+// engine has saved again. Nothing may alert because of the rename.
+func TestRenameAccountIntoARunningEngine(t *testing.T) {
+	m := renameFixture(t)
+	stop := startEngine(t, m)
 
 	if _, err := m.RenameAccount(context.Background(), "old", "fresh"); err != nil {
 		t.Fatal(err)
@@ -406,6 +428,85 @@ func TestRenameAccountIntoARunningEngine(t *testing.T) {
 			t.Errorf("the rename raised %s", bad)
 		}
 	}
+}
+
+// The old name is taken again by a new account right after the rename: the
+// renamed account keeps its state, the new one starts empty.
+func TestRenameAccountThenAddAnotherUnderTheOldNameWithARunningEngine(t *testing.T) {
+	m := renameFixture(t)
+	stop := startEngine(t, m)
+	ctx := context.Background()
+
+	if _, err := m.RenameAccount(ctx, "old", "old-kept"); err != nil {
+		t.Fatal(err)
+	}
+	// No reload in between: the engine's next look at the config sees both changes.
+	in := AccountInput{Name: "old", Auth: config.AuthClientSecret, Tenant: "t.example", ClientID: testGUID, Secret: "NEW-SECRET"}
+	if err := m.AddAccount(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	m.ReloadEngine()
+	waitFor(t, "the engine to apply the rename", func() bool {
+		st, err := store.New(m.dataDir).LoadState()
+		return err == nil && !store.HasPendingRename(m.dataDir) && st.Accounts["old-kept"] != nil && st.Accounts["old-kept"].Totals.Rounds == 5 && st.Accounts["old"] != nil
+	})
+	time.Sleep(200 * time.Millisecond)
+	stop()
+	st := m.state()
+	if st.Accounts["old-kept"].Totals.Rounds != 5 || st.Accounts["old-kept"].Status != store.StatusNeedsAttention || st.Accounts["old-kept"].LastPasswordCode != "AADSTS50126" {
+		t.Errorf("old-kept: %+v", st.Accounts["old-kept"])
+	}
+	if st.Accounts["old"].Totals.Rounds != 0 || st.Accounts["old"].LastPasswordCode != "" || st.Accounts["old"].Status == store.StatusNeedsAttention {
+		t.Errorf("the new account inherited state: %+v", st.Accounts["old"])
+	}
+}
+
+// a and b swap names through a temporary one while the engine runs: each
+// account keeps its own state, the password block included.
+func TestRenameAccountSwapWithARunningEngine(t *testing.T) {
+	m := newMachine(t)
+	m.addSecretAccount("a", bkSecretOld)
+	m.addSecretAccount("b", bkSecretMain)
+	st := store.NewState()
+	st.Accounts["a"] = &store.AccountState{Status: store.StatusNeedsAttention, Reason: "pw", Totals: store.Totals{Rounds: 1},
+		PasswordBlocked: &store.PasswordBlock{Code: "AADSTS50126", At: time.Now()}}
+	st.Accounts["b"] = &store.AccountState{Status: store.StatusOK, Totals: store.Totals{Rounds: 2}}
+	if err := store.New(m.dataDir).SaveState(st); err != nil {
+		t.Fatal(err)
+	}
+	stop := startEngine(t, m)
+	ctx := context.Background()
+	for _, r := range [][2]string{{"a", "tmp"}, {"b", "a"}, {"tmp", "b"}} {
+		if _, err := m.RenameAccount(ctx, r[0], r[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	m.ReloadEngine()
+	waitFor(t, "the engine to apply the renames", func() bool {
+		s, err := store.New(m.dataDir).LoadState()
+		return err == nil && !store.HasPendingRename(m.dataDir) && s.Accounts["b"] != nil && s.Accounts["b"].Totals.Rounds == 1 && s.Accounts["tmp"] == nil
+	})
+	time.Sleep(200 * time.Millisecond)
+	stop()
+	got := m.state()
+	if got.Accounts["b"].PasswordBlocked == nil || got.Accounts["a"].PasswordBlocked != nil || got.Accounts["a"].Totals.Rounds != 2 {
+		t.Errorf("after the swap: a=%+v b=%+v", got.Accounts["a"], got.Accounts["b"])
+	}
+	// The secrets followed too: a's old secret is now b's.
+	if m.mustGet("secret/b") != bkSecretOld || m.mustGet("secret/a") != bkSecretMain {
+		t.Error("the secrets did not follow the accounts")
+	}
+}
+
+func TestRenameAccountRefusesANameThatHasAStoredSecret(t *testing.T) {
+	m := newMachine(t)
+	m.addSecretAccount("a", bkSecretOld)
+	m.put("secret/taken", "SETUP-IN-PROGRESS") // what an app setup stores before the account exists
+	before := m.snapshot()
+	if _, err := m.rename("a", "taken"); err == nil || !strings.Contains(err.Error(), "stored secret already exists") {
+		t.Fatalf("rename: %v", err)
+	}
+	m.mustNotChange(before)
 }
 
 func containsEvent(es []store.Entry, name string) bool {

@@ -29,8 +29,12 @@ func accountTenantKey(name string) string { return "account:" + name }
 
 // ApplyRename moves everything the state keeps under the account name from to
 // the name to: the account's state, the tenant keys derived from the name and
-// the record of earlier names. It never touches the call log.
-func (s *State) ApplyRename(from, to string) {
+// the record of earlier names. It never touches the call log. A rename is a
+// fact about the configuration, so it replaces whatever the state holds under
+// to. When the state has nothing under from, the account's state may be in
+// detached (what an engine set aside for accounts its config did not have,
+// by name); it is taken from there.
+func (s *State) ApplyRename(from, to string, detached map[string]*AccountState) {
 	if from == to {
 		return
 	}
@@ -40,6 +44,11 @@ func (s *State) ApplyRename(from, to string) {
 	if as, ok := s.Accounts[from]; ok {
 		s.Accounts[to] = as
 		delete(s.Accounts, from)
+	} else if as, ok := detached[from]; ok {
+		s.Accounts[to] = as
+		delete(detached, from)
+	} else {
+		delete(s.Accounts, to) // the account had no state; do not leave another one's under its new name
 	}
 	fk, tk := accountTenantKey(from), accountTenantKey(to)
 	if ts, ok := s.Tenants[fk]; ok {
@@ -104,33 +113,22 @@ func (s *State) TidyRenames(configured func(string) bool) {
 	}
 }
 
-// hasActivity reports whether an account's state records any round.
-func (a *AccountState) hasActivity() bool {
-	return a.Totals != (Totals{}) || !a.LastSuccess.IsZero()
-}
-
-// ApplyRenames applies pending renames to the state. configured says whether
-// an account of that name is in the configuration the state belongs to. A
-// rename is applied when its new name is configured and its old one is not;
-// one whose new name is not configured yet is returned in later; the others
-// are dropped. A rename is also skipped when the new name already has a
-// state with recorded rounds, which it must not replace.
-func (s *State) ApplyRenames(rs []Rename, configured func(string) bool) (applied, later []Rename) {
+// ApplyRenames applies renames to the state in the order they were made, so
+// chains (a to b, then b to c) and swaps (a to tmp, b to a, tmp to b) come out
+// right. They are always applied as a whole: a pending rename is only written
+// after the configuration that holds it was saved, so an unclaimed one is
+// never older than a configuration that was loaded before it. It returns the
+// renames it applied.
+func (s *State) ApplyRenames(rs []Rename, detached map[string]*AccountState) []Rename {
+	var applied []Rename
 	for _, r := range rs {
-		switch {
-		case r.From == r.To:
-		case !configured(r.To):
-			later = append(later, r)
-		case configured(r.From):
-		default:
-			if have := s.Accounts[r.To]; have != nil && have.hasActivity() {
-				continue
-			}
-			s.ApplyRename(r.From, r.To)
-			applied = append(applied, r)
+		if r.From == r.To {
+			continue
 		}
+		s.ApplyRename(r.From, r.To, detached)
+		applied = append(applied, r)
 	}
-	return applied, later
+	return applied
 }
 
 // PendingRenameFile is the name of the file a rename leaves in the data
@@ -152,49 +150,35 @@ type PendingRename struct {
 // PendingRenamePath returns where the pending renames of the data directory dir are.
 func PendingRenamePath(dir string) string { return filepath.Join(dir, PendingRenameFile) }
 
-// CollapseRenames joins chains (a to b, then b to c becomes a to c) and drops
-// renames that end where they began.
-func CollapseRenames(rs []Rename) []Rename {
-	var out []Rename
-	for _, r := range rs {
-		merged := false
-		for i := range out {
-			if out[i].To == r.From {
-				out[i].To = r.To
-				merged = true
-				break
-			}
-		}
-		if !merged {
-			out = append(out, r)
-		}
-	}
-	res := out[:0]
-	for _, r := range out {
-		if r.From != r.To {
-			res = append(res, r)
-		}
-	}
-	return res
+// SavePendingRenames appends rs, which are newer, to the pending renames,
+// atomically (mode 0600). written is the time of the first writing; the zero
+// value means now.
+func SavePendingRenames(dir string, written time.Time, rs []Rename) error {
+	return savePendingRenames(dir, written, rs, false)
 }
 
-// SavePendingRenames appends rs to the pending renames, atomically (mode 0600),
-// collapsing chains with what is waiting already. written is the time of the
-// first writing; the zero value means now. A file that ends up empty is removed.
-func SavePendingRenames(dir string, written time.Time, rs []Rename) error {
+// RestorePendingRenames puts rs, which are older than whatever is waiting,
+// back in front of it (an engine that claimed them could not use them yet).
+func RestorePendingRenames(dir string, written time.Time, rs []Rename) error {
+	return savePendingRenames(dir, written, rs, true)
+}
+
+func savePendingRenames(dir string, written time.Time, rs []Rename, older bool) error {
 	p := &PendingRename{Written: written}
 	if old, err := ReadPendingRenameFile(PendingRenamePath(dir)); err == nil && old != nil {
-		p.Renames = old.Renames
+		if older {
+			p.Renames = append(slices.Clone(rs), old.Renames...)
+		} else {
+			p.Renames = append(slices.Clone(old.Renames), rs...)
+		}
 		if !old.Written.IsZero() && (p.Written.IsZero() || old.Written.Before(p.Written)) {
 			p.Written = old.Written
 		}
+	} else {
+		p.Renames = slices.Clone(rs)
 	}
 	if p.Written.IsZero() {
 		p.Written = time.Now()
-	}
-	p.Renames = CollapseRenames(append(p.Renames, rs...))
-	if len(p.Renames) == 0 {
-		return RemovePendingRename(dir)
 	}
 	b, err := json.MarshalIndent(p, "", "  ")
 	if err != nil {
@@ -252,7 +236,7 @@ func ClaimPendingRenames(dir string) ([]string, error) {
 }
 
 // ReadClaimedRenames reads the claimed files in order and returns their
-// renames (collapsed) and the oldest time of writing. A damaged file is
+// renames and the oldest time of writing. A damaged file is
 // skipped and its error returned.
 func ReadClaimedRenames(files []string) (rs []Rename, written time.Time, errs []error) {
 	for _, f := range files {
@@ -269,7 +253,7 @@ func ReadClaimedRenames(files []string) (rs []Rename, written time.Time, errs []
 			written = p.Written
 		}
 	}
-	return CollapseRenames(rs), written, errs
+	return rs, written, errs
 }
 
 // RemovePendingRename deletes the pending-rename file and any claimed one.

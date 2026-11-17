@@ -48,7 +48,7 @@ func TestFarFutureNextRunIsRescheduledOnTick(t *testing.T) {
 	f.start()
 	f.tickWait()
 	// The clock ran a month ahead, then NTP set it back.
-	f.e.updateAccount("main", func(as *store.AccountState) { as.NextRun = f.clock.now.Add(29 * 24 * time.Hour) })
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) { as.NextRun = f.clock.now.Add(29 * 24 * time.Hour) })
 	f.clock.Advance(-time.Hour)
 	f.tickWait()
 	if !f.hasEvent("clock_change") {

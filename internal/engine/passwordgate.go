@@ -26,16 +26,25 @@ func TriggerPasswordReset(dataDir, account string) error {
 type passwordGate struct {
 	e       *Engine
 	name    string
-	attempt time.Time // the attempt this gate recorded in Allow
+	rt      *accountRT // follows the account through a rename; nil outside a round
+	attempt time.Time  // the attempt this gate recorded in Allow
 }
 
 func (e *Engine) gateContext(ctx context.Context, name string) context.Context {
-	return auth.AllowPasswordFallback(ctx, &passwordGate{e: e, name: name})
+	return auth.AllowPasswordFallback(ctx, &passwordGate{e: e, name: name, rt: rtOf(ctx)})
+}
+
+// nameLocked is the account's current name; the caller holds e.mu.
+func (g *passwordGate) nameLocked() string {
+	if g.rt != nil && g.rt.name != "" {
+		return g.rt.name
+	}
+	return g.name
 }
 
 func (g *passwordGate) Allow() (ok bool, blocked string) {
 	g.e.withLock(func() {
-		as := g.e.state.Accounts[g.name]
+		as := g.e.state.Accounts[g.nameLocked()]
 		if as == nil {
 			return
 		}
@@ -59,7 +68,7 @@ func (g *passwordGate) Allow() (ok bool, blocked string) {
 // attempt; a reset while the request ran (a person set a new password, say)
 // changes the attempt time, and then the outcome of the old attempt is dropped.
 func (g *passwordGate) current() *store.AccountState {
-	as := g.e.state.Accounts[g.name]
+	as := g.e.state.Accounts[g.nameLocked()]
 	if as == nil || g.attempt.IsZero() || !as.LastPasswordAttempt.Equal(g.attempt) {
 		return nil
 	}
@@ -77,7 +86,7 @@ func (g *passwordGate) Result(code string) {
 
 func (g *passwordGate) LastCode() (code string) {
 	g.e.withLock(func() {
-		if as := g.e.state.Accounts[g.name]; as != nil {
+		if as := g.e.state.Accounts[g.nameLocked()]; as != nil {
 			code = as.LastPasswordCode
 		}
 	})

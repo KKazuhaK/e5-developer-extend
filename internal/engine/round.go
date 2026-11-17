@@ -32,10 +32,15 @@ type outcome struct {
 // the account's running flag and added to e.wg.
 func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 	defer e.wg.Done()
+	// The round follows its account through a rename: the runtime record is
+	// moved to the new name, and the round finds it by this pointer.
+	var rt0 *accountRT
+	e.withLock(func() { rt0 = e.rt[acct.Name] })
+	ctx = context.WithValue(ctx, rtKey{}, rt0)
 	defer func() {
 		e.mu.Lock()
-		if rt := e.rt[acct.Name]; rt != nil {
-			rt.running = false
+		if rt0 != nil {
+			rt0.running = false
 		}
 		e.mu.Unlock()
 	}()
@@ -44,8 +49,8 @@ func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 	if manual {
 		// An explicit run retries a failed user lookup.
 		e.withLock(func() {
-			if rt := e.rt[acct.Name]; rt != nil {
-				rt.userFail = ""
+			if rt0 != nil {
+				rt0.userFail = ""
 			}
 		})
 	}
@@ -63,16 +68,16 @@ func (e *Engine) round(ctx context.Context, acct config.Account, manual bool) {
 		return
 	}
 	// A panic while booking the result must not take the process down either.
-	e.guard("finish "+acct.Name, func() { e.finish(acct, roundID, out) })
+	e.guard("finish "+acct.Name, func() { e.finish(ctx, acct, roundID, out) })
 }
 
-func (e *Engine) finish(acct config.Account, roundID string, out outcome) {
+func (e *Engine) finish(ctx context.Context, acct config.Account, roundID string, out outcome) {
 	now := e.clock.Now()
 	var skipped, msg string
 	var follow []string // events to log after unlocking
 	found := true
 	e.withLock(func() {
-		as := e.state.Accounts[acct.Name]
+		as := e.state.Accounts[nameInLocked(ctx, acct.Name)]
 		if as == nil { // removed from the config meanwhile
 			found = false
 			return
@@ -152,7 +157,7 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 		// After Graph rejected a token, do not trust the cached one again.
 		force := false
 		e.withLock(func() {
-			if rt := e.rt[acct.Name]; rt != nil {
+			if rt := rtOf(ctx); rt != nil {
 				force, rt.forceTok = rt.forceTok, false
 			}
 		})
@@ -231,7 +236,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	var minN, maxN int
 	var random, gone bool
 	e.withLock(func() {
-		as := e.state.Accounts[acct.Name]
+		as := e.state.Accounts[nameInLocked(ctx, acct.Name)]
 		if as == nil {
 			gone = true
 			return
@@ -283,7 +288,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 		case graph.OK:
 			out.calls++
 			out.ok++
-			e.updateAccount(acct.Name, func(as *store.AccountState) { delete(as.APIForbiddenCount, id) })
+			e.updateAccount(ctx, acct.Name, func(as *store.AccountState) { delete(as.APIForbiddenCount, id) })
 		case graph.Throttled:
 			out.calls++
 			out.throttled = true
@@ -313,7 +318,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			out.calls++
 			out.failed++
 			out.lastFail = res.Class
-			e.updateAccount(acct.Name, func(as *store.AccountState) {
+			e.updateAccount(ctx, acct.Name, func(as *store.AccountState) {
 				if as.APIForbiddenCount == nil {
 					as.APIForbiddenCount = map[string]int{}
 				}
@@ -383,10 +388,10 @@ func (e *Engine) logCall(account, roundID, apiID string, res graph.Result) {
 		Status: res.Status, Class: string(res.Class), LatencyMS: res.Latency.Milliseconds()})
 }
 
-func (e *Engine) updateAccount(name string, f func(*store.AccountState)) {
+func (e *Engine) updateAccount(ctx context.Context, name string, f func(*store.AccountState)) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	if as := e.state.Accounts[name]; as != nil {
+	if as := e.state.Accounts[nameInLocked(ctx, name)]; as != nil {
 		f(as)
 	}
 }

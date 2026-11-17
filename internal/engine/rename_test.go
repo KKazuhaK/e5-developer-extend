@@ -1,12 +1,12 @@
 package engine
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
@@ -33,6 +33,21 @@ func TestRenameTriggersFollowTheAccount(t *testing.T) {
 	}
 }
 
+func (f *fixture) renameConfig(path string, to ...string) {
+	f.t.Helper()
+	next := *f.cfg
+	next.Accounts = nil
+	for _, n := range to {
+		next.Accounts = append(next.Accounts, delegatedAcct(n))
+		if f.auths[n] == nil {
+			f.auths[n] = f.auths["main"]
+		}
+	}
+	if err := next.Save(path); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
 // The state of a renamed account is moved when the engine loads the config that
 // has the new name; no alert is raised for the rename.
 func TestReloadAppliesRenameAndKeepsTheState(t *testing.T) {
@@ -46,23 +61,9 @@ func TestReloadAppliesRenameAndKeepsTheState(t *testing.T) {
 		t.Fatal("setup: no round ran")
 	}
 
-	// The hand-over comes first: a reload before the config is saved keeps it.
+	// The config is saved first, then the hand-over is written.
+	f.renameConfig(path, "renamed")
 	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed"}}); err != nil {
-		t.Fatal(err)
-	}
-	_ = TriggerReload(f.dir)
-	f.tickWait()
-	if !store.HasPendingRename(f.dir) {
-		t.Error("the rename was dropped before the config had the new name")
-	}
-	if f.acct("main").Totals.Rounds != 1 {
-		t.Error("the state moved before the config had the new name")
-	}
-
-	next := *f.cfg
-	next.Accounts = []config.Account{delegatedAcct("renamed")}
-	f.auths["renamed"] = f.auths["main"]
-	if err := next.Save(path); err != nil {
 		t.Fatal(err)
 	}
 	_ = TriggerReload(f.dir)
@@ -89,6 +90,117 @@ func TestReloadAppliesRenameAndKeepsTheState(t *testing.T) {
 	if es, _ := store.New(f.dir).Read(store.Filter{Account: "renamed"}); len(es) == 0 {
 		t.Error("the log of the old name is not found under the new one")
 	}
+}
+
+// The engine loads the config with the new name a moment before the hand-over
+// arrives: the state it had to set aside is found again when the rename comes.
+func TestRenameArrivingAfterTheConfigStillFindsTheState(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+
+	f.renameConfig(path, "renamed")
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("renamed"); got.Totals.Rounds != 0 {
+		t.Fatalf("setup: the new name should start empty: %+v", got)
+	}
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("renamed"); got.Totals.Rounds != 1 {
+		t.Errorf("the state was lost: %+v", got)
+	}
+}
+
+// The other order: the rename is claimed while the loaded config still says
+// "main". The renamed state is kept until a config has the new name.
+func TestRenameClaimedBeforeTheConfigHasTheNewName(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir) // the config still says "main"
+	f.tickWait()
+	f.renameConfig(path, "renamed")
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("renamed"); got.Totals.Rounds != 1 {
+		t.Errorf("the state was lost: %+v", got)
+	}
+}
+
+// A round in flight when the rename is applied stays marked as running, so no
+// second round starts, and books its result under the new name.
+func TestRenameKeepsARoundInFlight(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+	hits := f.h.count("")
+
+	gate := make(chan struct{})
+	f.h.setStatus(func(string) (int, map[string]string) {
+		<-gate
+		return 200, nil
+	})
+	f.clock.Advance(time.Minute)
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) { as.NextRun = f.clock.Now().Add(-time.Second) })
+	f.e.tick(context.Background()) // the round starts and waits at the first call
+	waitUntil(t, func() bool { return f.h.count("") > hits })
+
+	f.renameConfig(path, "renamed")
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir)
+	f.e.tick(context.Background()) // applies the rename; must not start another round
+	f.e.mu.Lock()
+	rt := f.e.rt["renamed"]
+	running := rt != nil && rt.running
+	f.e.mu.Unlock()
+	if !running {
+		t.Error("the round in flight is not marked as running under the new name")
+	}
+	f.clock.Advance(time.Minute)
+	f.e.updateAccount(context.Background(), "renamed", func(as *store.AccountState) { as.NextRun = f.clock.Now().Add(-time.Second) })
+	f.e.tick(context.Background())
+	close(gate)
+	f.e.wait()
+	got := f.acct("renamed")
+	if got.Totals.Rounds != 2 {
+		t.Errorf("rounds = %d: the in-flight result was lost or a second round ran", got.Totals.Rounds)
+	}
+	f.e.mu.Lock()
+	left := f.e.state.Accounts["main"]
+	f.e.mu.Unlock()
+	if left != nil {
+		t.Errorf("state left under the old name: %+v", left)
+	}
+}
+
+func waitUntil(t *testing.T, ok func() bool) {
+	t.Helper()
+	for i := 0; i < 500; i++ {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out")
 }
 
 // A rename made while the engine was stopped is applied at the next start.

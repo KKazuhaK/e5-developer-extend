@@ -15,7 +15,7 @@ func TestApplyRenameMovesEverythingKeyedByTheName(t *testing.T) {
 	st.TenantAliases = map[string]string{"account:a": "guid", "other": "account:a"}
 	st.RenamedFrom = map[string][]string{"a": {"z"}}
 
-	st.ApplyRename("a", "c")
+	st.ApplyRename("a", "c", nil)
 	if st.Accounts["a"] != nil || st.Accounts["c"] == nil || st.Accounts["c"].Totals.Rounds != 3 || st.Accounts["b"].Totals.Rounds != 1 {
 		t.Errorf("accounts: %+v", st.Accounts)
 	}
@@ -30,37 +30,50 @@ func TestApplyRenameMovesEverythingKeyedByTheName(t *testing.T) {
 	}
 
 	// Back to an earlier name: it is no longer "renamed from" itself.
-	st.ApplyRename("c", "z")
+	st.ApplyRename("c", "z", nil)
 	if !reflect.DeepEqual(st.RenamedFrom, map[string][]string{"z": {"a", "c"}}) {
 		t.Errorf("renamed_from after going back: %v", st.RenamedFrom)
 	}
 }
 
-func TestApplyRenamesChecksTheConfiguration(t *testing.T) {
+func TestApplyRenamesRunsInOrderSoSwapsAndChainsWork(t *testing.T) {
 	st := NewState()
-	st.Accounts["a"] = &AccountState{Totals: Totals{Rounds: 3}}
-	st.Accounts["x"] = &AccountState{Totals: Totals{Rounds: 9}}
-	st.Accounts["y"] = &AccountState{Totals: Totals{Rounds: 2}}
-	cfg := map[string]bool{"b": true, "x": true, "y": true, "w": true}
-	applied, later := st.ApplyRenames([]Rename{
-		{From: "a", To: "b"}, // applies
-		{From: "q", To: "r"}, // new name not configured yet: later
-		{From: "x", To: "w"}, // old name still configured: dropped
-		{From: "y", To: "y"}, // nothing to do
-	}, func(n string) bool { return cfg[n] })
-	if len(applied) != 1 || applied[0].To != "b" || len(later) != 1 || later[0].To != "r" {
-		t.Errorf("applied %v later %v", applied, later)
+	st.Accounts["a"] = &AccountState{Totals: Totals{Rounds: 1}, PasswordBlocked: &PasswordBlock{Code: "AADSTS50126"}}
+	st.Accounts["b"] = &AccountState{Totals: Totals{Rounds: 2}}
+	// A swap through a temporary name.
+	applied := st.ApplyRenames([]Rename{{"a", "tmp"}, {"b", "a"}, {"tmp", "b"}}, nil)
+	if len(applied) != 3 {
+		t.Fatalf("applied %v", applied)
 	}
-	if st.Accounts["b"] == nil || st.Accounts["a"] != nil || st.Accounts["x"] == nil {
-		t.Errorf("accounts: %+v", st.Accounts)
+	if st.Accounts["a"].Totals.Rounds != 2 || st.Accounts["b"].Totals.Rounds != 1 || st.Accounts["tmp"] != nil {
+		t.Errorf("after the swap: %+v", st.Accounts)
 	}
+	if st.Accounts["b"].PasswordBlocked == nil || st.Accounts["a"].PasswordBlocked != nil {
+		t.Error("the password block did not stay with its account")
+	}
+	if !reflect.DeepEqual(st.RenamedFrom["a"], []string{"b"}) || !reflect.DeepEqual(st.RenamedFrom["b"], []string{"a", "tmp"}) {
+		t.Errorf("renamed_from: %v", st.RenamedFrom)
+	}
+	// A chain, and a rename onto an account that is added afterwards.
+	st.ApplyRenames([]Rename{{"b", "c"}, {"c", "d"}}, nil)
+	if st.Accounts["d"].Totals.Rounds != 1 || st.Accounts["b"] != nil || st.Accounts["c"] != nil {
+		t.Errorf("after the chain: %+v", st.Accounts)
+	}
+}
 
-	// A new name whose state has recorded rounds is never replaced.
-	st.Accounts["n"] = &AccountState{Totals: Totals{Rounds: 4}}
-	st.Accounts["m"] = &AccountState{Totals: Totals{Rounds: 1}}
-	cfg["n"] = true
-	if applied, _ := st.ApplyRenames([]Rename{{From: "m", To: "n"}}, func(n string) bool { return cfg[n] }); len(applied) != 0 || st.Accounts["n"].Totals.Rounds != 4 {
-		t.Errorf("replaced a state with rounds: %v", applied)
+func TestApplyRenameTakesFromDetachedAndReplacesAFreshState(t *testing.T) {
+	st := NewState()
+	st.Accounts["new"] = &AccountState{Status: StatusOK} // made by an engine whose config already had the new name
+	detached := map[string]*AccountState{"old": {Totals: Totals{Rounds: 9}}}
+	st.ApplyRename("old", "new", detached)
+	if st.Accounts["new"].Totals.Rounds != 9 || len(detached) != 0 {
+		t.Errorf("accounts %+v detached %v", st.Accounts, detached)
+	}
+	// An account that never had a state leaves nothing under the new name.
+	st.Accounts["x"] = &AccountState{Totals: Totals{Rounds: 3}}
+	st.ApplyRename("never-ran", "x", nil)
+	if st.Accounts["x"] != nil {
+		t.Error("another state was left under the new name")
 	}
 }
 
@@ -75,20 +88,13 @@ func TestTidyRenames(t *testing.T) {
 	}
 }
 
-func TestCollapseRenames(t *testing.T) {
-	got := CollapseRenames([]Rename{{"a", "b"}, {"x", "y"}, {"b", "c"}, {"c", "a"}, {"p", "q"}, {"q", "p"}})
-	if !reflect.DeepEqual(got, []Rename{{"x", "y"}}) {
-		t.Errorf("%v", got)
-	}
-}
-
 func TestPendingRenameFile(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Now().Add(-time.Hour).Truncate(time.Second)
 	if err := SavePendingRenames(dir, at, []Rename{{"a", "b"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SavePendingRenames(dir, time.Time{}, []Rename{{"b", "c"}}); err != nil {
+	if err := SavePendingRenames(dir, time.Time{}, []Rename{{"b", "c"}, {"c", "a"}}); err != nil {
 		t.Fatal(err)
 	}
 	files, err := ClaimPendingRenames(dir)
@@ -96,10 +102,27 @@ func TestPendingRenameFile(t *testing.T) {
 		t.Fatalf("claim: %v %v", files, err)
 	}
 	rs, written, errs := ReadClaimedRenames(files)
-	if len(errs) != 0 || !reflect.DeepEqual(rs, []Rename{{"a", "c"}}) || !written.Equal(at) {
+	if len(errs) != 0 || !reflect.DeepEqual(rs, []Rename{{"a", "b"}, {"b", "c"}, {"c", "a"}}) || !written.Equal(at) {
 		t.Errorf("read: %v %v %v", rs, written, errs)
 	}
+	for _, f := range files {
+		_ = os.Remove(f)
+	}
+	// Claimed renames that could not be used go back in front of newer ones.
+	if err := SavePendingRenames(dir, time.Time{}, []Rename{{"x", "y"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RestorePendingRenames(dir, written, rs); err != nil {
+		t.Fatal(err)
+	}
+	p, _ := ReadPendingRenameFile(PendingRenamePath(dir))
+	if p == nil || !reflect.DeepEqual(p.Renames, []Rename{{"a", "b"}, {"b", "c"}, {"c", "a"}, {"x", "y"}}) {
+		t.Errorf("restored: %+v", p)
+	}
 	// An interrupted claim is found again.
+	if _, err := ClaimPendingRenames(dir); err != nil {
+		t.Fatal(err)
+	}
 	again, _ := ClaimPendingRenames(dir)
 	if len(again) != 1 {
 		t.Errorf("claimed file not found again: %v", again)
@@ -110,12 +133,7 @@ func TestPendingRenameFile(t *testing.T) {
 	if again, _ := ClaimPendingRenames(dir); len(again) != 0 {
 		t.Errorf("left: %v", again)
 	}
-	// A rename that cancels out leaves no file.
-	_ = SavePendingRenames(dir, time.Time{}, []Rename{{"a", "b"}})
-	_ = SavePendingRenames(dir, time.Time{}, []Rename{{"b", "a"}})
-	if _, err := os.Stat(PendingRenamePath(dir)); err == nil {
-		t.Error("an empty rename file was kept")
-	}
+	_ = os.Remove(PendingRenamePath(dir))
 }
 
 func TestReadFollowsRenamedFrom(t *testing.T) {

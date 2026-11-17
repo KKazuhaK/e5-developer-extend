@@ -7,6 +7,17 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
+// detachedTTL is how long the state of an account the configuration no
+// longer has is kept in memory: a rename that arrives a moment after the
+// configuration that holds the new name was loaded still finds it.
+const detachedTTL = time.Hour
+
+// detachedState is the state of an account that the loaded configuration did not have.
+type detachedState struct {
+	as *store.AccountState
+	at time.Time
+}
+
 // claimedRenames are account renames taken from the handover file
 // (store.PendingRenameFile) and not applied yet.
 type claimedRenames struct {
@@ -14,11 +25,11 @@ type claimedRenames struct {
 	written time.Time
 }
 
-// claimRenames takes the account renames `account rename` handed over. The
-// caller applies them with applyRenamesLocked to the state it is about to
-// match against a configuration, so the state of a renamed account is moved
-// before syncAccountsLocked would drop it as unknown. It returns nil when
-// there are none, or when they have waited too long.
+// claimRenames takes the account renames `account rename` handed over. It must
+// run before the configuration is loaded: a rename is written only after the
+// configuration that holds it was saved, so a configuration loaded after the
+// claim has every claimed rename in it. It returns nil when there are none, or
+// when they have waited too long.
 func (e *Engine) claimRenames() *claimedRenames {
 	files, err := store.ClaimPendingRenames(e.o.DataDir)
 	if err != nil {
@@ -45,22 +56,80 @@ func (e *Engine) claimRenames() *claimedRenames {
 	return &claimedRenames{rs: rs, written: written}
 }
 
-// applyRenamesLocked applies claimed renames to e.state against e.cfg. Renames
-// whose new name the configuration does not have yet are put back for the
-// next reload, for up to importWait. It returns the renames it applied. The
-// caller holds e.mu and calls syncAccountsLocked afterwards.
+// unclaimRenames puts claimed renames back, in front of newer ones, when the
+// configuration could not be loaded.
+func (e *Engine) unclaimRenames(c *claimedRenames) {
+	if c == nil {
+		return
+	}
+	if err := store.RestorePendingRenames(e.o.DataDir, c.written, c.rs); err != nil {
+		e.log.Warn("keep the account renames for later", "err", err)
+	}
+}
+
+// applyRenamesLocked applies claimed renames, in order, to the state and the
+// runtime records, and returns the ones it applied. A round in flight keeps
+// its runtime record, so it stays marked as running and books its result under
+// the new name. The caller holds e.mu and calls syncAccountsLocked afterwards.
 func (e *Engine) applyRenamesLocked(c *claimedRenames) []store.Rename {
 	if c == nil {
 		return nil
 	}
-	inCfg := func(n string) bool { _, ok := e.cfg.Find(n); return ok }
-	applied, later := e.state.ApplyRenames(c.rs, inCfg)
-	if len(later) > 0 && e.clock.Now().Sub(c.written) < importWait {
-		if err := store.SavePendingRenames(e.o.DataDir, c.written, later); err != nil {
-			e.log.Warn("keep the account renames for later", "err", err)
+	detached := map[string]*store.AccountState{}
+	for n, d := range e.detached {
+		detached[n] = d.as
+	}
+	for _, r := range c.rs {
+		if r.From == r.To {
+			continue
+		}
+		e.state.ApplyRename(r.From, r.To, detached)
+		if rt := e.rt[r.From]; rt != nil {
+			rt.name = r.To
+			e.rt[r.To] = rt
+			delete(e.rt, r.From)
+		} else {
+			delete(e.rt, r.To)
+		}
+		if e.renamedTo == nil {
+			e.renamedTo = map[string]bool{}
+		}
+		e.renamedTo[r.To] = true
+	}
+	for n := range e.detached {
+		if _, still := detached[n]; !still {
+			delete(e.detached, n)
 		}
 	}
-	return applied
+	return c.rs
+}
+
+// detachLocked sets the state of an account the configuration does not have
+// aside instead of dropping it.
+func (e *Engine) detachLocked(name string, as *store.AccountState, now time.Time) {
+	if e.detached == nil {
+		e.detached = map[string]*detachedState{}
+	}
+	e.detached[name] = &detachedState{as: as, at: now}
+}
+
+// recoverLocked returns the state set aside under name when a rename made it
+// the account's, and forgets old entries.
+func (e *Engine) recoverLocked(name string, now time.Time) *store.AccountState {
+	for n, d := range e.detached {
+		if now.Sub(d.at) > detachedTTL {
+			delete(e.detached, n)
+		}
+	}
+	if !e.renamedTo[name] {
+		return nil
+	}
+	d := e.detached[name]
+	if d == nil {
+		return nil
+	}
+	delete(e.detached, name)
+	return d.as
 }
 
 // tidyRenamesLocked drops the earlier names of accounts that are gone.

@@ -97,7 +97,7 @@ func TestTimeJumpPostponesDueRounds(t *testing.T) {
 
 	// A normal short gap is not a jump.
 	f.clock.Advance(f.opts.Tick)
-	f.e.updateAccount("main", func(as *store.AccountState) { as.NextRun = f.clock.now.Add(-time.Second) })
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) { as.NextRun = f.clock.now.Add(-time.Second) })
 	f.tickWait()
 	if f.h.total() == 0 {
 		t.Error("due round did not run on a normal tick")
@@ -373,7 +373,7 @@ func TestRunNowTriggerFile(t *testing.T) {
 func TestRunNowIgnoredWhileAutoPaused(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
 	f.start()
-	f.e.updateAccount("main", func(as *store.AccountState) { as.Status = store.StatusPaused })
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) { as.Status = store.StatusPaused })
 	_ = TriggerRun(f.dir, "main")
 	f.tickWait()
 	if f.h.total() != 0 {
@@ -563,7 +563,7 @@ func TestShutdownAbortsRunningRound(t *testing.T) {
 	f.start()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	f.e.updateAccount("main", func(as *store.AccountState) { as.NextRun = f.clock.now.Add(-time.Minute) })
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) { as.NextRun = f.clock.now.Add(-time.Minute) })
 	f.e.tick(ctx)
 	f.e.wait()
 	if f.acct("main").Totals.Rounds != 0 {
