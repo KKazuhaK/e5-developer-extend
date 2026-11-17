@@ -20,6 +20,8 @@ export function reasonMsg(reason: string): Msg | null {
       return { key: "rec.reason.no_teams_license" };
     case "no_sharepoint":
       return { key: "rec.reason.no_sharepoint" };
+    case "no_bookings":
+      return { key: "rec.reason.no_bookings" };
     case "needs_admin_role":
       return { key: "rec.reason.needs_admin_role" };
     case "not_supported":

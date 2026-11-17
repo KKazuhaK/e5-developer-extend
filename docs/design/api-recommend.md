@@ -28,13 +28,14 @@ func (o *Ops) RecommendCategories(ctx context.Context, name string) (Recommendat
 
 | 探测 | 探测的 API（目录里的 id，按顺序取第一个有权限的） | 决定的分类 | 判“没有”的结果 | 原因码 |
 |---|---|---|---|---|
-| 邮箱 | `mail.settings`、`mail.folders`、`mail.messages`、`cal.list`、`contacts.list` | mail、calendar、contacts、tasks | HTTP 404、400 | `no_mailbox` |
+| 邮箱 | `mail.settings`、`mail.folders`、`mail.messages`、`cal.list`、`contacts.list` | mail、calendar、contacts、tasks、insights | HTTP 404、400 | `no_mailbox` |
 | OneDrive | `drive.info`、`drive.root` | files、notes | HTTP 404、400 | `no_onedrive` |
 | Teams | `teams.joined` | teams | HTTP 404（403 是策略或权限问题，只算 `maybe`） | `no_teams_license` |
 | SharePoint | `sites.root` | sites | HTTP 404 | `no_sharepoint` |
+| Bookings | `bookings.businesses` | bookings | HTTP 404 | `no_bookings` |
 
 - 请求的**路径来自目录**（`API.Path(kind)`），不在代码里再写一遍；全部是 GET，永远不写。
-- 探测不会下载大量数据：返回单个对象的 API（`mail.settings`、`drive.info`、`sites.root`）不带查询；`teams.joined` 也不带任何查询
+- 探测不会下载大量数据：返回单个对象的 API（`mail.settings`、`drive.info`、`sites.root`、`bookings.businesses`）不带查询；`teams.joined` 也不带任何查询
   （Graph 文档说明 List joinedTeams 不支持 OData 查询参数，结果只是用户自己的团队）；其余集合 API 一律 `$top=1&$select=id`。测试检查了这一点。
 - “没有”只认 HTTP 404 / 400（Teams、SharePoint 只认 404）；402、403、405、409、422 等其他 4xx 都不能证明“没有”，一律 `maybe` + `probe_failed`。
 - 其他分类（user、org、group、apps）没有探测：只要权限够就是 `recommended`。
@@ -114,7 +115,7 @@ GUI 的健康页直接显示 `doctor` 的所有检查，所以不需要改动前
 - 步骤编号变化：登录是第 3 步（原来是第 4 步），所有 `startStep` 调用方（概览和账号页的“重新登录”）改为 3。
 - 后端 `AccountService.Recommend` 返回 `{needsLogin, categories[{category,status,reason,default}], recommended[]}`；`CatalogService.DefaultCategories()` 返回目录默认分类，不含任何用户名、令牌。
 
-原因码在界面上翻译（中英文）：`missing_permission:X`（缺少权限 X）、`no_mailbox`、`no_onedrive`、`no_teams_license`、`no_sharepoint`、
+原因码在界面上翻译（中英文）：`missing_permission:X`（缺少权限 X）、`no_mailbox`、`no_onedrive`、`no_teams_license`、`no_sharepoint`、`no_bookings`、
 `needs_admin_role`、`not_supported`、`probe_failed`。
 
 ## 5. 不做什么

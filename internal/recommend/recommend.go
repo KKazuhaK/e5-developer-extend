@@ -32,6 +32,7 @@ const (
 	ReasonNoOneDrive        = "no_onedrive"
 	ReasonNoTeams           = "no_teams_license"
 	ReasonNoSharePoint      = "no_sharepoint"
+	ReasonNoBookings        = "no_bookings"
 	ReasonNeedsAdminRole    = "needs_admin_role"
 	ReasonNotSupported      = "not_supported"
 	ReasonProbeFailed       = "probe_failed"
@@ -123,7 +124,8 @@ type probe struct {
 // result is only the user's own teams). Every other probe API is a collection
 // and is asked for one item with only its id (probeQuery), so a probe never
 // downloads bulk data.
-var noQuery = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true, "teams.joined": true}
+var noQuery = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true, "teams.joined": true,
+	"bookings.businesses": true}
 
 func probeQuery(api catalog.API) url.Values {
 	if noQuery[api.ID] {
@@ -137,7 +139,7 @@ var probes = []probe{
 	{
 		Name:       "mailbox",
 		APIs:       []string{"mail.settings", "mail.folders", "mail.messages", "cal.list", "contacts.list"},
-		Categories: []string{"mail", "calendar", "contacts", "tasks"},
+		Categories: []string{"mail", "calendar", "contacts", "tasks", "insights"},
 		Absent:     []int{http.StatusNotFound, http.StatusBadRequest},
 		Reason:     ReasonNoMailbox,
 	},
@@ -162,6 +164,14 @@ var probes = []probe{
 		Categories: []string{"sites"},
 		Absent:     []int{http.StatusNotFound},
 		Reason:     ReasonNoSharePoint,
+	},
+	{
+		// The list does not support $top or $select; Bookings may be switched off for the tenant.
+		Name:       "bookings",
+		APIs:       []string{"bookings.businesses"},
+		Categories: []string{"bookings"},
+		Absent:     []int{http.StatusNotFound},
+		Reason:     ReasonNoBookings,
 	},
 }
 

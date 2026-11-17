@@ -368,7 +368,7 @@ func TestDefaultFlagFollowsTheCatalog(t *testing.T) {
 	f := newFake(t, nil)
 	r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
 	for _, c := range r.Categories {
-		if want := c.Category != "reports"; c.Default != want {
+		if want := c.Category != "reports" && c.Category != "bookings"; c.Default != want {
 			t.Errorf("%s default = %v", c.Category, c.Default)
 		}
 	}

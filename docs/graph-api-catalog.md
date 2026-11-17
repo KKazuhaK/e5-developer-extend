@@ -32,6 +32,8 @@
 | user | user.me | `/me` | User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users/{user}` | User.Read.All, Directory.Read.All |
 | user | user.list | `/users?$top=20` | User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users?$top=20` | User.Read.All, Directory.Read.All |
 | user | user.memberof | `/me/memberOf` | User.Read, GroupMember.Read.All, Directory.Read.All | `/users/{user}/memberOf` | Directory.Read.All |
+| user | user.directreports | `/me/directReports` | User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users/{user}/directReports` | User.Read.All, Directory.Read.All |
+| user | user.settings | `/me/settings`⁷ | User.Read, User.Read.All | — | — |
 | org | org.info | `/organization` | User.Read¹, Organization.Read.All, Directory.Read.All | `/organization` | Organization.Read.All, Directory.Read.All |
 | org | org.domains | `/domains` | Domain.Read.All, Directory.Read.All | `/domains` | Domain.Read.All, Directory.Read.All |
 | group | group.list | `/groups?$top=20` | Group.ReadBasic.All, GroupMember.Read.All, Group.Read.All, Directory.Read.All | `/groups?$top=20` | Group.ReadBasic.All², GroupMember.Read.All, Group.Read.All, Directory.Read.All |
@@ -43,17 +45,27 @@
 | mail | mail.settings | `/me/mailboxSettings` | MailboxSettings.Read, MailboxSettings.ReadWrite | `/users/{user}/mailboxSettings` | MailboxSettings.Read, MailboxSettings.ReadWrite |
 | mail | mail.categories | `/me/outlook/masterCategories` | MailboxSettings.Read, MailboxSettings.ReadWrite | `/users/{user}/outlook/masterCategories` | MailboxSettings.Read, MailboxSettings.ReadWrite |
 | calendar | cal.list | `/me/calendars` | Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite | `/users/{user}/calendars` | Calendars.ReadBasic³, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite |
+| calendar | cal.groups | `/me/calendarGroups` | Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite | `/users/{user}/calendarGroups` | Calendars.ReadBasic³, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite |
 | calendar | cal.events | `/me/events?$top=10` | Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite | `/users/{user}/events?$top=10` | Calendars.ReadBasic³, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite |
 | contacts | contacts.list | `/me/contacts?$top=10` | Contacts.Read, Contacts.ReadWrite | `/users/{user}/contacts?$top=10` | Contacts.Read, Contacts.ReadWrite |
 | files | drive.info | `/me/drive` | Files.Read, Files.Read.All, Sites.Read.All | —⁴ | — |
+| files | drive.list | `/me/drives` | Files.Read, Files.Read.All, Sites.Read.All | — | — |
 | files | drive.root | `/me/drive/root/children` | Files.Read, Files.Read.All, Sites.Read.All | `/users/{user}/drive/root/children` | Files.Read.All, Sites.Read.All |
 | sites | sites.root | `/sites/root` | Sites.Read.All | `/sites/root` | Sites.Read.All |
 | sites | sites.lists | `/sites/root/lists` | Sites.Read.All | `/sites/root/lists` | Sites.Read.All |
 | sites | sites.search | `/sites?search=*` | Sites.Read.All | `/sites?search=*` | Sites.Read.All |
 | notes | onenote.notebooks | `/me/onenote/notebooks` | Notes.Create, Notes.Read, Notes.Read.All | —⁵ | — |
+| notes | onenote.sections | `/me/onenote/sections?$top=10`⁵ | Notes.Create, Notes.Read, Notes.Read.All | — | — |
 | tasks | todo.lists | `/me/todo/lists` | Tasks.Read, Tasks.ReadWrite | `/users/{user}/todo/lists` | Tasks.Read.All, Tasks.ReadWrite.All |
 | tasks | planner.tasks | `/me/planner/tasks` | Tasks.Read, Group.Read.All | `/users/{user}/planner/tasks` | Tasks.Read.All |
 | teams | teams.joined | `/me/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All | `/users/{user}/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All |
+| insights | insights.trending | `/me/insights/trending?$top=10`⁸ | Sites.Read.All | — | — |
+| insights | insights.used | `/me/insights/used?$top=10`⁸ | Sites.Read.All | — | — |
+| insights | insights.shared | `/me/insights/shared?$top=10`⁸ | Sites.Read.All | — | — |
+| insights | people.list | `/me/people?$top=10`⁹ | People.Read, People.Read.All | — | — |
+| presence | presence.me | `/me/presence` | Presence.Read, Presence.Read.All | `/users/{user}/presence` | Presence.Read.All |
+| bookings | bookings.businesses | `/solutions/bookingBusinesses`¹⁰ | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All | `/solutions/bookingBusinesses` | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All |
+| bookings | bookings.currencies | `/solutions/bookingCurrencies`¹⁰ | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All | `/solutions/bookingCurrencies` | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All |
 | reports | reports.active | `/reports/getOffice365ActiveUserDetail(period='D7')`⁶ | Reports.Read.All（还需管理员角色） | 同左 | Reports.Read.All |
 
 `{user}`：应用身份下的目标用户 ID 或 UPN。来自配置，或者启动时从 `/users` 随机取一个。
@@ -67,13 +79,19 @@
 4. `GET /users/{id}/drive` 的文档写的是**应用权限不支持**，所以应用身份只用 `drive.root`。实测时再确认。
 5. OneNote 的**应用身份已于 2025-03-31 停用**（Message Center MC1011142）。参考页的表格里还列着 `Notes.Read.All`，但实际已经调不通。
 6. 报表接口返回 302 跳转到 CSV，客户端要跟随跳转。委托身份调用时，用户还必须有 Entra 的报表相关管理员角色。
+7. `GET /me/settings`（v1.0，用户设置）只支持委托身份。原版的“区域和语言设置”（`/me/settings/regionalAndLanguageSettings`）只在 beta 里，我们只用 v1.0，所以没有收。
+8. 洞察（`/me/insights/*`）只支持委托身份，需要邮箱；权限用已有的 `Sites.Read.All`。
+9. People API 处于维护模式但仍可调用；只有委托身份。
+10. Bookings 默认关闭（不是每个租户都开了 Bookings），列表接口不支持 `$top`。需要 `Bookings.Read.All`。
 
 ## 从初稿删掉或降级的条目
 
 | 条目 | 处理 | 原因 |
 |---|---|---|
-| `drive.recent`（`/me/drive/recent`） | **删除** | 已弃用：降级运行到 2026 年 11 月，之后不再返回数据，也就是现在 |
-| `user.people`（`/me/people`） | **删除** | People API 进入维护模式，官方建议改用 Microsoft Search |
+| `drive.recent`（`/me/drive/recent`）、`drive.sharedWithMe` | **删除** | 已弃用：降级运行到 2026 年 11 月，之后不再返回数据，也就是现在 |
+| `user.people`（`/me/people`） | **重新加入**为 `people.list`（insights 分类） | People API 进入维护模式，但还能调用；原版也在用 |
+| `/me/manager` | 不收 | 没有上级的账号（开发者租户里常见）会返回 404，每轮都显示为失败；只收 `user.directreports`（空列表也是 200） |
+| 某个团队的频道列表 | 不收 | 需要先取团队 ID 再请求第二步，引擎目前一次只发一条独立的请求 |
 | OneNote 应用身份 | 删除应用路径 | 见脚注 5 |
 | `drive.info` 应用身份 | 删除应用路径 | 见脚注 4 |
 | `planner.tasks` 应用身份 | **补上** | 初稿以为不支持，文档实际支持 `Tasks.Read.All` |
@@ -100,6 +118,7 @@
 - 委托身份：尽量选普通用户能自己同意的低权限。`GroupMember.Read.All` 需要管理员同意（E5 开发者租户里你自己就是管理员，所以不是问题）。
   其余是否需要管理员同意，以 Entra 后台“API 权限”页显示为准，实测时核对。`offline_access` 不对应任何接口，只是让登录可以续期。
 - 应用身份：全部需要管理员同意。
+- 新增的三个权限都是只读：`People.Read`、`Presence.Read`、`Bookings.Read.All`（委托），`Presence.Read.All`、`Bookings.Read.All`（应用）。自动创建应用会一并申请；已有的应用注册没有这些权限时，对应接口只是不会被选中，不影响其他接口。
 - `Organization.Read.All` 在两个列表里都有：除了“组织信息”接口，订阅到期检测（`GET /directory/subscriptions`，见 [docs/design/subscription.md](design/subscription.md)）也读它；委托身份下它需要管理员同意。
 - 测试保证列表里的每个权限（`offline_access` 除外）都至少被 `apis.yaml` 里的一个接口用到，所以列表不会悄悄变成多余的权限。
 

@@ -99,7 +99,7 @@ func TestAvailable(t *testing.T) {
 	}
 }
 
-var footnoteRe = strings.NewReplacer("¹", "", "²", "", "³", "", "⁴", "", "⁵", "", "⁶", "")
+var footnoteRe = strings.NewReplacer("¹", "", "²", "", "³", "", "⁴", "", "⁵", "", "⁶", "", "⁷", "", "⁸", "", "⁹", "", "⁰", "")
 
 func cleanCell(s string) string {
 	s = footnoteRe.Replace(strings.TrimSpace(s))

@@ -33,6 +33,28 @@
     app: [Directory.Read.All]
   default: true
 
+- id: user.directreports
+  category: user
+  name: Direct reports
+  delegated: /me/directReports
+  app: /users/{user}/directReports
+  query:
+    $select: ["id,displayName", "id,displayName,jobTitle"]
+  scopes:
+    delegated: [User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All]
+    app: [User.Read.All, Directory.Read.All]
+  default: true
+
+# Not /me/settings/regionalAndLanguageSettings: that one is beta only.
+# No application path: the docs do not support application permissions here.
+- id: user.settings
+  category: user
+  name: User settings
+  delegated: /me/settings
+  scopes:
+    delegated: [User.Read, User.Read.All]
+  default: true
+
 - id: org.info
   category: org
   name: Organization info
@@ -155,6 +177,16 @@
     app: [Calendars.ReadBasic, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite]
   default: true
 
+- id: cal.groups
+  category: calendar
+  name: Calendar groups
+  delegated: /me/calendarGroups
+  app: /users/{user}/calendarGroups
+  scopes:
+    delegated: [Calendars.ReadBasic, Calendars.Read, Calendars.ReadWrite]
+    app: [Calendars.ReadBasic, Calendars.ReadBasic.All, Calendars.Read, Calendars.ReadWrite]
+  default: true
+
 - id: cal.events
   category: calendar
   name: Calendar events
@@ -186,6 +218,15 @@
   category: files
   name: OneDrive info
   delegated: /me/drive
+  scopes:
+    delegated: [Files.Read, Files.Read.All, Sites.Read.All]
+  default: true
+
+# No application path, like drive.info.
+- id: drive.list
+  category: files
+  name: OneDrive drives
+  delegated: /me/drives
   scopes:
     delegated: [Files.Read, Files.Read.All, Sites.Read.All]
   default: true
@@ -244,6 +285,16 @@
     delegated: [Notes.Create, Notes.Read, Notes.Read.All]
   default: true
 
+- id: onenote.sections
+  category: notes
+  name: OneNote sections
+  delegated: /me/onenote/sections
+  query:
+    $top: ["5", "10"]
+  scopes:
+    delegated: [Notes.Create, Notes.Read, Notes.Read.All]
+  default: true
+
 - id: todo.lists
   category: tasks
   name: To Do lists
@@ -273,6 +324,81 @@
     delegated: [Team.ReadBasic.All, TeamSettings.Read.All]
     app: [Team.ReadBasic.All, TeamSettings.Read.All]
   default: true
+
+# Insights, people and presence have no application path: the docs do not
+# support application permissions for /me/insights and /me/people.
+- id: insights.trending
+  category: insights
+  name: Trending documents
+  delegated: /me/insights/trending
+  query:
+    $top: ["5", "10"]
+  scopes:
+    delegated: [Sites.Read.All]
+  default: true
+
+- id: insights.used
+  category: insights
+  name: Used documents
+  delegated: /me/insights/used
+  query:
+    $top: ["5", "10"]
+  scopes:
+    delegated: [Sites.Read.All]
+  default: true
+
+- id: insights.shared
+  category: insights
+  name: Shared documents
+  delegated: /me/insights/shared
+  query:
+    $top: ["5", "10"]
+  scopes:
+    delegated: [Sites.Read.All]
+  default: true
+
+# People API is in maintenance mode but still answers.
+- id: people.list
+  category: insights
+  name: Relevant people
+  delegated: /me/people
+  query:
+    $top: ["5", "10"]
+    $select: ["id,displayName", "id,displayName,jobTitle"]
+  scopes:
+    delegated: [People.Read, People.Read.All]
+  default: true
+
+- id: presence.me
+  category: presence
+  name: Presence
+  delegated: /me/presence
+  app: /users/{user}/presence
+  scopes:
+    delegated: [Presence.Read, Presence.Read.All]
+    app: [Presence.Read.All]
+  default: true
+
+# Off by default: not every tenant has Bookings turned on.
+- id: bookings.businesses
+  category: bookings
+  name: Bookings businesses
+  delegated: /solutions/bookingBusinesses
+  app: /solutions/bookingBusinesses
+  scopes:
+    delegated: [Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All]
+    app: [Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All]
+  default: false
+
+- id: bookings.currencies
+  category: bookings
+  name: Bookings currencies
+  delegated: /solutions/bookingCurrencies
+  app: /solutions/bookingCurrencies
+  scopes:
+    delegated: [Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All]
+    app: [Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All]
+  default: false
 
 # Needs an Entra reporting admin role when signed in as a user; answers with a
 # 302 redirect to a CSV. Off by default.
