@@ -80,3 +80,78 @@ export function appIdentityName(name: string, existing: readonly string[] = []):
   for (let n = 2; taken.has(candidate); n++) candidate = make(`-app${n}`);
   return candidate;
 }
+
+/** What the backend accepts as an account name (it also refuses a few reserved device names). */
+const EDIT_NAME_RE = /^[a-z0-9_-]{1,64}$/;
+
+/** Validates the whole edit form at once. The sign-in kind cannot change, so a stored secret is kept when the field is empty. */
+export function validateEditForm(i: AccountInput): Partial<Record<keyof AccountInput, AccountErrorCode>> {
+  const e = validateAccountInput(i, "edit", "identity", i.auth);
+  const name = i.name.trim();
+  if (!name) e.name = "required";
+  else if (!EDIT_NAME_RE.test(name)) e.name = "name";
+  if (i.categories.length === 0) e.categories = "categories";
+  return e;
+}
+
+/** True when saving would discard the saved sign-in: the tenant, the app or the user changed. */
+export function identityChanged(orig: AccountInput, next: AccountInput): boolean {
+  return orig.tenant.trim() !== next.tenant.trim() || orig.clientId.trim() !== next.clientId.trim() || orig.username.trim() !== next.username.trim();
+}
+
+/** The calls the edit form makes, in the order it makes them. */
+export interface EditApi {
+  rename(from: string, to: string): Promise<void>;
+  update(input: AccountInput): Promise<void>;
+  pause(name: string): Promise<void>;
+  resume(name: string): Promise<void>;
+}
+
+export interface EditSaveResult {
+  /** The name the account has now. */
+  name: string;
+  renamed: boolean;
+  signInCleared: boolean;
+}
+
+/** A save that failed. `name` is what the account is called now: the new name when the rename went through. */
+export class EditSaveError extends Error {
+  constructor(message: string, readonly name: string, readonly renamed: boolean) {
+    super(message);
+  }
+}
+
+/**
+ * Saves the edit form: rename first when the name changed, then the update under the (new) name, then the
+ * paused state when it changed. Nothing is sent when a field is invalid (errors are returned instead).
+ */
+export async function saveAccountEdit(
+  api: EditApi, original: AccountInput, input: AccountInput, paused: { was: boolean; now: boolean },
+): Promise<{ errors: ReturnType<typeof validateEditForm> } | { result: EditSaveResult }> {
+  const errors = validateEditForm(input);
+  if (Object.keys(errors).length) return { errors };
+  const payload: AccountInput = {
+    ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim(),
+    secret: input.secret || undefined,
+  };
+  const renamed = payload.name !== original.name;
+  let current = original.name;
+  const fail = (e: unknown): never => {
+    throw new EditSaveError(e instanceof Error ? e.message : String(e), current, current !== original.name);
+  };
+  if (renamed) {
+    try {
+      await api.rename(original.name, payload.name);
+    } catch (e) {
+      fail(e);
+    }
+    current = payload.name;
+  }
+  try {
+    await api.update(payload);
+    if (paused.was !== paused.now) await (paused.now ? api.pause(current) : api.resume(current));
+  } catch (e) {
+    fail(e);
+  }
+  return { result: { name: current, renamed, signInCleared: identityChanged(original, payload) } };
+}

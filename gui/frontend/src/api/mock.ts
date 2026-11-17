@@ -564,7 +564,21 @@ export const mockApi: Api = {
       const a = find(input.name);
       const { secret, ...rest } = input;
       void secret;
+      // Like the real service: a new tenant, client or user discards the saved sign-in.
+      if (a.input.tenant !== rest.tenant || a.input.clientId !== rest.clientId || a.input.username !== rest.username) {
+        a.status = "not_signed_in";
+        a.reason = "尚未登录";
+        a.fix = "完成一次登录后才会开始调用";
+      }
       a.input = rest;
+    },
+    async rename(from, to) {
+      await wait(300);
+      const a = find(from);
+      if (accounts.some((x) => x.input.name === to)) throw new Error(`账号 ${to} 已存在。请换一个名称。`);
+      if (!/^[a-z0-9_-]{1,64}$/.test(to)) throw new Error("名称只能包含小写字母、数字、- 和 _，最长 64 个字符");
+      clearLogin(from);
+      a.input = { ...a.input, name: to };
     },
     async remove(name) {
       await lag();

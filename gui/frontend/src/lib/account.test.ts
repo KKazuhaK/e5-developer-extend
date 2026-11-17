@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AccountInput } from "@/api/types";
-import { appIdentityName, isSignInFrequency, reasonHead, secretRequired, grantedScopes, needsSecret, needsUsername, summarizeByCategory, validateAccountInput } from "./account";
+import { EditSaveError, appIdentityName, identityChanged, saveAccountEdit, validateEditForm, isSignInFrequency, reasonHead, secretRequired, grantedScopes, needsSecret, needsUsername, summarizeByCategory, validateAccountInput } from "./account";
 
 const GUID = "0b4f6c1e-9a2d-4c7e-8f31-5d6a7b8c9d0e";
 const input = (p: Partial<AccountInput> = {}): AccountInput => ({
@@ -111,5 +111,85 @@ describe("sign-in frequency cutoff", () => {
     const n = appIdentityName("x".repeat(32), taken);
     expect(n).toHaveLength(32);
     expect(taken).not.toContain(n);
+  });
+});
+
+describe("validateEditForm", () => {
+  it("accepts an unchanged account and keeps the stored secret when the field is empty", () => {
+    expect(validateEditForm(input({ auth: "client_secret", username: "u@x.com" }))).toEqual({});
+  });
+  it("checks every field at once", () => {
+    const e = validateEditForm(input({ name: "Bad Name", tenant: "", clientId: "x", auth: "password", username: "", secretExpires: "nope", categories: [] }));
+    expect(e).toEqual({ name: "name", tenant: "required", clientId: "guid", username: "required", secretExpires: "date", categories: "categories" });
+  });
+  it("uses the backend's name rule: lowercase, up to 64", () => {
+    expect(validateEditForm(input({ name: "Work" })).name).toBe("name");
+    expect(validateEditForm(input({ name: "a".repeat(65) })).name).toBe("name");
+    expect(validateEditForm(input({ name: "a".repeat(64) })).name).toBeUndefined();
+    expect(validateEditForm(input({ name: " " })).name).toBe("required");
+  });
+});
+
+describe("identityChanged", () => {
+  it("is true for a new tenant, client or user only", () => {
+    expect(identityChanged(input(), input({ name: "other", categories: ["x"], secret: "s", secretExpires: "2030-01-01" }))).toBe(false);
+    expect(identityChanged(input(), input({ tenant: "other.example" }))).toBe(true);
+    expect(identityChanged(input(), input({ clientId: "0b4f6c1e-9a2d-4c7e-8f31-5d6a7b8c9d0f" }))).toBe(true);
+    expect(identityChanged(input({ username: "a@x" }), input({ username: "b@x" }))).toBe(true);
+    expect(identityChanged(input({ tenant: "t" }), input({ tenant: " t " }))).toBe(false);
+  });
+});
+
+describe("saveAccountEdit", () => {
+  const fake = (fail?: "rename" | "update") => {
+    const calls: string[] = [];
+    return {
+      calls,
+      api: {
+        rename: async (a: string, b: string) => { calls.push(`rename ${a}>${b}`); if (fail === "rename") throw new Error("exists"); },
+        update: async (i: AccountInput) => { calls.push(`update ${i.name}${i.secret ? " +secret" : ""}`); if (fail === "update") throw new Error("disk"); },
+        pause: async (n: string) => { calls.push(`pause ${n}`); },
+        resume: async (n: string) => { calls.push(`resume ${n}`); },
+      },
+    };
+  };
+  const unpaused = { was: false, now: false };
+
+  it("sends nothing while a field is invalid", async () => {
+    const f = fake();
+    const out = await saveAccountEdit(f.api, input(), input({ name: "new", tenant: "" }), unpaused);
+    expect("errors" in out && out.errors.tenant).toBe("required");
+    expect(f.calls).toEqual([]);
+  });
+  it("renames first, then updates under the new name", async () => {
+    const f = fake();
+    const out = await saveAccountEdit(f.api, input(), input({ name: " work ", secret: "s3" }), unpaused);
+    expect(f.calls).toEqual(["rename main>work", "update work +secret"]);
+    expect("result" in out && out.result).toEqual({ name: "work", renamed: true, signInCleared: false });
+  });
+  it("does not rename when the name is the same, and reports a discarded sign-in", async () => {
+    const f = fake();
+    const out = await saveAccountEdit(f.api, input(), input({ tenant: "other.example" }), unpaused);
+    expect(f.calls).toEqual(["update main"]);
+    expect("result" in out && out.result).toEqual({ name: "main", renamed: false, signInCleared: true });
+  });
+  it("applies the paused toggle last, under the current name", async () => {
+    const f = fake();
+    await saveAccountEdit(f.api, input(), input({ name: "work" }), { was: false, now: true });
+    expect(f.calls).toEqual(["rename main>work", "update work", "pause work"]);
+    const g = fake();
+    await saveAccountEdit(g.api, input(), input(), { was: true, now: false });
+    expect(g.calls).toEqual(["update main", "resume main"]);
+  });
+  it("stops at a failed rename without updating", async () => {
+    const f = fake("rename");
+    await expect(saveAccountEdit(f.api, input(), input({ name: "work" }), unpaused)).rejects.toMatchObject({ message: "exists", name: "main", renamed: false });
+    expect(f.calls).toEqual(["rename main>work"]);
+  });
+  it("says the rename went through when the update fails after it", async () => {
+    const f = fake("update");
+    const err = await saveAccountEdit(f.api, input(), input({ name: "work" }), unpaused).catch((e) => e);
+    expect(err).toBeInstanceOf(EditSaveError);
+    expect(err).toMatchObject({ message: "disk", name: "work", renamed: true });
   });
 });
