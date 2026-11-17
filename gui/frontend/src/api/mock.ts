@@ -232,7 +232,7 @@ const setupListeners = new Map<string, Set<(e: AppSetupEvent) => void>>();
 const setupTimers = new Map<string, number[]>();
 // catalog.RecommendedDelegated and catalog.RecommendedApplication, verbatim.
 const DELEGATED_PERMS = [
-  "User.Read", "User.ReadBasic.All", "GroupMember.Read.All", "Mail.ReadBasic", "MailboxSettings.Read", "Calendars.ReadBasic", "Contacts.Read",
+  "User.Read", "User.ReadBasic.All", "Organization.Read.All", "GroupMember.Read.All", "Mail.ReadBasic", "MailboxSettings.Read", "Calendars.ReadBasic", "Contacts.Read",
   "Files.Read", "Sites.Read.All", "Notes.Read", "Tasks.Read", "Team.ReadBasic.All", "offline_access",
 ];
 const APP_PERMS = [

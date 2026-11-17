@@ -6,7 +6,7 @@ package catalog
 // and for the documentation. offline_access is structural (it makes the sign-in
 // renewable) and is not used by any API.
 var RecommendedDelegated = []string{
-	"User.Read", "User.ReadBasic.All", "GroupMember.Read.All", "Mail.ReadBasic",
+	"User.Read", "User.ReadBasic.All", "Organization.Read.All", "GroupMember.Read.All", "Mail.ReadBasic",
 	"MailboxSettings.Read", "Calendars.ReadBasic", "Contacts.Read", "Files.Read",
 	"Sites.Read.All", "Notes.Read", "Tasks.Read", "Team.ReadBasic.All", "offline_access",
 }
@@ -19,3 +19,9 @@ var RecommendedApplication = []string{
 	"MailboxSettings.Read", "Calendars.Read", "Contacts.Read", "Files.Read.All",
 	"Sites.Read.All", "Tasks.Read.All", "Team.ReadBasic.All",
 }
+
+// SubscriptionPermission is what the subscription expiry check needs to read
+// GET /directory/subscriptions, delegated or application. It is also used by
+// the "Organization info" API of the catalog, but the check does not depend on
+// that entry staying there.
+const SubscriptionPermission = "Organization.Read.All"
