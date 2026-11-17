@@ -11,8 +11,8 @@ import (
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 
-	"github.com/KKazuhaK/e5-renew/gui/services"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/gui/services"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // runWindow runs window mode: the main window with the services behind it.

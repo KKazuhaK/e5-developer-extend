@@ -33,12 +33,12 @@ jobs:
       - name: Build
         env:
           CGO_ENABLED: "0"
-        run: go build -o bin/ ./cmd/e5renew
+        run: go build -o bin/ ./cmd/e5extend
       - name: CLI does not depend on the GUI toolkit
         shell: bash
         run: |
-          if go list -deps ./cmd/e5renew | grep -i wails; then
-            echo "cmd/e5renew must not import Wails"; exit 1
+          if go list -deps ./cmd/e5extend | grep -i wails; then
+            echo "cmd/e5extend must not import Wails"; exit 1
           fi
 
   gui:

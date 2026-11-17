@@ -5,7 +5,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 func (a *app) newAccountPauseCmd() *cobra.Command {

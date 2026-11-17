@@ -10,8 +10,8 @@ import (
 	"github.com/pkg/browser"
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 func (a *app) newAccountCmd() *cobra.Command {
@@ -51,7 +51,7 @@ func (a *app) newAccountAddCmd() *cobra.Command {
 				return err
 			}
 			fmt.Fprintf(cmd.OutOrStdout(), "added account %q (%s)\n", acct.Name, acct.Auth)
-			fmt.Fprintf(cmd.OutOrStdout(), "next: e5renew account login %s\n", acct.Name)
+			fmt.Fprintf(cmd.OutOrStdout(), "next: e5extend account login %s\n", acct.Name)
 			return nil
 		},
 	}
@@ -103,7 +103,7 @@ func (a *app) newAccountSetSecretCmd() *cobra.Command {
 			if err := o.SetSecret(contextOrBackground(cmd), name, secret, expires); err != nil {
 				return err
 			}
-			fmt.Fprintf(cmd.OutOrStdout(), "stored the new secret for account %q\nnext: e5renew account login %s   (verifies it)\n", name, name)
+			fmt.Fprintf(cmd.OutOrStdout(), "stored the new secret for account %q\nnext: e5extend account login %s   (verifies it)\n", name, name)
 			return nil
 		},
 	}
@@ -122,7 +122,7 @@ func (a *app) newAccountListCmd() *cobra.Command {
 				return err
 			}
 			if len(list) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "no accounts; add one with: e5renew account add")
+				fmt.Fprintln(cmd.OutOrStdout(), "no accounts; add one with: e5extend account add")
 				return nil
 			}
 			tw := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)

@@ -1,6 +1,6 @@
 # 注册 Entra 应用
 
-e5renew 不内置公共 Client ID，需要你在自己的开发者租户里注册一个应用。
+e5extend 不内置公共 Client ID，需要你在自己的开发者租户里注册一个应用。
 入口：[Microsoft Entra 管理中心](https://entra.microsoft.com) → 应用注册 → 新注册。
 界面文字可能随微软更新而变化，下面按功能描述。
 
@@ -17,8 +17,8 @@ e5renew 不内置公共 Client ID，需要你在自己的开发者租户里注�
 6. 添加账号：
 
 ```bash
-e5renew account add main --auth device_code --tenant <租户 ID 或 organizations> --client-id <客户端 ID>
-e5renew account login main
+e5extend account add main --auth device_code --tenant <租户 ID 或 organizations> --client-id <客户端 ID>
+e5extend account login main
 ```
 
 浏览器登录用 `--auth browser`。`password`（账号密码）只适用于没开 MFA 的账号，不推荐。
@@ -32,13 +32,13 @@ e5renew account login main
 5. 添加账号，租户必须是具体的租户 ID 或域名（不能是 `common` / `organizations`）：
 
 ```bash
-e5renew account add app1 --auth client_secret --tenant <租户 ID> --client-id <客户端 ID> \
+e5extend account add app1 --auth client_secret --tenant <租户 ID> --client-id <客户端 ID> \
         --secret-expires 2027-06-30 --username <目标用户的 UPN 或对象 ID>
 ```
 
-命令会提示输入密钥。`--secret-expires` 让 e5renew 在到期前 30、7、1 天和到期当天提醒你。
+命令会提示输入密钥。`--secret-expires` 让 e5extend 在到期前 30、7、1 天和到期当天提醒你。
 `--username` 是读取哪个用户的邮箱等数据；不指定时，需要授予 `User.Read.All`，程序会从租户里随机挑一个用户。
-换新密钥：`e5renew account set-secret app1 --secret-expires <新到期日>`。
+换新密钥：`e5extend account set-secret app1 --secret-expires <新到期日>`。
 
 ## 推荐权限
 
@@ -54,12 +54,12 @@ e5renew account add app1 --auth client_secret --tenant <租户 ID> --client-id <
 | 文件 | `Files.Read` | `Files.Read.All` |
 | 待办 | `Tasks.Read` | `Tasks.Read.All` |
 
-e5renew 请求令牌时使用 `https://graph.microsoft.com/.default`，拿到的是应用注册里**已经同意**的全部权限，
+e5extend 请求令牌时使用 `https://graph.microsoft.com/.default`，拿到的是应用注册里**已经同意**的全部权限，
 并按这些权限自动筛选可调用的接口。查看当前能用哪些：
 
 ```bash
-e5renew account test main
-e5renew catalog list --account main
+e5extend account test main
+e5extend catalog list --account main
 ```
 
-只授予只读权限。e5renew 的接口库里没有任何写操作。
+只授予只读权限。e5extend 的接口库里没有任何写操作。

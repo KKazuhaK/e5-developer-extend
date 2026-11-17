@@ -3,15 +3,15 @@
 <plist version="1.0">
 <dict>
 	<key>Label</key>
-	<string>io.github.kkazuhak.e5renew</string>
+	<string>io.github.kkazuhak.e5extend</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/usr/local/bin/e5renew</string>
+		<string>/usr/local/bin/e5extend</string>
 		<string>run</string>
 		<string>--log-format</string>
 		<string>json</string>
 		<string>--log-file</string>
-		<string>/Users/u/Library/Application Support/e5renew/engine.log</string>
+		<string>/Users/u/Library/Application Support/e5extend/engine.log</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
@@ -25,14 +25,14 @@
 	<key>ProcessType</key>
 	<string>Standard</string>
 	<key>StandardOutPath</key>
-	<string>/Users/u/Library/Logs/e5renew/engine.log</string>
+	<string>/Users/u/Library/Logs/e5extend/engine.log</string>
 	<key>StandardErrorPath</key>
-	<string>/Users/u/Library/Logs/e5renew/engine.log</string>
+	<string>/Users/u/Library/Logs/e5extend/engine.log</string>
 	<key>EnvironmentVariables</key>
 	<dict>
-		<key>E5RENEW_CONFIG_DIR</key>
+		<key>E5EXTEND_CONFIG_DIR</key>
 		<string>/Volumes/x/cfg</string>
-		<key>E5RENEW_DATA_DIR</key>
+		<key>E5EXTEND_DATA_DIR</key>
 		<string>/Volumes/x/data &amp; more</string>
 	</dict>
 </dict>

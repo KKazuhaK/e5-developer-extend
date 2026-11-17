@@ -32,7 +32,7 @@ func TestRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if bytes.Contains(data, []byte("s3cret")) || !bytes.HasPrefix(data, []byte("E5RNWBAK\x01\x01")) {
+	if bytes.Contains(data, []byte("s3cret")) || !bytes.HasPrefix(data, []byte("E5XTDBAK\x01\x01")) {
 		t.Fatal("header wrong or content not encrypted")
 	}
 	got, err := Open(data, pass)
@@ -98,12 +98,12 @@ func TestEveryHeaderByteAndSampledCiphertextAreAuthenticated(t *testing.T) {
 }
 
 func TestNotABackup(t *testing.T) {
-	for _, in := range [][]byte{nil, []byte("hello"), []byte("E5RNWBA"), bytes.Repeat([]byte{'x'}, 200)} {
+	for _, in := range [][]byte{nil, []byte("hello"), []byte("E5XTDBA"), bytes.Repeat([]byte{'x'}, 200)} {
 		if _, err := Open(in, pass); !errors.Is(err, ErrNotBackup) {
 			t.Errorf("%q: got %v", in, err)
 		}
 	}
-	if _, err := Open([]byte("E5RNWBAK\x01\x01"), pass); !errors.Is(err, ErrBadFile) {
+	if _, err := Open([]byte("E5XTDBAK\x01\x01"), pass); !errors.Is(err, ErrBadFile) {
 		t.Errorf("truncated header: %v", err)
 	}
 }

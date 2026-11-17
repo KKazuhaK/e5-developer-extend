@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func TestInitRefusesWithoutTerminal(t *testing.T) {

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
   <RegistrationInfo>
-    <Description>e5renew - keep a Microsoft 365 E5 developer tenant active</Description>
+    <Description>e5extend - keep a Microsoft 365 E5 developer tenant active</Description>
   </RegistrationInfo>
   <Triggers>
     <LogonTrigger>
@@ -48,8 +48,8 @@
   </Settings>
   <Actions Context="Author">
     <Exec>
-      <Command>C:\Users\u\bin\e5renew-bg.exe</Command>
-      <Arguments>run --log-format json --log-file C:\Users\u\AppData\Local\e5renew\engine.log</Arguments>
+      <Command>C:\Users\u\bin\e5extend-bg.exe</Command>
+      <Arguments>run --log-format json --log-file C:\Users\u\AppData\Local\e5extend\engine.log</Arguments>
     </Exec>
   </Actions>
 </Task>

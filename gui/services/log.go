@@ -3,7 +3,7 @@ package services
 import (
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 // LogService reads the call log.

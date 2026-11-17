@@ -15,10 +15,10 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 const testGUID = "11111111-2222-3333-4444-555555555555"
@@ -40,9 +40,9 @@ func newEnv(t *testing.T) *env {
 	t.Helper()
 	keyring.MockInit()
 	e := &env{t: t, cfgDir: t.TempDir(), dataDir: t.TempDir(), home: t.TempDir(),
-		runner: &service.FakeRunner{}, exe: filepath.Join(string(filepath.Separator), "opt", "e5renew", "e5renew")}
-	t.Setenv("E5RENEW_CONFIG_DIR", e.cfgDir)
-	t.Setenv("E5RENEW_DATA_DIR", e.dataDir)
+		runner: &service.FakeRunner{}, exe: filepath.Join(string(filepath.Separator), "opt", "e5extend", "e5extend")}
+	t.Setenv("E5EXTEND_CONFIG_DIR", e.cfgDir)
+	t.Setenv("E5EXTEND_DATA_DIR", e.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	// Results must not depend on whether the tests run over SSH.
@@ -170,7 +170,7 @@ func TestAccountLifecycle(t *testing.T) {
 	if bytes.Contains(raw, []byte("s3cr3t-value")) {
 		t.Fatal("secret leaked into config")
 	}
-	if !bytes.HasPrefix(raw, []byte("# Managed by e5renew")) {
+	if !bytes.HasPrefix(raw, []byte("# Managed by e5extend")) {
 		t.Fatal("saved config lacks the header comment")
 	}
 
@@ -304,7 +304,7 @@ func TestAccountTestHints(t *testing.T) {
 		err  error
 		want string
 	}{
-		{auth.ErrLoginRequired, "run: e5renew account login main"},
+		{auth.ErrLoginRequired, "run: e5extend account login main"},
 		{auth.ErrConsentRequired, "grant consent"},
 		{auth.ErrInvalidClient, "client secret"},
 		{auth.ErrTransient, "connectivity"},
@@ -326,7 +326,7 @@ func TestAccountTestRealAuthenticatorNotLoggedIn(t *testing.T) {
 	e := newEnv(t)
 	e.mustRun("", "account", "add", "main", "--auth", "device_code", "--tenant", "t.example", "--client-id", testGUID)
 	_, _, err := e.run("", "account", "test", "main")
-	if err == nil || !errors.Is(err, auth.ErrLoginRequired) || !strings.Contains(err.Error(), "e5renew account login main") {
+	if err == nil || !errors.Is(err, auth.ErrLoginRequired) || !strings.Contains(err.Error(), "e5extend account login main") {
 		t.Fatalf("got %v", err)
 	}
 }

@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/doctor"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func TestDoctorWithoutConfigFailsWithExitCode2(t *testing.T) {
@@ -18,7 +18,7 @@ func TestDoctorWithoutConfigFailsWithExitCode2(t *testing.T) {
 	if !errors.As(err, &ee) || ee.code != 2 {
 		t.Fatalf("err = %v", err)
 	}
-	if !strings.Contains(out, "no configuration file yet") || !strings.Contains(out, "e5renew config init") || !strings.Contains(out, "offline") {
+	if !strings.Contains(out, "no configuration file yet") || !strings.Contains(out, "e5extend config init") || !strings.Contains(out, "offline") {
 		t.Errorf("out:\n%s", out)
 	}
 	if strings.Contains(errOut, "Error:") {

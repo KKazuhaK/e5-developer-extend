@@ -17,8 +17,8 @@ import (
 	"github.com/AzureAD/microsoft-authentication-library-for-go/apps/cache"
 	msalerrors "github.com/AzureAD/microsoft-authentication-library-for-go/apps/errors"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 type memStore struct{ m map[string][]byte }

@@ -17,14 +17,14 @@ import (
 
 const (
 	// EnvMasterKey holds the base64 master key.
-	EnvMasterKey = "E5RENEW_MASTER_KEY"
+	EnvMasterKey = "E5EXTEND_MASTER_KEY"
 	// EnvMasterKeyFile names a file that holds the base64 master key; used
 	// where systemd credentials are not available.
-	EnvMasterKeyFile = "E5RENEW_MASTER_KEY_FILE"
+	EnvMasterKeyFile = "E5EXTEND_MASTER_KEY_FILE"
 	// CredentialName is the systemd credential file name.
-	CredentialName = "e5renew-master-key"
+	CredentialName = "e5extend-master-key"
 
-	keyringService = "e5renew"
+	keyringService = "e5extend"
 	keyringUser    = "master-key"
 )
 
@@ -96,7 +96,7 @@ func DecodeKey(s string) ([]byte, error) {
 	return key, nil
 }
 
-const noKeyAdvice = "set " + EnvMasterKey + " (generate one with: e5renew vault init --print-key), " +
+const noKeyAdvice = "set " + EnvMasterKey + " (generate one with: e5extend vault init --print-key), " +
 	"point " + EnvMasterKeyFile + " at a key file, or provide the systemd credential " + CredentialName + " via LoadCredential="
 
 // KeyringTimeout bounds each system keyring call, so a locked Secret Service
@@ -158,7 +158,7 @@ func checkNoOrphans(vaultDir string) error {
 	}
 	if has {
 		return fmt.Errorf("%w: the vault has data but no master key was found; restore the old key via %s or the system keyring "+
-			"(as a last resort, `e5renew vault reset` deletes all stored secrets)", ErrNoMasterKey, EnvMasterKey)
+			"(as a last resort, `e5extend vault reset` deletes all stored secrets)", ErrNoMasterKey, EnvMasterKey)
 	}
 	return nil
 }
@@ -200,7 +200,7 @@ func ResolveMasterKey(backend, vaultDir string) ([]byte, Source, error) {
 	}
 
 	if backend == BackendKeyring {
-		return nil, "", fmt.Errorf("%w: no key in the system keyring; run: e5renew vault init", ErrNoMasterKey)
+		return nil, "", fmt.Errorf("%w: no key in the system keyring; run: e5extend vault init", ErrNoMasterKey)
 	}
 	if err := checkNoOrphans(vaultDir); err != nil {
 		return nil, "", err

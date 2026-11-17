@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 )
 
 // webhook builds the alert sender of this app.
@@ -50,7 +50,7 @@ func (a *app) newNotifySetCmd() *cobra.Command {
 			if cleared {
 				fmt.Fprintln(out, "removed notify.webhook_url from config.toml")
 			}
-			fmt.Fprintln(out, "next: e5renew notify test")
+			fmt.Fprintln(out, "next: e5extend notify test")
 			return nil
 		},
 	}

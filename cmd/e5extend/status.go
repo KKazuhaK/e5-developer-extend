@@ -12,9 +12,9 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 // staleAfter marks an account whose last success is older than this.
@@ -51,7 +51,7 @@ func (a *app) newStatusCmd() *cobra.Command {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %v\n", snap.StateErr)
 			}
 			if len(snap.Accounts) == 0 {
-				fmt.Fprintln(out, "no accounts; add one with: e5renew account add")
+				fmt.Fprintln(out, "no accounts; add one with: e5extend account add")
 				return nil
 			}
 

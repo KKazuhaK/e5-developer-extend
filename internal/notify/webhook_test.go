@@ -61,7 +61,7 @@ func TestPayloadShape(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := map[string]string{"event": "needs_attention", "account": "main", "message": "login required",
-		"time": "2026-11-17T10:00:00Z", "text": "[e5renew] main: login required", "content": "[e5renew] main: login required"}
+		"time": "2026-11-17T10:00:00Z", "text": "[e5extend] main: login required", "content": "[e5extend] main: login required"}
 	for k, v := range want {
 		if got[k] != v {
 			t.Errorf("%s = %q, want %q", k, got[k], v)
@@ -70,7 +70,7 @@ func TestPayloadShape(t *testing.T) {
 	if rc.ctype != "application/json" {
 		t.Errorf("content type %q", rc.ctype)
 	}
-	if (Event{Message: "hello"}).Text() != "[e5renew] hello" {
+	if (Event{Message: "hello"}).Text() != "[e5extend] hello" {
 		t.Error("text without account")
 	}
 }

@@ -8,8 +8,8 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 )
 
 // AccountService manages accounts and their sign-in.

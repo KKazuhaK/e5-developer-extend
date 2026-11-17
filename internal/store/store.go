@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // StateVersion is the current state.json format version.

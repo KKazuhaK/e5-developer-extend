@@ -10,11 +10,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 type outcome struct {
@@ -124,7 +124,7 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 			as.ConsecutiveFailedRound++
 			if as.ConsecutiveFailedRound >= AutoPauseRounds {
 				as.Status = store.StatusPaused
-				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); fix the cause, then run: e5renew account resume %s",
+				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); fix the cause, then run: e5extend account resume %s",
 					as.ConsecutiveFailedRound, out.lastFail, acct.Name)
 				as.NextRun = time.Time{}
 				follow = append(follow, "auto_pause")
@@ -254,7 +254,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 		}
 	}
 	if len(cands) == 0 {
-		out.attention = "no usable APIs: check the app's granted permissions and the account's categories (e5renew account test " + acct.Name + ")"
+		out.attention = "no usable APIs: check the app's granted permissions and the account's categories (e5extend account test " + acct.Name + ")"
 		return out
 	}
 

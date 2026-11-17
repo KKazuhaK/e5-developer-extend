@@ -11,8 +11,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 type hookRecv struct {
@@ -90,7 +90,7 @@ func TestNotifySetTestClear(t *testing.T) {
 	if !strings.Contains(out, "delivered") || strings.Contains(out, "SECRETTOKEN123") {
 		t.Errorf("test output: %s", out)
 	}
-	if len(rc.got) != 2 || rc.path[1] != "/hook/SECRETTOKEN123" || rc.got[1]["event"] != "test" || !strings.HasPrefix(rc.got[1]["text"], "[e5renew]") {
+	if len(rc.got) != 2 || rc.path[1] != "/hook/SECRETTOKEN123" || rc.got[1]["event"] != "test" || !strings.HasPrefix(rc.got[1]["text"], "[e5extend]") {
 		t.Errorf("received: %+v", rc.got)
 	}
 

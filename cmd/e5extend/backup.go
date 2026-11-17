@@ -8,14 +8,14 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 func (a *app) newBackupCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "backup",
 		Short: "Export everything to one file, or import it on another machine",
-		Long: "Move e5renew to another machine (also another operating system) with one file.\n" +
+		Long: "Move e5extend to another machine (also another operating system) with one file.\n" +
 			"The file is encrypted with a backup passphrase you choose; on import the secrets are\n" +
 			"encrypted again with the new machine's own master key.",
 	}
@@ -106,11 +106,11 @@ func (a *app) newBackupImportCmd() *cobra.Command {
 }
 
 func printImportSummary(out io.Writer, s ops.ImportSummary) {
-	fmt.Fprintf(out, "imported (%s mode) from a backup made %s by e5renew %s on %s\n", s.Mode, s.Created, s.SourceVersion, s.SourceOS)
+	fmt.Fprintf(out, "imported (%s mode) from a backup made %s by e5extend %s on %s\n", s.Mode, s.Created, s.SourceVersion, s.SourceOS)
 	fmt.Fprintf(out, "accounts: %s\n", listOrNone(s.Accounts))
 	fmt.Fprintf(out, "vault entries written: %d\n", s.VaultEntries)
 	if s.NewMasterKey {
-		fmt.Fprintln(out, "this machine had no master key: a new one was created in the system keyring (keep it safe; see `e5renew vault init`)")
+		fmt.Fprintln(out, "this machine had no master key: a new one was created in the system keyring (keep it safe; see `e5extend vault init`)")
 	}
 	for _, sk := range s.Skipped {
 		fmt.Fprintf(out, "left out: %s\n", sk)

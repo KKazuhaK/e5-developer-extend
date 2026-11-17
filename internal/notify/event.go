@@ -16,7 +16,7 @@ const (
 	Stale          = "stale"
 	SecretExpiring = "secret_expiring"
 	PeriodEnded    = "period_ended"
-	// Test is only sent by `e5renew notify test`.
+	// Test is only sent by `e5extend notify test`.
 	Test = "test"
 )
 
@@ -31,9 +31,9 @@ type Event struct {
 // Text is the one-line form used by chat-style webhooks.
 func (e Event) Text() string {
 	if e.Account == "" {
-		return "[e5renew] " + e.Message
+		return "[e5extend] " + e.Message
 	}
-	return "[e5renew] " + e.Account + ": " + e.Message
+	return "[e5extend] " + e.Account + ": " + e.Message
 }
 
 // payload is the JSON body. text suits Slack and WeCom/Feishu style bots,

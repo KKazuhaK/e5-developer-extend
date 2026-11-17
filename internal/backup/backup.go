@@ -5,7 +5,7 @@
 //
 // Layout (version 1), all of it before the ciphertext is authenticated:
 //
-//	magic      8 bytes   "E5RNWBAK"
+//	magic      8 bytes   "E5XTDBAK"
 //	version    1 byte    1
 //	kdf        1 byte    1 = PBKDF2-HMAC-SHA256
 //	iterations 4 bytes   big endian
@@ -31,7 +31,7 @@ import (
 )
 
 const (
-	magic        = "E5RNWBAK"
+	magic        = "E5XTDBAK"
 	formatNumber = 1
 	kdfPBKDF2    = 1
 
@@ -61,8 +61,8 @@ var Iterations uint32 = 600_000
 
 // Errors returned by Open. Callers show their text, so none of them carries data from the file.
 var (
-	ErrNotBackup       = errors.New("not an e5renew backup file")
-	ErrTooNew          = errors.New("the backup comes from a newer version of e5renew; upgrade e5renew first")
+	ErrNotBackup       = errors.New("not an e5extend backup file")
+	ErrTooNew          = errors.New("the backup comes from a newer version of e5extend; upgrade e5extend first")
 	ErrBadFile         = errors.New("the backup file is damaged")
 	ErrDecrypt         = errors.New("wrong backup passphrase, or the file is damaged")
 	ErrTooLarge        = errors.New("the backup file is too large")

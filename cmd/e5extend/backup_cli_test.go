@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func init() { backup.Iterations = 100_000 }
@@ -42,7 +42,7 @@ func TestBackupExportImportCLI(t *testing.T) {
 		t.Fatalf("wrong passphrase: %v", err)
 	}
 	out = b.mustRun(cliPass+"\n", "backup", "import", file)
-	if !strings.Contains(out, "accounts: main") || !strings.Contains(out, "e5renew doctor") || strings.Contains(out, "CLI-SECRET-VALUE") {
+	if !strings.Contains(out, "accounts: main") || !strings.Contains(out, "e5extend doctor") || strings.Contains(out, "CLI-SECRET-VALUE") {
 		t.Fatalf("import output: %s", out)
 	}
 	if list := b.mustRun("", "account", "list"); !strings.Contains(list, "main") || !strings.Contains(list, "secret stored") {
@@ -93,7 +93,7 @@ func TestBackupExportRefusesExistingFile(t *testing.T) {
 func TestBackupPassphraseFromStdinOnly(t *testing.T) {
 	e := newEnv(t)
 	t.Setenv(vault.EnvMasterKey, vault.EncodeKey(make([]byte, 32)))
-	t.Setenv("E5RENEW_BACKUP_PASSPHRASE", cliPass) // must be ignored
+	t.Setenv("E5EXTEND_BACKUP_PASSPHRASE", cliPass) // must be ignored
 	addMain(t, e, "S")
 	file := filepath.Join(t.TempDir(), "x.e5backup")
 	if _, _, err := e.run("", "backup", "export", file); err == nil {

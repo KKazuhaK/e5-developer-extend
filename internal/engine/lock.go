@@ -10,7 +10,7 @@ import (
 
 	"github.com/gofrs/flock"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // ErrRunning means another engine already holds the single-instance lock.

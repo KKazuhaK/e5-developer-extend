@@ -1,5 +1,5 @@
 // Package service installs, removes and queries the background job that runs
-// `e5renew run`: a systemd user unit on Linux, a LaunchAgent on macOS and a
+// `e5extend run`: a systemd user unit on Linux, a LaunchAgent on macOS and a
 // scheduled task on Windows.
 //
 // The files that get written are produced by pure functions, and every
@@ -24,9 +24,9 @@ import (
 
 // Names of the registered job.
 const (
-	UnitName = "e5renew.service" // systemd user unit
-	Label    = "io.github.kkazuhak.e5renew"
-	TaskName = "e5renew" // Windows scheduled task
+	UnitName = "e5extend.service" // systemd user unit
+	Label    = "io.github.kkazuhak.e5extend"
+	TaskName = "e5extend" // Windows scheduled task
 
 	// KeyFileName is the master key file written by `--key-file`.
 	KeyFileName = "master.key"
@@ -137,7 +137,7 @@ type InstallOptions struct {
 	// unknown, which Install fills in by asking `systemctl --version`.
 	SystemdVersion int
 	// ExplicitDirs hands ConfigDir and DataDir to the job when they come from
-	// E5RENEW_*_DIR overrides: as environment on macOS, as --config-dir and
+	// E5EXTEND_*_DIR overrides: as environment on macOS, as --config-dir and
 	// --data-dir arguments on Windows (systemd units always carry them).
 	ExplicitDirs bool
 }
@@ -459,14 +459,14 @@ func CheckExecutable(path string, tempDirs ...string) error {
 	p := norm(path)
 	switch {
 	case strings.Contains(p, "/go-build"):
-		return fmt.Errorf("%s looks like a `go run` build; build a binary first (go build -o e5renew ./cmd/e5renew) and run that", path)
+		return fmt.Errorf("%s looks like a `go run` build; build a binary first (go build -o e5extend ./cmd/e5extend) and run that", path)
 	}
 	// macOS runs a quarantined app from a random read-only copy (App
 	// Translocation) until it is moved out of Downloads or the disk image.
 	if strings.Contains(p, "/apptranslocation/") ||
 		(strings.HasPrefix(p, "/volumes/") && strings.Contains(p, ".app/contents/macos/")) {
 		return fmt.Errorf("%s is a temporary copy (the app runs from the disk image or from a quarantined download); "+
-			"move E5 Renew to the Applications folder, open it from there and try again", path)
+			"move E5 Developer Extend to the Applications folder, open it from there and try again", path)
 	}
 	dirs := append([]string{"/tmp", "/var/tmp", "/private/tmp", "/private/var/folders", "/var/folders"}, tempDirs...)
 	for _, d := range dirs {
@@ -483,9 +483,9 @@ func CheckExecutable(path string, tempDirs ...string) error {
 
 // BackgroundExeName is the Windows GUI-subsystem build that does not open a
 // console window.
-const BackgroundExeName = "e5renew-bg.exe"
+const BackgroundExeName = "e5extend-bg.exe"
 
-// PickWindowsExe prefers e5renew-bg.exe next to exe. It returns the program to
+// PickWindowsExe prefers e5extend-bg.exe next to exe. It returns the program to
 // register and a warning when only the console build is available.
 func PickWindowsExe(exe string, exists func(string) bool) (path, warning string) {
 	if strings.EqualFold(winBase(exe), BackgroundExeName) {
@@ -495,6 +495,6 @@ func PickWindowsExe(exe string, exists func(string) bool) (path, warning string)
 	if exists(bg) {
 		return bg, ""
 	}
-	return exe, "e5renew-bg.exe was not found next to " + winBase(exe) +
+	return exe, "e5extend-bg.exe was not found next to " + winBase(exe) +
 		"; the task will use the console build, which shows a console window each time it starts"
 }

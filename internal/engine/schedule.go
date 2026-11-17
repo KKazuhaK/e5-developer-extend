@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
 
 // randFn returns a random duration in [lo, hi].

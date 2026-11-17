@@ -7,10 +7,10 @@
 
 | 用途 | Linux | macOS | Windows |
 |---|---|---|---|
-| 配置 `ConfigDir()` | `$XDG_CONFIG_HOME/e5renew`（默认 `~/.config/e5renew`） | `~/Library/Application Support/e5renew` | `%APPDATA%\e5renew` |
-| 数据 `DataDir()` | `$XDG_DATA_HOME/e5renew`（默认 `~/.local/share/e5renew`） | `~/Library/Application Support/e5renew` | `%LOCALAPPDATA%\e5renew` |
+| 配置 `ConfigDir()` | `$XDG_CONFIG_HOME/e5extend`（默认 `~/.config/e5extend`） | `~/Library/Application Support/e5extend` | `%APPDATA%\e5extend` |
+| 数据 `DataDir()` | `$XDG_DATA_HOME/e5extend`（默认 `~/.local/share/e5extend`） | `~/Library/Application Support/e5extend` | `%LOCALAPPDATA%\e5extend` |
 
-- 环境变量 `E5RENEW_CONFIG_DIR`、`E5RENEW_DATA_DIR` 可以覆盖（测试、Docker、Windows 服务模式用）。
+- 环境变量 `E5EXTEND_CONFIG_DIR`、`E5EXTEND_DATA_DIR` 可以覆盖（测试、Docker、Windows 服务模式用）。
 - 目录按需创建，权限 0700；目录已存在且不是 0700 时（非 Windows）会收紧为 0700。
 - 配置文件：`ConfigDir()/config.toml`。
 
@@ -56,11 +56,11 @@ home_account_id = ""             # 委托身份登录成功后由程序写入，
 ```
 
 - `Load(path)`：读取文件，补上默认值，然后 `Validate()`。文件不存在时返回 `ErrNotFound`。
-  **先只读 `version`**：大于当前支持的版本时直接报 `config version N is newer than this e5renew supports; upgrade`，
+  **先只读 `version`**：大于当前支持的版本时直接报 `config version N is newer than this e5extend supports; upgrade`，
   不会再给出一堆“未知字段”错误；通过后才做严格解码（未知字段会报错）。
 - `Save(path)`：原子写入（同目录临时文件 → `fsync` → `rename`），权限 0600。
   **文件是整体重写的，原有注释不会保留。** 每次保存都会在文件开头写一段短注释，
-  指向 `e5renew config init --print-template`（打印带注释的模板）。
+  指向 `e5extend config init --print-template`（打印带注释的模板）。
 - `Validate()`：把所有问题一次性返回（`errors.Join`），每条带字段路径，例如 `accounts[1].client_id: not a GUID`。
   校验内容：
   - 时长解析；`interval_min ≤ interval_max`；`apis_per_round_min` 在 1 到 `apis_per_round_max` 之间
@@ -71,7 +71,7 @@ home_account_id = ""             # 委托身份登录成功后由程序写入，
   - `password` 模式下 `username` 必填
 - 校验信息里的代理地址会隐藏用户名和密码；无法按 `scheme://host` 解析的值不会回显。
 - `Default()`：返回带默认值、没有账号的配置。
-- `webhook_url` 仍被读取，但推荐用 `e5renew notify set-webhook` 把地址存进 vault（见 service-doctor-notify.md）。
+- `webhook_url` 仍被读取，但推荐用 `e5extend notify set-webhook` 把地址存进 vault（见 service-doctor-notify.md）。
 
 ## 3. 密钥 `internal/vault`
 
@@ -81,18 +81,18 @@ home_account_id = ""             # 委托身份登录成功后由程序写入，
 - 三个平台的行为一致。
 
 - 主密钥：32 字节随机数，按以下顺序查找：
-  1. 环境变量 `E5RENEW_MASTER_KEY`（base64）
-  2. systemd 凭据：`$CREDENTIALS_DIRECTORY/e5renew-master-key`
-  3. 系统钥匙串（`github.com/zalando/go-keyring`，服务名 `e5renew`、用户名 `master-key`；
+  1. 环境变量 `E5EXTEND_MASTER_KEY`（base64）
+  2. systemd 凭据：`$CREDENTIALS_DIRECTORY/e5extend-master-key`
+  3. 系统钥匙串（`github.com/zalando/go-keyring`，服务名 `e5extend`、用户名 `master-key`；
      全平台无 CGO：macOS 调 `/usr/bin/security`，Linux 走 DBus Secret Service，Windows 用凭据管理器）。
      每次钥匙串调用有 10 秒超时（在 goroutine 里调用），避免被锁住的 Secret Service 卡死进程；
-     超时会报错并建议设置 `E5RENEW_MASTER_KEY`。
+     超时会报错并建议设置 `E5EXTEND_MASTER_KEY`。
 - `backend = "auto"`：按 1、2、3 的顺序找；都没有时，如果钥匙串可用就生成一个新的存进去，否则报错，并给出操作建议：
-  设置环境变量，或用 `e5renew vault init --print-key` 生成一个。
+  设置环境变量，或用 `e5extend vault init --print-key` 生成一个。
   **如果 `vault/` 下已经有 `*.bin` 文件，绝不生成新密钥**（新密钥解不开旧数据）：返回 `ErrNoMasterKey`，
-  提示“恢复旧密钥（`E5RENEW_MASTER_KEY` 或钥匙串），或运行 `e5renew vault reset` 清空”。`vault init` 同样遵守。
+  提示“恢复旧密钥（`E5EXTEND_MASTER_KEY` 或钥匙串），或运行 `e5extend vault reset` 清空”。`vault init` 同样遵守。
   写入钥匙串后会重新读取，并以钥匙串里实际存的值为准（两个进程同时初始化时不会各用各的）。
-- `e5renew vault reset [--yes]`：删除整个 vault 目录（所有 secret 和令牌缓存）。账号仍留在配置里，之后需要
+- `e5extend vault reset [--yes]`：删除整个 vault 目录（所有 secret 和令牌缓存）。账号仍留在配置里，之后需要
   `account set-secret` 重新输入密钥并重新登录。
 - `backend = "keyring"`：只用 3。`backend = "file"`：只用 1 和 2。
 - 数据：`DataDir()/vault/<key>.bin`，AES-256-GCM，随机 nonce，以 key 名作为附加认证数据（AAD），防止把文件互换。
@@ -171,34 +171,34 @@ type LoginUI interface {
 ## 6. CLI 命令（本阶段）
 
 ```
-e5renew config path                    # 打印配置和数据目录
-e5renew config init [--print-template] # 生成默认 config.toml（已存在则不动）；--print-template 只打印带注释的模板
-e5renew config validate                # 校验并列出所有问题
+e5extend config path                    # 打印配置和数据目录
+e5extend config init [--print-template] # 生成默认 config.toml（已存在则不动）；--print-template 只打印带注释的模板
+e5extend config validate                # 校验并列出所有问题
 
-e5renew account add <name> --auth device_code|browser|client_secret|password \
+e5extend account add <name> --auth device_code|browser|client_secret|password \
         --tenant T --client-id ID [--username U]
                                        # 写配置；client_secret/password 会提示输入（不回显），存进 vault
-e5renew account list                   # 名称、方式、租户、登录状态
-e5renew account login <name>           # 交互式登录 / 首次验证，成功后写回 home_account_id
-e5renew account test <name>            # 静默取令牌，打印账号、过期时间、已授予的权限
-e5renew account set-secret <name>      # 重新输入并保存 client secret / 密码（可加 --secret-expires）
-e5renew account remove <name> [--yes]  # 删除配置、vault 里的 secret 和 tokencache
+e5extend account list                   # 名称、方式、租户、登录状态
+e5extend account login <name>           # 交互式登录 / 首次验证，成功后写回 home_account_id
+e5extend account test <name>            # 静默取令牌，打印账号、过期时间、已授予的权限
+e5extend account set-secret <name>      # 重新输入并保存 client secret / 密码（可加 --secret-expires）
+e5extend account remove <name> [--yes]  # 删除配置、vault 里的 secret 和 tokencache
 
-e5renew vault init [--print-key]       # 生成主密钥：存进钥匙串，或打印出来用于环境变量 / systemd 凭据
-e5renew vault reset [--yes]            # 删除所有 vault 数据（主密钥丢失时用）
+e5extend vault init [--print-key]       # 生成主密钥：存进钥匙串，或打印出来用于环境变量 / systemd 凭据
+e5extend vault reset [--yes]            # 删除所有 vault 数据（主密钥丢失时用）
 ```
 
 - 密钥输入用 `golang.org/x/term` 不回显读取；非终端时从 stdin 读一行（方便脚本）。
 - Ctrl+C 或 SIGTERM 会立即中止密钥和确认提示，什么都不保存（终端状态会恢复）；第一次信号之后恢复默认处理，再按一次直接结束进程。
 - 账号名限制见第 2 节；`account add` 先单独校验账号并读取密钥，再加锁、重新读配置、写入。
-- 出错时打印下一步怎么做，例如 `ErrLoginRequired` → `run: e5renew account login main`。
+- 出错时打印下一步怎么做，例如 `ErrLoginRequired` → `run: e5extend account login main`。
 
 ## 7. 长期运行相关
 
 - 令牌缓存每次变化都原子写回；同一个账号的缓存读写加进程内互斥锁，并加跨进程的文件锁
   （`github.com/gofrs/flock`，`vault/tokencache/<account>.lock`）。
 - 配置的“读取 → 修改 → 保存”由 `ConfigDir()/.config.lock` 文件锁保护（`config init`、`account add/remove/login` 写回、`set-secret`）。
-  等锁最多 30 秒。锁是咨询锁，只对遵守它的 e5renew 进程有效。
+  等锁最多 30 秒。锁是咨询锁，只对遵守它的 e5extend 进程有效。
 - vault 和配置写入都是原子的，断电不会留下半个文件。
 - 静默刷新失败时按错误类型区分：`ErrTransient` 只重试，其他错误标记为需要处理，交给健康检查和通知（后续阶段实现）。
 - `secret_expires` 只记录到配置里，到期提醒在调度阶段实现。

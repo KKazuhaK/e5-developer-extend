@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func init() { backup.Iterations = 100_000 }
@@ -33,7 +33,7 @@ func TestBackupServiceRoundTrip(t *testing.T) {
 	}
 	file := filepath.Join(t.TempDir(), "mine") // no extension: the service adds one
 	a.b.PickSaveFile = func(title, name string) (string, error) {
-		if title != "Save here" || name != "e5renew-backup-"+time.Now().Format("20060102")+".e5backup" {
+		if title != "Save here" || name != "e5extend-backup-"+time.Now().Format("20060102")+".e5backup" {
 			t.Errorf("dialog args: %q %q", title, name)
 		}
 		return file, nil
@@ -121,10 +121,10 @@ func TestBackupServiceRoundTrip(t *testing.T) {
 }
 
 func TestDefaultBackupName(t *testing.T) {
-	if got := defaultBackupName(time.Date(2026, 11, 16, 23, 0, 0, 0, time.Local)); got != "e5renew-backup-20261116.e5backup" {
+	if got := defaultBackupName(time.Date(2026, 11, 16, 23, 0, 0, 0, time.Local)); got != "e5extend-backup-20261116.e5backup" {
 		t.Errorf("got %q", got)
 	}
-	if !regexp.MustCompile(`^e5renew-backup-\d{8}\.e5backup$`).MatchString(defaultBackupName(time.Now())) {
+	if !regexp.MustCompile(`^e5extend-backup-\d{8}\.e5backup$`).MatchString(defaultBackupName(time.Now())) {
 		t.Error("pattern")
 	}
 }

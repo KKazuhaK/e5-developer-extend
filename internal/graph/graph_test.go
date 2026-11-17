@@ -54,7 +54,7 @@ func TestClassAndHeaders(t *testing.T) {
 			t.Errorf("%s: got %s retry %v", tc.path, r.Class, r.RetryAfter)
 		}
 	}
-	if gotAuth != "Bearer tok" || !strings.HasPrefix(gotUA, "e5renew/") || gotCL != "eventual" {
+	if gotAuth != "Bearer tok" || !strings.HasPrefix(gotUA, "e5extend/") || gotCL != "eventual" {
 		t.Errorf("headers: %q %q %q", gotAuth, gotUA, gotCL)
 	}
 	if !strings.Contains(gotQuery, "$top=5") {

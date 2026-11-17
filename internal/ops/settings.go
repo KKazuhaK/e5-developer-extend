@@ -11,12 +11,12 @@ import (
 
 	"github.com/pelletier/go-toml/v2"
 
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
 // ConfigTemplate is the commented config.toml that `config init` writes.
-const ConfigTemplate = `# e5renew configuration. Secrets are never stored here; they live in the vault.
+const ConfigTemplate = `# e5extend configuration. Secrets are never stored here; they live in the vault.
 version = 1
 
 [schedule]
@@ -35,7 +35,7 @@ work_end = "22:00"
 proxy = ""                  # empty uses HTTPS_PROXY and friends
 
 [notify]
-# Set the alert address with: e5renew notify set-webhook <url>   (it is kept in the vault, not here)
+# Set the alert address with: e5extend notify set-webhook <url>   (it is kept in the vault, not here)
 webhook_url = ""            # legacy plaintext address; set-webhook moves it into the vault
 stale_after = "72h"         # alert when an account has had no successful call for this long
 events = []                 # empty means all: needs_attention, recovered, auto_paused, stale, secret_expiring, period_ended
@@ -43,7 +43,7 @@ events = []                 # empty means all: needs_attention, recovered, auto_
 [vault]
 backend = "auto"            # auto | keyring | file
 
-# Add accounts with: e5renew account add <name> --auth ... --tenant ... --client-id ...
+# Add accounts with: e5extend account add <name> --auth ... --tenant ... --client-id ...
 `
 
 // ConfigPaths returns the config file and the data directory.
@@ -100,7 +100,7 @@ func (o *Ops) ValidateConfig() (ConfigReport, error) {
 	rep := ConfigReport{Path: path}
 	cfg, err := config.Load(path)
 	if errors.Is(err, config.ErrNotFound) {
-		return rep, fmt.Errorf("%w\nrun: e5renew config init", err)
+		return rep, fmt.Errorf("%w\nrun: e5extend config init", err)
 	}
 	if err != nil {
 		if cfg == nil {

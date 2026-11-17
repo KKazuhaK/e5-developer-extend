@@ -30,11 +30,11 @@ type Manager interface {
 
 ### 1.1 Linux：systemd 用户服务
 
-`~/.config/systemd/user/e5renew.service`：
+`~/.config/systemd/user/e5extend.service`：
 
 ```ini
 [Unit]
-Description=e5renew - keep a Microsoft 365 E5 developer tenant active
+Description=e5extend - keep a Microsoft 365 E5 developer tenant active
 # 用户级 systemd 里没有 network-online.target，所以不写 After/Wants；断网时引擎自己重试
 
 [Service]
@@ -45,15 +45,15 @@ RestartSec=30
 WatchdogSec=120
 TimeoutStopSec=30
 # 只在使用 --key-file 时加：
-LoadCredential=e5renew-master-key:<ConfigDir>/master.key
-Environment=E5RENEW_CONFIG_DIR=<ConfigDir>
-Environment=E5RENEW_DATA_DIR=<DataDir>
+LoadCredential=e5extend-master-key:<ConfigDir>/master.key
+Environment=E5EXTEND_CONFIG_DIR=<ConfigDir>
+Environment=E5EXTEND_DATA_DIR=<DataDir>
 
 [Install]
 WantedBy=default.target
 ```
 
-- 安装：写文件，然后执行 `systemctl --user daemon-reload`、`systemctl --user enable --now e5renew.service`；重新安装时再 `systemctl --user restart e5renew.service`。
+- 安装：写文件，然后执行 `systemctl --user daemon-reload`、`systemctl --user enable --now e5extend.service`；重新安装时再 `systemctl --user restart e5extend.service`。
 - **linger**：用 `loginctl show-user $USER -p Linger --value` 检查。如果是 `no`：
   - 带 `--enable-linger` 参数时执行 `loginctl enable-linger $USER`（大多数发行版允许用户自己开）；失败的话给出 sudo 命令。
   - 不带这个参数时，在结果里**醒目提示**：不开 linger 的话，用户退出登录后服务会被停掉。
@@ -70,22 +70,22 @@ WantedBy=default.target
 
 ### 1.3 macOS：LaunchAgent
 
-`~/Library/LaunchAgents/io.github.kkazuhak.e5renew.plist`：
+`~/Library/LaunchAgents/io.github.kkazuhak.e5extend.plist`：
 - `ProgramArguments`：`[<路径>, "run", "--log-format", "json"]`
 - `RunAtLoad`：true
 - `KeepAlive`：`{SuccessfulExit: false}`
 - `ThrottleInterval`：30
 - `ProcessType`：`Standard`（不用 `Background`：Background 会让定时器被系统节流）
-- `StandardOutPath` / `StandardErrorPath`：`~/Library/Logs/e5renew/engine.log`
+- `StandardOutPath` / `StandardErrorPath`：`~/Library/Logs/e5extend/engine.log`
 
-安装命令：`launchctl enable gui/<uid>/io.github.kkazuhak.e5renew`，然后 `launchctl bootstrap gui/<uid> <plist>`（被禁用的 label 不能 bootstrap，所以 enable 在前）。
+安装命令：`launchctl enable gui/<uid>/io.github.kkazuhak.e5extend`，然后 `launchctl bootstrap gui/<uid> <plist>`（被禁用的 label 不能 bootstrap，所以 enable 在前）。
 已经装过的话，先 `bootout` 再 `bootstrap`。用户登录会话里可以访问钥匙串，不需要密钥文件。
 
 ### 1.4 Windows：登录时运行的计划任务
 
 **不用 Windows 服务作为默认方式**：服务以 LocalSystem 运行时读不到用户的凭据管理器和用户目录，需要整套单独的数据位置，等以后有需要再做（作为 `--windows-service` 的 TODO 记在文档里）。
 
-计划任务通过 XML 导入：`schtasks /Create /TN e5renew /XML <file> /F`。XML 关键设置：
+计划任务通过 XML 导入：`schtasks /Create /TN e5extend /XML <file> /F`。XML 关键设置：
 - 触发器：当前用户登录时（`LogonTrigger`，限定 `UserId`）
 - `RunLevel`：`LeastPrivilege`
 - **`ExecutionTimeLimit`：`PT0S`**（默认是 72 小时，到时间会被系统杀掉）
@@ -95,31 +95,31 @@ WantedBy=default.target
 - `StartWhenAvailable`：true
 
 **控制台窗口问题**：普通的命令行程序由计划任务启动时会弹出控制台窗口。解决办法：
-- 发布时额外编译一个窗口子系统版本 `e5renew-bg.exe`（`-ldflags -H=windowsgui`），代码和普通版完全相同。
-- `service install` 优先使用同目录下的 `e5renew-bg.exe`；找不到就用 `e5renew.exe`，并警告会出现控制台窗口。
+- 发布时额外编译一个窗口子系统版本 `e5extend-bg.exe`（`-ldflags -H=windowsgui`），代码和普通版完全相同。
+- `service install` 优先使用同目录下的 `e5extend-bg.exe`；找不到就用 `e5extend.exe`，并警告会出现控制台窗口。
 
-安装后立即执行一次 `schtasks /Run /TN e5renew`。查询状态用 `schtasks /Query /TN e5renew /XML`，再结合引擎的心跳判断是否在运行。
+安装后立即执行一次 `schtasks /Run /TN e5extend`。查询状态用 `schtasks /Query /TN e5extend /XML`，再结合引擎的心跳判断是否在运行。
 
 ### 1.5 Docker
 
 - 仓库根目录放 `Dockerfile`：多阶段构建，最终镜像基于 `gcr.io/distroless/static`，以非 root 用户运行。
-  - `ENV E5RENEW_CONFIG_DIR=/data/config E5RENEW_DATA_DIR=/data/state`
-  - `ENTRYPOINT ["/e5renew"]`，`CMD ["run", "--log-format", "json"]`
-- 主密钥通过环境变量 `E5RENEW_MASTER_KEY` 或 Docker secret 传入（用 `/run/secrets/...` 时设置 `CREDENTIALS_DIRECTORY=/run/secrets`）。
+  - `ENV E5EXTEND_CONFIG_DIR=/data/config E5EXTEND_DATA_DIR=/data/state`
+  - `ENTRYPOINT ["/e5extend"]`，`CMD ["run", "--log-format", "json"]`
+- 主密钥通过环境变量 `E5EXTEND_MASTER_KEY` 或 Docker secret 传入（用 `/run/secrets/...` 时设置 `CREDENTIALS_DIRECTORY=/run/secrets`）。
 - `docs/user/docker.md` 里给出 `compose.yaml` 示例，带 `restart: unless-stopped`、数据卷，**不暴露任何端口**。
 - 镜像发布到 GHCR 的 CI 留到发布阶段再做。
 
 ### 1.6 CLI
 
 ```
-e5renew service install [--key-file] [--enable-linger]
-e5renew service uninstall
-e5renew service status
+e5extend service install [--key-file] [--enable-linger]
+e5extend service uninstall
+e5extend service status
 ```
 
 ## 2. 健康检查 `internal/doctor`
 
-`e5renew doctor [--offline] [--json]`。每项检查返回 `{id, title, level: ok|warn|fail, detail, fix}`。
+`e5extend doctor [--offline] [--json]`。每项检查返回 `{id, title, level: ok|warn|fail, detail, fix}`。
 
 | id | 检查内容 | 级别规则 |
 |---|---|---|
@@ -150,15 +150,15 @@ e5renew service status
 
   ```json
   {"event":"needs_attention","account":"main","message":"…","time":"RFC3339",
-   "text":"[e5renew] main: …","content":"[e5renew] main: …"}
+   "text":"[e5extend] main: …","content":"[e5extend] main: …"}
   ```
 
   `text` 兼容 Slack 和企业微信、飞书类机器人的常见格式，`content` 兼容 Discord。其他服务可以按结构化字段自己处理。
   - 超时 10 秒；失败按指数退避重试 3 次；仍失败只记日志，不影响引擎。
 - Webhook 地址可能带令牌，所以**存进 vault**（key 为 `notify/webhook`）：
-  - `e5renew notify set-webhook <url>`：保存
-  - `e5renew notify clear`：删除
-  - `e5renew notify test`：发一条测试消息
+  - `e5extend notify set-webhook <url>`：保存
+  - `e5extend notify clear`：删除
+  - `e5extend notify test`：发一条测试消息
 - 配置里原来的 `notify.webhook_url` 继续支持，但 `doctor` 会建议迁移；`set-webhook` 会顺带把配置里的明文删掉。
 - 桌面通知留给 GUI 阶段做。
 
@@ -177,7 +177,7 @@ e5renew service status
 - 引擎在每次状态变化和每天第一次 tick 时评估这些事件。发送是异步的，不能阻塞 tick。
 - 新配置项：`notify.stale_after`（默认 `"72h"`）、`notify.events`（空表示全部）。
 
-## 4. 引导 `e5renew init`
+## 4. 引导 `e5extend init`
 
 交互式向导，每一步都可以跳过，已经完成的步骤自动跳过：
 1. 没有配置就生成默认配置
@@ -207,7 +207,7 @@ e5renew service status
 
 ## 6. 测试
 
-- 服务文件：unit、plist、任务 XML 的 golden 测试，包括带和不带 `--key-file`、`e5renew-bg.exe` 存在和不存在两种情况。
+- 服务文件：unit、plist、任务 XML 的 golden 测试，包括带和不带 `--key-file`、`e5extend-bg.exe` 存在和不存在两种情况。
 - 用假 Runner 测试 install、uninstall、status 依次执行的命令。
 - sd_notify：在临时目录里起一个 unixgram 监听，检查收到的消息（仅 Linux 测试，用 build tag 或 `runtime.GOOS` 跳过）。
 - doctor：每项检查的 ok、warn、fail 都要覆盖；`--offline` 跳过联网检查；退出码；JSON 输出。
@@ -221,12 +221,12 @@ e5renew service status
 - **`service install --print`**：只显示将要写的文件和执行的命令，不写不跑。隐藏参数 `--platform linux|darwin|windows` 只配合 `--print`，
   跨平台打印时用虚构的用户名和路径。可执行文件在临时目录时，`--print` 只警告，真正安装仍然拒绝。
 - **Windows 任务**：参数是 `run --log-format json --log-file <DataDir>\engine.log`。窗口子系统版本没有控制台，运行日志写到这个文件
-  （`run --log-file` 是新增参数，约 5 MB 转存为 `.1`）。任务 XML 以 UTF-16 保存在 `<DataDir>\service\e5renew-task.xml`，卸载时删除。
-  `Status.Running` 在 Windows 上是“未知”，由 `service status` 用引擎的锁和心跳补充。任务不继承 `E5RENEW_*_DIR` 环境变量，安装时会警告。
-- **macOS**：只有 `E5RENEW_CONFIG_DIR` 或 `E5RENEW_DATA_DIR` 被显式设置时，plist 才带 `EnvironmentVariables`。`--key-file` 在 macOS、Windows 上报错。
+  （`run --log-file` 是新增参数，约 5 MB 转存为 `.1`）。任务 XML 以 UTF-16 保存在 `<DataDir>\service\e5extend-task.xml`，卸载时删除。
+  `Status.Running` 在 Windows 上是“未知”，由 `service status` 用引擎的锁和心跳补充。任务不继承 `E5EXTEND_*_DIR` 环境变量，安装时会警告。
+- **macOS**：只有 `E5EXTEND_CONFIG_DIR` 或 `E5EXTEND_DATA_DIR` 被显式设置时，plist 才带 `EnvironmentVariables`。`--key-file` 在 macOS、Windows 上报错。
   `bootout` 只在 plist 已存在时执行。
 - **卸载**：不删除 `master.key`（它可能是 vault 密钥的唯一副本），只提醒。
-- **密钥提示**：`service install` 不带 `--key-file` 时，Linux 上如果 `E5RENEW_MASTER_KEY` 设置在当前 shell，或者既没有 `CREDENTIALS_DIRECTORY` 也没有
+- **密钥提示**：`service install` 不带 `--key-file` 时，Linux 上如果 `E5EXTEND_MASTER_KEY` 设置在当前 shell，或者既没有 `CREDENTIALS_DIRECTORY` 也没有
   `DISPLAY`/`WAYLAND_DISPLAY`，会提示加 `--key-file`。`vault.backend = "keyring"` 时拒绝 `--key-file`（那个后端不读文件）。
   新增 `vault.LookupMasterKey`（只查找，从不创建密钥），供 `init` 判断步骤是否已完成。
 - **Webhook**：重定向不跟随（3xx 算失败）；除 408、429、5xx 和网络错误外的 4xx 不重试。错误、日志和消息里用 `<webhook>` 代替地址、主机和路径。
@@ -238,7 +238,7 @@ e5renew service status
   `notify.stale_after` 至少 1 小时；`notify.events` 的值必须是上表里的事件名。
 - **doctor**：`--offline` 时联网的检查（令牌、clock、network）不出现在输出里，文本末尾有说明；离线时 `scopes` 用上一轮记录的权限。
   配置加载失败时只运行 config、engine、service。vault 检查只解密已存在的数据，从不创建主密钥。账号已暂停（配置）时 `activity` 显示正常。
-- **init**：向导通过在进程内执行已有子命令完成工作；选择“生成密钥并显示”时，密钥只设置到向导进程的 `E5RENEW_MASTER_KEY`，
+- **init**：向导通过在进程内执行已有子命令完成工作；选择“生成密钥并显示”时，密钥只设置到向导进程的 `E5EXTEND_MASTER_KEY`，
   之后的步骤可用，退出后需要自己保存。
 
 ## 8. 评审后的修改（覆盖上文相应说明）
@@ -260,14 +260,14 @@ e5renew service status
   `service status`/`uninstall` 解码 UTF-16 输出；`schtasks /Query` 退出码为 1（且不是“拒绝访问”）视为未安装，其他错误如实报告（消息是本地化的，所以只用退出码）。
 - **`init`**：“生成密钥并显示”只在 Linux 上提供（只有那里能用 `--key-file` 把它交给后台任务）；主密钥来自环境变量时，向导自动给 `service install` 加 `--key-file` 并说明原因。
 - **`LoadCredential=` 的版本**：systemd NEWS 里最早明确提到用户服务可用凭据的是 v258（加密凭据；凭据本身自 v247 起用于系统服务），在 v259 上实测普通 `LoadCredential=`
-  对用户服务有效。`systemctl --version` 低于 258 时，unit 改用 `Environment=E5RENEW_MASTER_KEY_FILE=<path>`，vault 支持这个环境变量
-  （顺序：`E5RENEW_MASTER_KEY`、`E5RENEW_MASTER_KEY_FILE`、`CREDENTIALS_DIRECTORY`、钥匙串）。
+  对用户服务有效。`systemctl --version` 低于 258 时，unit 改用 `Environment=E5EXTEND_MASTER_KEY_FILE=<path>`，vault 支持这个环境变量
+  （顺序：`E5EXTEND_MASTER_KEY`、`E5EXTEND_MASTER_KEY_FILE`、`CREDENTIALS_DIRECTORY`、钥匙串）。
 - **doctor**：`notify` 项会尝试解密 vault 里的地址（从不显示），解不开时警告。
 
 ### 复审后的小修正
 
 - 告警送达回调按“尝试时间”匹配（`MarkDelivered(…, tried)`），较早一次尝试的迟到回调不会把新一次标记为已送达。
-- 读不到 systemd 版本时，也改用 `E5RENEW_MASTER_KEY_FILE` 方式（各版本都支持），并给出警告。
-- 卸载时，unit 里有 `E5RENEW_MASTER_KEY_FILE` 的情况同样提示 `master.key` 被保留。
-- 通过 `E5RENEW_MASTER_KEY_FILE` 读取的密钥文件如果对其他用户可读，会记一条警告并提示 `chmod 600`。
+- 读不到 systemd 版本时，也改用 `E5EXTEND_MASTER_KEY_FILE` 方式（各版本都支持），并给出警告。
+- 卸载时，unit 里有 `E5EXTEND_MASTER_KEY_FILE` 的情况同样提示 `master.key` 被保留。
+- 通过 `E5EXTEND_MASTER_KEY_FILE` 读取的密钥文件如果对其他用户可读，会记一条警告并提示 `chmod 600`。
 - Windows 计划任务没法设置环境变量：自定义目录改用新增的全局参数 `--config-dir` / `--data-dir` 传入（它们只是设置对应的环境变量）。macOS 用 plist 的 `EnvironmentVariables`，systemd 用 `Environment=`。

@@ -13,13 +13,13 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 const testGUID = "11111111-2222-3333-4444-555555555555"
@@ -120,14 +120,14 @@ func newRig(t *testing.T) *rig {
 		AccessToken: tokenValue, HomeAccountID: "uid.tid", Account: upn,
 		ExpiresOn: time.Now().Add(time.Hour), Scopes: []string{"User.Read", "Mail.Read"},
 	}, prompt: "To sign in, use a web browser to open the page https://microsoft.com/devicelogin and enter the code ABCD1234EF to authenticate."}
-	t.Setenv("E5RENEW_CONFIG_DIR", r.cfgDir)
-	t.Setenv("E5RENEW_DATA_DIR", r.dataDir)
+	t.Setenv("E5EXTEND_CONFIG_DIR", r.cfgDir)
+	t.Setenv("E5EXTEND_DATA_DIR", r.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	o := &ops.Ops{
 		NewAuth:   func(config.Account, auth.Store, *http.Client) (auth.Authenticator, error) { return r.fa, nil },
 		NoCallGap: true, WebhookBackoff: []time.Duration{time.Millisecond},
-		Runner: &service.FakeRunner{}, Exe: func() (string, error) { return "/opt/e5renew/e5renew", nil },
+		Runner: &service.FakeRunner{}, Exe: func() (string, error) { return "/opt/e5extend/e5extend", nil },
 		Svc: ops.SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"},
 	}
 	r.b = NewBackend(&Backend{Ops: o, ConfigDir: r.cfgDir, Emit: r.ev.emit, Autostart: r.auto,
@@ -504,7 +504,7 @@ func TestInstallChecksBeforeHandover(t *testing.T) {
 	}
 
 	// The checks pass but the install fails: the handover is withdrawn.
-	r.b.Ops.Exe = func() (string, error) { return "/opt/e5renew/e5renew", nil }
+	r.b.Ops.Exe = func() (string, error) { return "/opt/e5extend/e5extend", nil }
 	r.b.Ops.Platform = service.Linux // make systemctl the command that fails, on every host
 	r.b.Ops.Runner = &service.FakeRunner{FailOn: []string{"systemctl"}}
 	if _, err := h.InstallService(); err == nil {

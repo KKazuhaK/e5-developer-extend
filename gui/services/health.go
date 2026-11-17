@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 // HealthService runs the health checks and manages the background service.

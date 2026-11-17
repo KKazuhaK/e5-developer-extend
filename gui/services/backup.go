@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 // BackupService exports everything to one file and restores it (docs/user/backup.md).
@@ -21,7 +21,7 @@ const backupExt = ".e5backup"
 
 // defaultBackupName is the file name the save dialog starts with, for the day now.
 func defaultBackupName(now time.Time) string {
-	return "e5renew-backup-" + now.Format("20060102") + backupExt
+	return "e5extend-backup-" + now.Format("20060102") + backupExt
 }
 
 // TargetHasData reports whether this machine already has accounts or vault

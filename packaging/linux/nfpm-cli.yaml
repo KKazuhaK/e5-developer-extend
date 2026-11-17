@@ -1,8 +1,8 @@
-# Command-line package: /usr/bin/e5renew, no GUI libraries.
+# Command-line package: /usr/bin/e5extend, no GUI libraries.
 # Built by scripts/release/cli.sh, which copies the binaries of one
 # architecture into dist/stage/ first. nfpm expands ${...} in name, arch,
 # version and depends, but not in contents.
-name: e5renew
+name: e5extend
 arch: ${GOARCH}
 platform: linux
 version: ${VERSION}
@@ -13,18 +13,18 @@ maintainer: KKazuhaK <KKazuhaK@users.noreply.github.com>
 description: |
   Keeps a Microsoft 365 E5 developer tenant active.
   Calls read-only Microsoft Graph APIs on a randomized schedule. Run it as a
-  systemd user service: e5renew init, or e5renew service install.
+  systemd user service: e5extend init, or e5extend service install.
 vendor: KKazuhaK
-homepage: https://github.com/KKazuhaK/e5-renew
+homepage: https://github.com/KKazuhaK/e5-developer-extend
 license: MIT
 
 contents:
-  - src: dist/stage/e5renew
-    dst: /usr/bin/e5renew
+  - src: dist/stage/e5extend
+    dst: /usr/bin/e5extend
     file_info:
       mode: 0755
   - src: LICENSE
-    dst: /usr/share/doc/e5renew/copyright
+    dst: /usr/share/doc/e5extend/copyright
     file_info:
       mode: 0644
 

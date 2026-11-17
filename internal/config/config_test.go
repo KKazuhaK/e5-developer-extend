@@ -189,7 +189,7 @@ func TestFindRemove(t *testing.T) {
 
 func TestNewerVersionRejectedFirst(t *testing.T) {
 	_, err := Parse([]byte("version = 2\nfuture_field = 1\n"))
-	if err == nil || !strings.Contains(err.Error(), "newer than this e5renew supports") {
+	if err == nil || !strings.Contains(err.Error(), "newer than this e5extend supports") {
 		t.Fatalf("got %v", err)
 	}
 }
@@ -200,7 +200,7 @@ func TestSaveWritesHeader(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	if !strings.HasPrefix(string(data), "# Managed by e5renew") || !strings.Contains(string(data), "--print-template") {
+	if !strings.HasPrefix(string(data), "# Managed by e5extend") || !strings.Contains(string(data), "--print-template") {
 		t.Fatalf("header missing:\n%s", data)
 	}
 	if _, err := Load(path); err != nil {

@@ -15,14 +15,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/backup"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/backup"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // logNameRe matches the call log files a backup may carry.
@@ -47,7 +47,7 @@ const (
 	CodeMergeConflict       = "merge_conflict"        // Names: accounts present on both sides
 	CodeLocalConfigBroken   = "local_config_broken"   // default or merge import while this machine's config is invalid
 	CodeInvalidBackup       = "invalid_backup"        // the file decrypts but its content is not usable
-	CodeNewerVersion        = "newer_version"         // the content comes from a newer e5renew
+	CodeNewerVersion        = "newer_version"         // the content comes from a newer e5extend
 	CodeSaveFailed          = "save_failed"           // nothing was changed
 	CodeRollbackFailed      = "rollback_failed"       // default and replace: Names are the vault entries that could not be put back
 	CodeRollbackFailedMerge = "rollback_failed_merge" // merge: Names are the accounts that were being added
@@ -421,7 +421,7 @@ func checkBackup(p *backup.Payload, machineVault config.Vault) (*importPlan, err
 			return nil, invalidBackup("the backup holds an invalid state.json", nil)
 		}
 		if st.Version > store.StateVersion {
-			return nil, &BackupError{Code: CodeNewerVersion, Msg: "the backup's state.json comes from a newer version of e5renew; upgrade e5renew first"}
+			return nil, &BackupError{Code: CodeNewerVersion, Msg: "the backup's state.json comes from a newer version of e5extend; upgrade e5extend first"}
 		}
 		if st.Accounts == nil {
 			st.Accounts = map[string]*store.AccountState{}
@@ -454,7 +454,7 @@ func checkBackup(p *backup.Payload, machineVault config.Vault) (*importPlan, err
 	return plan, nil
 }
 
-// knownVaultKey accepts only the entries e5renew itself writes.
+// knownVaultKey accepts only the entries e5extend itself writes.
 func knownVaultKey(cfg *config.Config, key string) bool {
 	if key == notify.VaultKey {
 		return true
@@ -552,12 +552,12 @@ func rollbackFailed(cause error, mode ImportMode, failed, accounts []string) err
 		return &BackupError{
 			Code: CodeRollbackFailedMerge, Names: accounts, Err: cause,
 			Msg: fmt.Sprintf("%v\nthe old vault entries %s could not be put back, and vault entries of the accounts being added (%s) may be left behind;\n"+
-				"remove them (e5renew account remove NAME) and merge again", cause, strings.Join(failed, ", "), strings.Join(accounts, ", ")),
+				"remove them (e5extend account remove NAME) and merge again", cause, strings.Join(failed, ", "), strings.Join(accounts, ", ")),
 		}
 	}
 	return &BackupError{
 		Code: CodeRollbackFailed, Names: failed, Err: cause,
-		Msg: fmt.Sprintf("%v\nthe old vault entries %s could not be put back; run `e5renew doctor`, and if accounts fail, import the same backup again with --replace",
+		Msg: fmt.Sprintf("%v\nthe old vault entries %s could not be put back; run `e5extend doctor`, and if accounts fail, import the same backup again with --replace",
 			cause, strings.Join(failed, ", ")),
 	}
 }
@@ -599,7 +599,7 @@ func (o *Ops) applyImport(ctx context.Context, plan *importPlan, mode ImportMode
 	p := plan.p
 	sum := ImportSummary{
 		Mode: mode, SourceOS: p.SourceOS, SourceVersion: p.AppVersion, Created: p.Created,
-		Hint: "accounts whose tenant ties tokens to the device (Conditional Access) may ask you to sign in again; run `e5renew doctor` to check",
+		Hint: "accounts whose tenant ties tokens to the device (Conditional Access) may ask you to sign in again; run `e5extend doctor` to check",
 	}
 
 	tcfg, cfgPath, broken, err := o.targetConfig(mode)
@@ -938,7 +938,7 @@ func accountOfKey(key string) string {
 
 // ensureMasterKey makes sure this machine has a master key to write with. A
 // key that exists is used; with none, and an empty vault, one is created in
-// the system keyring like `e5renew vault init` does. It reports whether it created one.
+// the system keyring like `e5extend vault init` does. It reports whether it created one.
 func ensureMasterKey(backend string) (bool, error) {
 	_, _, err := vault.LookupMasterKey(backend)
 	if err == nil {

@@ -7,7 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 )
 
 func (a *app) newCatalogCmd() *cobra.Command {
@@ -35,7 +35,7 @@ func (a *app) newCatalogCmd() *cobra.Command {
 				return nil
 			}
 			if res.NoGrants {
-				fmt.Fprintf(out, "no granted permissions recorded for %q yet; run: e5renew run-now %s\n\n", res.Account.Name, res.Account.Name)
+				fmt.Fprintf(out, "no granted permissions recorded for %q yet; run: e5extend run-now %s\n\n", res.Account.Name, res.Account.Name)
 			}
 			fmt.Fprintln(tw, "ID\tCATEGORY\tAVAILABLE\tNAME")
 			for _, e := range res.Entries {

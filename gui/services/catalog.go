@@ -1,7 +1,7 @@
 package services
 
 import (
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 )
 
 // CatalogService lists the API calls the engine can make.

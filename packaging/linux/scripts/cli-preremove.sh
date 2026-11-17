@@ -4,6 +4,6 @@
 case "$1" in
 upgrade | 1) exit 0 ;;
 esac
-echo "e5renew: if you installed the background service, run 'e5renew service uninstall' as that user;" >&2
-echo "e5renew: otherwise the service keeps failing because the program is gone. Your config and data are kept." >&2
+echo "e5extend: if you installed the background service, run 'e5extend service uninstall' as that user;" >&2
+echo "e5extend: otherwise the service keeps failing because the program is gone. Your config and data are kept." >&2
 exit 0

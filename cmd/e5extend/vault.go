@@ -7,8 +7,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 func (a *app) newVaultCmd() *cobra.Command {
@@ -23,7 +23,7 @@ func (a *app) newVaultInitCmd() *cobra.Command {
 		Use:   "init",
 		Short: "Create the vault master key",
 		Long: "Create the vault master key and store it in the system keyring, or with --print-key\n" +
-			"print a new one for E5RENEW_MASTER_KEY or a systemd credential (nothing is stored).",
+			"print a new one for E5EXTEND_MASTER_KEY or a systemd credential (nothing is stored).",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if printKey {

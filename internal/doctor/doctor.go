@@ -1,4 +1,4 @@
-// Package doctor runs the health checks behind `e5renew doctor`. Every check
+// Package doctor runs the health checks behind `e5extend doctor`. Every check
 // returns a level, a short detail and, where one exists, the command that
 // fixes the problem. Details never contain tokens, secrets, user names or
 // webhook addresses.
@@ -16,16 +16,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // Level is the severity of a check result.
@@ -246,11 +246,11 @@ func checkConfig(d Deps, cfg *config.Config, err error) Check {
 	c := Check{ID: "config", Title: "Configuration"}
 	switch {
 	case errors.Is(err, config.ErrNotFound):
-		c.Level, c.Detail, c.Fix = Fail, "no configuration file yet", "e5renew config init"
+		c.Level, c.Detail, c.Fix = Fail, "no configuration file yet", "e5extend config init"
 	case err != nil:
-		c.Level, c.Detail, c.Fix = Fail, firstLines(err, 5), "e5renew config validate"
+		c.Level, c.Detail, c.Fix = Fail, firstLines(err, 5), "e5extend config validate"
 	case len(cfg.Accounts) == 0:
-		c.Level, c.Detail, c.Fix = Warn, "the configuration is valid but has no accounts", "e5renew account add <name> --auth device_code --tenant <tenant> --client-id <id>"
+		c.Level, c.Detail, c.Fix = Warn, "the configuration is valid but has no accounts", "e5extend account add <name> --auth device_code --tenant <tenant> --client-id <id>"
 	default:
 		c.Level, c.Detail = OK, fmt.Sprintf("valid, %d account(s)", len(cfg.Accounts))
 	}
@@ -305,7 +305,7 @@ func checkVault(d Deps, cfg *config.Config) Check {
 		c.Level, c.Detail = Fail, strings.Join(dedup(problems), "; ")
 		c.Fix = d.hint(firstErr, firstAccount(cfg))
 		if errors.Is(firstErr, vault.ErrNotFound) {
-			c.Fix = "e5renew account set-secret <name>"
+			c.Fix = "e5extend account set-secret <name>"
 		}
 		return c
 	}
@@ -354,7 +354,7 @@ func checkEngine(d Deps) Check {
 		if hbErr == nil {
 			c.Detail += " (last seen " + hb.Local().Format("2006-01-02 15:04") + ")"
 		}
-		c.Fix = "e5renew service install   (or, in the foreground: e5renew run)"
+		c.Fix = "e5extend service install   (or, in the foreground: e5extend run)"
 	case hbErr != nil || d.now().Sub(hb) > HeartbeatMaxAge:
 		c.Level, c.Detail = Warn, "the engine holds its lock but its heartbeat is older than 2 minutes"
 		c.Fix = "check the engine log; restart it if it is stuck"
@@ -376,11 +376,11 @@ func checkService(d Deps) []Check {
 	case err != nil:
 		c.Level, c.Detail = Warn, "cannot ask the service manager: "+firstLines(err, 2)
 	case !st.Installed:
-		c.Level, c.Detail, c.Fix = Warn, "not installed (fine if you start e5renew some other way)", "e5renew service install"
+		c.Level, c.Detail, c.Fix = Warn, "not installed (fine if you start e5extend some other way)", "e5extend service install"
 	case st.Enabled == service.No:
-		c.Level, c.Detail, c.Fix = Warn, "installed but disabled", "e5renew service install"
+		c.Level, c.Detail, c.Fix = Warn, "installed but disabled", "e5extend service install"
 	case st.Running == service.No:
-		c.Level, c.Detail, c.Fix = Warn, "installed and enabled, but not running", "e5renew service status"
+		c.Level, c.Detail, c.Fix = Warn, "installed and enabled, but not running", "e5extend service status"
 	default:
 		c.Level, c.Detail = OK, "installed and enabled"
 		if st.Running == service.Yes {
@@ -496,10 +496,10 @@ func checkScopes(acct config.Account, id, title string, scopes []string, recorde
 	switch {
 	case n == 0:
 		c.Level, c.Detail = Fail, "no API in the catalog can be called with the granted permissions"+src
-		c.Fix = "grant more API permissions and admin consent (docs/user/app-registration.md); see: e5renew catalog list --account " + acct.Name
+		c.Fix = "grant more API permissions and admin consent (docs/user/app-registration.md); see: e5extend catalog list --account " + acct.Name
 	case n < fewAPIs:
 		c.Level, c.Detail = Warn, fmt.Sprintf("only %d API(s) usable%s; more permissions give more variety", n, src)
-		c.Fix = "see: e5renew catalog list --account " + acct.Name
+		c.Fix = "see: e5extend catalog list --account " + acct.Name
 	default:
 		c.Level, c.Detail = OK, fmt.Sprintf("%d APIs usable%s", n, src)
 	}
@@ -513,16 +513,16 @@ func checkActivity(d Deps, acct config.Account, as *store.AccountState, id, titl
 		return c
 	}
 	if as == nil || as.LastSuccess.IsZero() {
-		c.Level, c.Detail, c.Fix = Warn, "no successful call recorded yet", "e5renew run-now "+acct.Name
+		c.Level, c.Detail, c.Fix = Warn, "no successful call recorded yet", "e5extend run-now "+acct.Name
 		return c
 	}
 	age := d.now().Sub(as.LastSuccess)
 	c.Detail = "last successful call " + humanAge(age) + " ago"
 	switch {
 	case age > ActivityFail:
-		c.Level, c.Fix = Fail, "e5renew status; then e5renew run-now "+acct.Name
+		c.Level, c.Fix = Fail, "e5extend status; then e5extend run-now "+acct.Name
 	case age > ActivityWarn:
-		c.Level, c.Fix = Warn, "e5renew status; then e5renew run-now "+acct.Name
+		c.Level, c.Fix = Warn, "e5extend status; then e5extend run-now "+acct.Name
 	default:
 		c.Level = OK
 	}
@@ -548,13 +548,13 @@ func checkState(acct config.Account, as *store.AccountState, id, title string) C
 	}
 	switch {
 	case acct.Paused:
-		c.Level, c.Detail, c.Fix = Warn, "paused in the configuration", "e5renew account resume "+acct.Name
+		c.Level, c.Detail, c.Fix = Warn, "paused in the configuration", "e5extend account resume "+acct.Name
 	case status == store.StatusNeedsAttention:
 		c.Level, c.Detail = Fail, "needs attention: "+reason
-		c.Fix = "fix the cause above, then: e5renew account resume " + acct.Name
+		c.Fix = "fix the cause above, then: e5extend account resume " + acct.Name
 	case status == store.StatusPaused:
 		c.Level, c.Detail = Fail, "paused automatically: "+reason
-		c.Fix = "e5renew account resume " + acct.Name
+		c.Fix = "e5extend account resume " + acct.Name
 	case status == store.StatusPeriodEnded:
 		c.Level, c.Detail = Warn, "the run period has ended"
 		c.Fix = "extend schedule.period_end in the configuration to keep running"
@@ -571,7 +571,7 @@ func checkSecret(d Deps, acct config.Account, id, title string) Check {
 		c.Level, c.Detail = Warn, "secret_expires is not a YYYY-MM-DD date"
 		return c
 	}
-	c.Fix = "create a new secret in the app registration, then: e5renew account set-secret " + acct.Name + " --secret-expires YYYY-MM-DD"
+	c.Fix = "create a new secret in the app registration, then: e5extend account set-secret " + acct.Name + " --secret-expires YYYY-MM-DD"
 	switch {
 	case days < 0:
 		c.Level, c.Detail = Fail, fmt.Sprintf("expired on %s", acct.SecretExpires)
@@ -607,7 +607,7 @@ func checkNetwork(ctx context.Context, d Deps, cfg *config.Config) []Check {
 		nc.Level, nc.Detail = Fail, "bad Graph address: "+err.Error()
 		return []Check{cc.skipped(), nc}
 	}
-	req.Header.Set("User-Agent", "e5renew/"+version.Version)
+	req.Header.Set("User-Agent", "e5extend/"+version.Version)
 	cp := *hc
 	cp.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
 	resp, err := cp.Do(req)
@@ -676,15 +676,15 @@ func checkNotify(d Deps, cfg *config.Config) Check {
 	case unreadable:
 		c.Level = Warn
 		c.Detail = "the stored webhook address cannot be decrypted, so no alert can be sent"
-		c.Fix = "restore the master key, or set the address again: e5renew notify set-webhook <url>"
+		c.Fix = "restore the master key, or set the address again: e5extend notify set-webhook <url>"
 	case plain:
 		c.Level = Warn
 		c.Detail = "the webhook address is stored in plain text in config.toml"
-		c.Fix = "e5renew notify set-webhook <url>   (moves it into the vault and clears the config entry)"
+		c.Fix = "e5extend notify set-webhook <url>   (moves it into the vault and clears the config entry)"
 	case !inVault:
 		c.Level = Warn
 		c.Detail = "no alert destination is set; you will not hear about problems"
-		c.Fix = "e5renew notify set-webhook <url>"
+		c.Fix = "e5extend notify set-webhook <url>"
 	default:
 		c.Level, c.Detail = OK, "webhook set (stored in the vault)"
 	}

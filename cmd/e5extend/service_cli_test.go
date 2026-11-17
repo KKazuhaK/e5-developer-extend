@@ -8,15 +8,15 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/KKazuhaK/e5-renew/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 )
 
 func TestServicePrintShowsAllPlatformsAndTouchesNothing(t *testing.T) {
 	e := newEnv(t)
 	want := map[string][]string{
-		"linux":   {"Type=notify", "WatchdogSec=120", "systemctl --user enable --now e5renew.service", "loginctl show-user"},
-		"darwin":  {"io.github.kkazuhak.e5renew", "<key>ThrottleInterval</key>", "launchctl bootstrap gui/501"},
-		"windows": {"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", "e5renew-bg.exe", "schtasks /Create /TN e5renew /XML"},
+		"linux":   {"Type=notify", "WatchdogSec=120", "systemctl --user enable --now e5extend.service", "loginctl show-user"},
+		"darwin":  {"io.github.kkazuhak.e5extend", "<key>ThrottleInterval</key>", "launchctl bootstrap gui/501"},
+		"windows": {"<ExecutionTimeLimit>PT0S</ExecutionTimeLimit>", "e5extend-bg.exe", "schtasks /Create /TN e5extend /XML"},
 	}
 	for platform, markers := range want {
 		out := e.mustRun("", "service", "install", "--print", "--platform", platform)
@@ -33,7 +33,7 @@ func TestServicePrintShowsAllPlatformsAndTouchesNothing(t *testing.T) {
 		t.Errorf("--print wrote files into the home directory: %v", ents)
 	}
 	out := e.mustRun("", "service", "install", "--print", "--platform", "linux", "--key-file", "--enable-linger")
-	if !strings.Contains(out, "LoadCredential=e5renew-master-key:") || !strings.Contains(out, "enable-linger") || !strings.Contains(out, "secret content not shown") {
+	if !strings.Contains(out, "LoadCredential=e5extend-master-key:") || !strings.Contains(out, "enable-linger") || !strings.Contains(out, "secret content not shown") {
 		t.Errorf("flags not reflected:\n%s", out)
 	}
 	if _, _, err := e.run("", "service", "install", "--platform", "linux"); err == nil {
@@ -86,7 +86,7 @@ func TestServiceInstallStatusUninstallUseFakeRunner(t *testing.T) {
 
 func TestServiceInstallRefusesTemporaryBinary(t *testing.T) {
 	e := newEnv(t)
-	e.exe = filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "e5renew")
+	e.exe = filepath.Join(os.TempDir(), "go-build123", "b001", "exe", "e5extend")
 	_, _, err := e.run("", "service", "install")
 	if err == nil || !strings.Contains(err.Error(), "go run") {
 		t.Errorf("err = %v", err)
@@ -123,7 +123,7 @@ func TestKeyHint(t *testing.T) {
 	if h := keyHint("darwin", false, env(nil)); h != "" {
 		t.Errorf("darwin: %q", h)
 	}
-	if h := keyHint("linux", false, env(map[string]string{"E5RENEW_MASTER_KEY": "x", "DISPLAY": ":0"})); !strings.Contains(h, "does not inherit") {
+	if h := keyHint("linux", false, env(map[string]string{"E5EXTEND_MASTER_KEY": "x", "DISPLAY": ":0"})); !strings.Contains(h, "does not inherit") {
 		t.Errorf("env key: %q", h)
 	}
 	if h := keyHint("linux", false, env(map[string]string{"CREDENTIALS_DIRECTORY": "/c"})); h != "" {

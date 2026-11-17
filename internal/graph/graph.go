@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/version"
+	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
 // DefaultBase is the Graph v1.0 endpoint.
@@ -106,7 +106,7 @@ func (c *Client) do(ctx context.Context, token, path string, query url.Values, s
 		return Result{Class: ClientError, Err: err}
 	}
 	req.Header.Set("Authorization", "Bearer "+token)
-	req.Header.Set("User-Agent", "e5renew/"+version.Version)
+	req.Header.Set("User-Agent", "e5extend/"+version.Version)
 	if needsConsistency(query) {
 		req.Header.Set("ConsistencyLevel", "eventual")
 	}

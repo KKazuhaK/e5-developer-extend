@@ -18,13 +18,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/catalog"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/graph"
-	"github.com/KKazuhaK/e5-renew/internal/notify"
-	"github.com/KKazuhaK/e5-renew/internal/paths"
-	"github.com/KKazuhaK/e5-renew/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
 // Tunables that are not worth a config option.
@@ -830,9 +830,9 @@ func RunOnce(ctx context.Context, o Options, names []string) error {
 			}
 			switch as := e.state.Accounts[a.Name]; {
 			case a.Paused:
-				skip[a.Name] = "account is paused; run: e5renew account resume " + a.Name
+				skip[a.Name] = "account is paused; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPaused:
-				skip[a.Name] = "account was paused automatically; run: e5renew account resume " + a.Name
+				skip[a.Name] = "account was paused automatically; run: e5extend account resume " + a.Name
 			case as != nil && as.Status == store.StatusPeriodEnded:
 				skip[a.Name] = "the run period has ended"
 			}

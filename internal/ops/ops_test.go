@@ -14,12 +14,12 @@ import (
 
 	"github.com/zalando/go-keyring"
 
-	"github.com/KKazuhaK/e5-renew/internal/auth"
-	"github.com/KKazuhaK/e5-renew/internal/config"
-	"github.com/KKazuhaK/e5-renew/internal/engine"
-	"github.com/KKazuhaK/e5-renew/internal/service"
-	"github.com/KKazuhaK/e5-renew/internal/store"
-	"github.com/KKazuhaK/e5-renew/internal/vault"
+	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
+	"github.com/KKazuhaK/e5-developer-extend/internal/store"
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
 
 const testGUID = "11111111-2222-3333-4444-555555555555"
@@ -54,8 +54,8 @@ func newTestEnv(t *testing.T) *testEnv {
 		AccessToken: "TOKEN-SECRET", HomeAccountID: "uid.tid", Account: "me@contoso.com",
 		ExpiresOn: time.Now().Add(time.Hour), Scopes: []string{"User.Read", "Mail.Read"},
 	}}}
-	t.Setenv("E5RENEW_CONFIG_DIR", e.cfgDir)
-	t.Setenv("E5RENEW_DATA_DIR", e.dataDir)
+	t.Setenv("E5EXTEND_CONFIG_DIR", e.cfgDir)
+	t.Setenv("E5EXTEND_DATA_DIR", e.dataDir)
 	t.Setenv(vault.EnvMasterKey, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	e.Ops = &Ops{
@@ -320,7 +320,7 @@ func TestSnapshotStatuses(t *testing.T) {
 	state := store.NewState()
 	state.Accounts["ok"] = &store.AccountState{Status: store.StatusOK, LastSuccess: now.Add(-time.Hour), LastRun: now.Add(-time.Hour),
 		NextRun: now.Add(time.Hour), GrantedScopes: []string{"User.Read", "Mail.Read"}}
-	state.Accounts["attn"] = &store.AccountState{Status: store.StatusNeedsAttention, Reason: "login required; run: e5renew account login attn"}
+	state.Accounts["attn"] = &store.AccountState{Status: store.StatusNeedsAttention, Reason: "login required; run: e5extend account login attn"}
 	if err := st.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +537,7 @@ func TestServicePlanDoesNotTouchTheSystem(t *testing.T) {
 	fr := &service.FakeRunner{}
 	e.Runner = fr
 	e.Exe = func() (string, error) {
-		return filepath.Join(string(filepath.Separator), "opt", "e5renew", "e5renew"), nil
+		return filepath.Join(string(filepath.Separator), "opt", "e5extend", "e5extend"), nil
 	}
 	e.Svc = SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"}
 	for _, platform := range []string{"", "linux", "darwin", "windows"} {
@@ -589,7 +589,7 @@ func TestEngineStoppedHint(t *testing.T) {
 	e.Runner = fr
 	e.Platform = service.Linux // the fake runner and unit file below are systemd's
 	e.Svc = SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"}
-	if h := e.EngineStoppedHint(); !strings.Contains(h, "e5renew service install") || !strings.Contains(h, "e5renew run") {
+	if h := e.EngineStoppedHint(); !strings.Contains(h, "e5extend service install") || !strings.Contains(h, "e5extend run") {
 		t.Fatalf("not installed: %q", h)
 	}
 	unit := filepath.Join(e.Svc.Home, ".config", "systemd", "user", service.UnitName)

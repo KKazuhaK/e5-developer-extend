@@ -1,6 +1,6 @@
 package services
 
-import "github.com/KKazuhaK/e5-renew/internal/ops"
+import "github.com/KKazuhaK/e5-developer-extend/internal/ops"
 
 // The types below mirror the TypeScript contract. Types shared with ops are
 // aliases, so there is one definition and one set of JSON tags.
