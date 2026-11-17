@@ -34,6 +34,12 @@ type Backend struct {
 	Autostart Autostart
 	// OpenURL opens a web address in the default browser.
 	OpenURL func(url string) error
+	// PickSaveFile shows the system "save as" dialog and returns the chosen
+	// path, or "" when the user cancels.
+	PickSaveFile func(title, defaultName string) (string, error)
+	// PickOpenFile shows the system "open" dialog and returns the chosen path,
+	// or "" when the user cancels.
+	PickOpenFile func(title string) (string, error)
 	// RequestHandover asks the process that runs the engine inside the tray to
 	// give it up (needed before installing the background service) and
 	// waits until the engine lock is free or the timeout passes.

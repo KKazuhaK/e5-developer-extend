@@ -151,7 +151,31 @@ func (c *Config) Remove(name string) bool {
 }
 
 // Parse decodes TOML over the defaults and validates the result.
-func Parse(data []byte) (*Config, error) {
+func Parse(data []byte) (*Config, error) { return parse(data, nil) }
+
+// ParseWithVault is Parse for a file whose own [vault] section is not wanted:
+// v is used in its place, before validation, so the file's backend is neither
+// checked nor kept.
+func ParseWithVault(data []byte, v Vault) (*Config, error) { return parse(data, &v) }
+
+// VaultSetting reads only the [vault] section of config text, however invalid
+// the rest of it is. ok is false when it cannot be read or names an unknown backend.
+func VaultSetting(data []byte) (v Vault, ok bool) {
+	var raw struct {
+		Vault Vault `toml:"vault"`
+	}
+	raw.Vault = Vault{Backend: BackendAuto}
+	if err := toml.Unmarshal(data, &raw); err != nil {
+		return Vault{}, false
+	}
+	switch raw.Vault.Backend {
+	case BackendAuto, BackendKeyring, BackendFile:
+		return raw.Vault, true
+	}
+	return Vault{}, false
+}
+
+func parse(data []byte, override *Vault) (*Config, error) {
 	// Read only the version first so a newer file gets a clear message
 	// instead of unknown-field errors.
 	var head struct {
@@ -169,6 +193,9 @@ func Parse(data []byte) (*Config, error) {
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(cfg); err != nil {
 		return nil, decodeError(err)
+	}
+	if override != nil {
+		cfg.Vault = *override
 	}
 	if err := cfg.Validate(); err != nil {
 		return cfg, err

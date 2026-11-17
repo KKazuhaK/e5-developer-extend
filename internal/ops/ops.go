@@ -45,6 +45,11 @@ type Ops struct {
 	Platform string
 	// WebhookBackoff replaces the retry waits of alert delivery.
 	WebhookBackoff []time.Duration
+	// VaultFor replaces how the vault is opened; tests use it to give each
+	// simulated machine its own master key.
+	VaultFor func(cfg *config.Config) (*vault.Vault, error)
+	// SaveConfig replaces how an import saves config.toml; tests inject failures.
+	SaveConfig func(cfg *config.Config, path string) error
 }
 
 // New returns Ops that talk to the real services.
@@ -86,6 +91,9 @@ func (o *Ops) LoadConfigOrDefault() (*config.Config, string, error) {
 
 // OpenVault opens the vault named by the configuration.
 func (o *Ops) OpenVault(cfg *config.Config) (*vault.Vault, error) {
+	if o.VaultFor != nil {
+		return o.VaultFor(cfg)
+	}
 	return vault.Open(cfg.Vault.Backend)
 }
 

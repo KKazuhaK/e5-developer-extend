@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch";
 import { ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, fieldAria } from "@/components/common";
 import { NOTIFY_EVENTS, WEEKDAYS, errorsByField, isValidWebhook, validateSettings, type LocalCode } from "@/lib/settings";
 import { cn, errMsg } from "@/lib/utils";
+import { BackupCard } from "./BackupCard";
 
 const LOCAL_MSG: Record<LocalCode, DictKey> = {
   duration: "settings.err.duration", minInterval: "settings.err.minInterval", intervalOrder: "settings.err.intervalOrder",
@@ -25,7 +26,7 @@ const LOCAL_MSG: Record<LocalCode, DictKey> = {
 export function SettingsPage() {
   const { t } = useI18n();
   const toast = useToast();
-  const { setPrefs } = useApp();
+  const { setPrefs, snapshot } = useApp();
   const [saved, setSaved] = useState<Settings | null>(null);
   const [draft, setDraft] = useState<Settings | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -64,6 +65,18 @@ export function SettingsPage() {
     if (remote[f]) return remote[f];
     const c = showLocal ? (local as Record<string, LocalCode>)[f] : undefined;
     return c ? t(LOCAL_MSG[c]) : undefined;
+  };
+  // An import can change every setting, including language and theme.
+  const afterImport = async () => {
+    try {
+      const s = await api.settings.get();
+      setSaved(s);
+      setDraft(structuredClone(s));
+      setPrefs({ language: s.ui.language, theme: s.ui.theme });
+    } catch (e) {
+      toast.error(errMsg(e));
+    }
+    void snapshot.refresh();
   };
   const clearRemote = (f: string) => remote[f] && setRemote((r) => ({ ...r, [f]: "" }));
 
@@ -221,6 +234,8 @@ export function SettingsPage() {
             </label>
           </CardContent>
         </Card>
+
+        <BackupCard onImported={() => { void afterImport(); }} />
       </div>
     </>
   );

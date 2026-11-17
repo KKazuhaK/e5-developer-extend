@@ -185,3 +185,42 @@ func openURL(url string) error {
 	}
 	return browser.OpenURL(url)
 }
+
+// backupFilter is the file type filter of the backup dialogs.
+const backupFilter = "*.e5backup"
+
+// saveDialogOptions describes the "save as" dialog of a backup: titled title,
+// starting on defaultName, offering only *.e5backup files. This version of the
+// toolkit has no SetTitle on the save dialog, so the title goes in the options;
+// the message is set too for macOS, which shows it instead of a title.
+func saveDialogOptions(title, defaultName string) *application.SaveFileDialogOptions {
+	return &application.SaveFileDialogOptions{
+		Title:                title,
+		Message:              title,
+		Filename:             defaultName,
+		CanCreateDirectories: true,
+		Filters:              []application.FileFilter{{DisplayName: "e5renew backup", Pattern: backupFilter}},
+	}
+}
+
+// pickSaveFile asks where to save a backup. It returns "" when the user cancels.
+func pickSaveFile(app *application.App, win *application.WebviewWindow, title, defaultName string) (string, error) {
+	opts := saveDialogOptions(title, defaultName)
+	if win != nil {
+		opts.Window = win
+	}
+	// The overwrite question is the dialog's own, and the backup service relies on it
+	// (it overwrites the exact path returned). The GTK3 build of Wails (linux_cgo_gtk3.go,
+	// build tag gtk3) does not turn that confirmation on; release builds use GTK4, which does.
+	return app.Dialog.SaveFileWithOptions(opts).PromptForSingleSelection()
+}
+
+// pickOpenFile asks which backup to open. It returns "" when the user cancels.
+func pickOpenFile(app *application.App, win *application.WebviewWindow, title string) (string, error) {
+	d := app.Dialog.OpenFile().SetTitle(title).CanChooseFiles(true).CanChooseDirectories(false).
+		AddFilter("e5renew backup", backupFilter).AddFilter("All files", "*")
+	if win != nil {
+		d.AttachToWindow(win)
+	}
+	return d.PromptForSingleSelection()
+}

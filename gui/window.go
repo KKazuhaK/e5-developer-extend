@@ -54,6 +54,8 @@ func runWindow(page string) error {
 		Emit:            func(name string, data any) { app.Event.Emit(name, data) },
 		Autostart:       wailsAutostart{app},
 		OpenURL:         openURL,
+		PickSaveFile:    func(title, name string) (string, error) { return pickSaveFile(app, win, title, name) },
+		PickOpenFile:    func(title string) (string, error) { return pickOpenFile(app, win, title) },
 		RequestHandover: requestHandover,
 		CancelHandover:  cancelHandover,
 	})
@@ -64,6 +66,7 @@ func runWindow(page string) error {
 	app.RegisterService(application.NewService(services.NewSettingsService(backend)))
 	app.RegisterService(application.NewService(services.NewHealthService(backend)))
 	app.RegisterService(application.NewService(services.NewCatalogService(backend)))
+	app.RegisterService(application.NewService(services.NewBackupService(backend)))
 
 	win = app.Window.NewWithOptions(application.WebviewWindowOptions{
 		Name:      "main",

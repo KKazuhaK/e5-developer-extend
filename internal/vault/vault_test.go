@@ -439,3 +439,77 @@ func TestRemoteSessionNeverCreatesAKey(t *testing.T) {
 		t.Errorf("env key over SSH: src=%v err=%v", src, err)
 	}
 }
+
+func TestListNeedsNoMasterKeyAndSkipsNonEntries(t *testing.T) {
+	v, dir := testVault(t)
+	for _, k := range []string{"secret/main", "tokencache/main", "notify/webhook", "secret/other"} {
+		if err := v.Put(k, []byte("x")); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// A lock file, an interrupted atomic write and a stray file are not entries.
+	for _, junk := range []string{"secret/main.lock", "secret/other.bin.tmp-123", "notes.txt", "secret/bad name.bin"} {
+		if err := os.WriteFile(filepath.Join(dir, filepath.FromSlash(junk)), []byte("junk"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// A vault whose key lookup always fails still lists, because it never asks for the key.
+	keyless := New(dir, func() ([]byte, error) { return nil, ErrNoMasterKey })
+	got, err := keyless.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"notify/webhook", "secret/main", "secret/other", "tokencache/main"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("List = %v, want %v", got, want)
+	}
+}
+
+func TestListMissingDirIsEmpty(t *testing.T) {
+	v := New(filepath.Join(t.TempDir(), "nope"), func() ([]byte, error) { return nil, ErrNoMasterKey })
+	got, err := v.List()
+	if err != nil || len(got) != 0 {
+		t.Fatalf("List = %v, %v", got, err)
+	}
+}
+
+func TestSnapshotAndRestore(t *testing.T) {
+	key, _ := GenerateKey()
+	v := New(t.TempDir(), func() ([]byte, error) { return key, nil })
+	other, _ := GenerateKey()
+	// Entries that cannot be decrypted are snapshotted and restored byte for byte.
+	foreign := New(v.dir, func() ([]byte, error) { return other, nil })
+	if err := foreign.Put("secret/a", []byte("old-a")); err != nil {
+		t.Fatal(err)
+	}
+	rawA, hadA, err := v.Snapshot("secret/a")
+	if err != nil || !hadA {
+		t.Fatal(err, hadA)
+	}
+	_, hadB, err := v.Snapshot("secret/b")
+	if err != nil || hadB {
+		t.Fatal("a missing entry reported as present", err)
+	}
+	if err := v.Put("secret/a", []byte("new-a")); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Put("secret/b", []byte("new-b")); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Restore("secret/a", rawA, true); err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Restore("secret/b", nil, false); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := foreign.Get("secret/a"); err != nil || string(got) != "old-a" {
+		t.Fatalf("a: %q %v", got, err)
+	}
+	if ok, _ := v.Has("secret/b"); ok {
+		t.Error("b was not removed")
+	}
+	if err := v.Restore("secret/b", nil, false); err != nil {
+		t.Errorf("restoring an absent entry twice: %v", err)
+	}
+}

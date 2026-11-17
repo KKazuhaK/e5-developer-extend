@@ -130,6 +130,8 @@ type Engine struct {
 	sched *schedule
 	state *store.State
 	rt    map[string]*accountRT
+	// unsaved is set when the state in memory differs from state.json because a save failed.
+	unsaved bool
 
 	// Touched by the tick goroutine only.
 	lastTick  time.Time
@@ -241,10 +243,117 @@ func (e *Engine) event(account, name, msg string) {
 	e.log.Info("event", "event", name, "account", account, "detail", msg)
 }
 
-// saveLocked writes the state; e.mu must be held.
-func (e *Engine) saveLocked() {
+// saveLocked writes the state; e.mu must be held. It reports whether the write worked.
+func (e *Engine) saveLocked() bool {
 	if err := e.store.SaveState(e.state); err != nil {
 		e.log.Error("save state", "err", err)
+		return false
+	}
+	return true
+}
+
+// Limits of a state handed over by `backup import` (store.PendingImportFile).
+const (
+	// importWait is how long entries for accounts that are not in the config yet are kept.
+	importWait = 24 * time.Hour
+	// importMaxAge is the age after which a handover file is ignored and deleted.
+	importMaxAge = 7 * 24 * time.Hour
+)
+
+// hasActivity reports whether an account's state records any round. A state
+// without one is what the engine creates for an account it has just learned
+// about, so an imported state may take its place.
+func hasActivity(as *store.AccountState) bool {
+	return as.Totals != (store.Totals{}) || !as.LastSuccess.IsZero()
+}
+
+// adoptPending applies the state an import handed over. The file is claimed
+// by renaming it first (see store.ClaimPendingImports), so a second import
+// during this call writes a new file for the next call. Adoption is one-shot:
+// a claimed file is deleted once applied, even if the save that follows fails
+// (the state is then saved on the next tick). Entries it cannot apply yet stay
+// in a new pending file: those of accounts that are not in the config (an
+// import writes the handover just before the config, so a reload may not have
+// seen the account yet; dropped after importWait) and those of accounts with a
+// round in flight (applied on the first tick after it ends).
+func (e *Engine) adoptPending() {
+	files, err := store.ClaimPendingImports(e.o.DataDir)
+	if err != nil {
+		e.log.Warn("claim the imported state", "err", err)
+		return
+	}
+	for _, f := range files {
+		e.adoptFile(f)
+		_ = os.Remove(f)
+	}
+}
+
+func (e *Engine) adoptFile(path string) {
+	p, err := store.ReadPendingFile(path)
+	if err != nil {
+		e.log.Warn("ignoring the imported state", "err", err)
+		return
+	}
+	if p == nil {
+		// The importer withdrew its handover (its config save failed) after we claimed it.
+		return
+	}
+	now := e.clock.Now()
+	age := now.Sub(p.Written)
+	if age > importMaxAge {
+		e.event("", "state_import_expired", "an imported state older than 7 days was ignored")
+		return
+	}
+	later := map[string]*store.AccountState{}
+	var adopted []string
+	expired := 0
+	var fixed []string
+	e.withLock(func() {
+		for name, as := range p.Accounts {
+			rt := e.rt[name]
+			switch _, inCfg := e.cfg.Find(name); {
+			case !inCfg:
+				if age < importWait {
+					later[name] = as
+				} else {
+					expired++
+				}
+				continue
+			case rt != nil && rt.running:
+				later[name] = as
+				continue
+			}
+			// A merge never replaces what an account has recorded here; the
+			// empty state the engine made for a new account is not that.
+			if have := e.state.Accounts[name]; have != nil && p.Mode == store.PendingMerge && hasActivity(have) {
+				continue
+			}
+			e.state.Accounts[name] = as
+			adopted = append(adopted, name)
+			// An imported next run in the past would start a round at once, as after a restart.
+			if (as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention) && !as.NextRun.After(now) {
+				e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
+			}
+		}
+		if len(adopted) > 0 {
+			fixed = e.fixFarFutureLocked(now)
+			if !e.saveLocked() {
+				e.unsaved = true
+			}
+		}
+	})
+	e.reportClockFix(fixed)
+	if len(later) > 0 {
+		err := store.SavePendingImport(e.o.DataDir, &store.PendingImport{Mode: p.Mode, Written: p.Written, Accounts: later})
+		if err != nil {
+			e.log.Warn("keep the imported state for later", "err", err)
+		}
+	}
+	if len(adopted) > 0 {
+		e.event("", "state_import", "adopted the state of an imported backup")
+	}
+	if expired > 0 {
+		e.event("", "state_import_expired", "dropped the imported state of accounts that never appeared in the configuration")
 	}
 }
 
@@ -267,7 +376,7 @@ func (e *Engine) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			e.hook("stopping", e.o.Hooks.Stopping)
 			e.wg.Wait()
-			e.withLock(e.saveLocked)
+			e.withLock(func() { e.saveLocked() })
 			e.event("", "stop", "")
 			return nil
 		case <-e.reload:
@@ -387,6 +496,7 @@ func (e *Engine) init() {
 		e.saveLocked()
 	})
 	e.reportClockFix(fixed)
+	e.adoptPending()
 	if e.o.ConfigPath != "" {
 		if fi, err := os.Stat(e.o.ConfigPath); err == nil {
 			e.cfgMod = fi.ModTime()
@@ -505,6 +615,9 @@ func (e *Engine) tick(ctx context.Context) {
 			e.reloadConfig()
 		}
 	}
+	if store.HasPendingImport(e.o.DataDir) {
+		e.adoptPending() // also when the reload trigger of the import was lost, or a round was in flight
+	}
 
 	manual := e.processTriggers(now)
 
@@ -550,8 +663,8 @@ func (e *Engine) tick(ctx context.Context) {
 				go e.round(ctx, acct, manual[acct.Name])
 			}
 		}
-		if changed {
-			e.saveLocked()
+		if changed || e.unsaved {
+			e.unsaved = !e.saveLocked()
 		}
 	})
 	e.reportClockFix(fixed)
@@ -657,6 +770,7 @@ func (e *Engine) reloadConfig() {
 		e.syncAccountsLocked(e.clock.Now(), false)
 		e.saveLocked()
 	})
+	e.adoptPending()
 	msg := ""
 	if restart {
 		msg = "restart required for network/vault changes"
