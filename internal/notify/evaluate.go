@@ -7,6 +7,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
@@ -33,6 +35,149 @@ type Input struct {
 	Config   config.Notify
 	Accounts []config.Account
 	State    *store.State
+	// Calls holds the recent call-log entries per account, oldest first, for
+	// failure_spike. Nil means the log was not read: failure_spike is then
+	// neither raised nor ended.
+	Calls map[string][]store.Entry
+	APIs  []catalog.API
+}
+
+// evaluator is one run of Evaluate.
+type evaluator struct {
+	in       Input
+	events   []Event
+	held     []Event // alerts whose quiet hours ended, to be sent as one summary
+	changed  bool
+	quiet    bool
+	cooldown time.Duration
+}
+
+func (ev *evaluator) allowed(kind string) bool {
+	return len(ev.in.Config.Events) == 0 || slices.Contains(ev.in.Config.Events, kind)
+}
+
+// cooldownApplies says which kinds the cooldown covers: those that can flap.
+// The others have their own repetition rule (stale, secret_expiring) or are
+// one-shot (recovered, period_ended).
+func cooldownApplies(kind string) bool {
+	switch kind {
+	case NeedsAttention, AutoPaused, FailureSpike, AllFailing:
+		return true
+	}
+	return false
+}
+
+// cooldownFor is the cooldown of a kind: critical ones repeat twice as soon.
+func (ev *evaluator) cooldownFor(kind string) time.Duration {
+	if LevelOf(kind) == config.LevelCritical {
+		return ev.cooldown / 2
+	}
+	return ev.cooldown
+}
+
+// scope is where the notices of one account, or of the global alerts, live.
+type scope struct {
+	ev       *evaluator
+	account  string // empty for global alerts
+	notified *map[string]store.Notice
+	sent     *map[string]time.Time
+}
+
+func (s scope) get(kind string) (store.Notice, bool) { n, ok := (*s.notified)[kind]; return n, ok }
+func (s scope) put(kind string, n store.Notice) {
+	if *s.notified == nil {
+		*s.notified = map[string]store.Notice{}
+	}
+	(*s.notified)[kind] = n
+	s.ev.changed = true
+}
+func (s scope) del(kind string) {
+	if _, ok := (*s.notified)[kind]; ok {
+		delete(*s.notified, kind)
+		s.ev.changed = true
+	}
+}
+
+// event rebuilds the event of a notice. key carries what the decision was
+// based on: the numbers of a failure_spike, the origin of a recovery.
+func (s scope) event(kind, key, msg string, at time.Time) Event {
+	e := Event{Event: kind, Account: s.account, Message: msg, Time: at}
+	switch kind {
+	case FailureSpike:
+		parts := strings.Split(key, "/")
+		if len(parts) == 3 {
+			e.Failures, e.Rounds = atoiOr(parts[0], 0), atoiOr(parts[1], 0)
+			e.FailRate, _ = strconv.ParseFloat(parts[2], 64)
+		}
+	case Recovered:
+		e.Origin = key
+	}
+	return e
+}
+
+// announce records an alert and hands it out. cooled is true when the cooldown
+// swallowed it: it is then remembered as announced without ever being sent.
+func (s scope) announce(kind, key, msg string) (cooled bool) {
+	ev, now := s.ev, s.ev.in.Now
+	n := store.Notice{At: now, Key: key}
+	if kind == Recovered && !ev.allowed(kind) {
+		return false // one-shot and filtered out: nothing to remember
+	}
+	if ev.allowed(kind) {
+		if last, ok := (*s.sent)[kind]; ok && cooldownApplies(kind) && ev.cooldown > 0 && now.Sub(last) < ev.cooldownFor(kind) {
+			s.put(kind, n)
+			return true
+		}
+		n.Pending, n.Msg = true, msg
+		if ev.quiet && LevelOf(kind) != config.LevelCritical {
+			n.Held = true
+		} else {
+			n.Tried = now
+			ev.events = append(ev.events, s.event(kind, key, msg, now))
+		}
+		if *s.sent == nil {
+			*s.sent = map[string]time.Time{}
+		}
+		(*s.sent)[kind] = now
+	}
+	s.put(kind, n)
+	return false
+}
+
+// retry hands out again what was not confirmed, and releases what was held.
+// Each alert is handed out at most once per RetryAfter.
+func (s scope) retry() {
+	ev, now := s.ev, s.ev.in.Now
+	for _, kind := range sortedKinds(*s.notified) {
+		n := (*s.notified)[kind]
+		if !n.Pending || !ev.allowed(kind) {
+			continue
+		}
+		heldBack := ev.quiet && LevelOf(kind) != config.LevelCritical
+		if n.Held {
+			if heldBack {
+				continue
+			}
+			n.Held, n.Tried = false, now
+			s.put(kind, n)
+			ev.held = append(ev.held, s.event(kind, n.Key, n.Msg, now))
+			continue
+		}
+		if now.Sub(n.Tried) < RetryAfter {
+			continue
+		}
+		if slices.ContainsFunc(ev.events, func(e Event) bool { return e.Account == s.account && e.Event == kind }) {
+			continue
+		}
+		if heldBack {
+			n.Held = true
+			s.put(kind, n)
+			continue
+		}
+		n.Tried = now
+		s.put(kind, n)
+		ev.events = append(ev.events, s.event(kind, n.Key, n.Msg, now))
+	}
 }
 
 // Evaluate compares the account states with what has been announced already
@@ -42,48 +187,32 @@ type Input struct {
 // again after RetryAfter. The caller saves State when the returned flag says
 // it changed. Kinds not listed in Config.Events are recorded as delivered and
 // not returned.
+//
+// The same alert for the same account is not sent again within the cooldown.
+// During the quiet hours only critical alerts go out; the others are held and,
+// once the hours end, sent as one Digest event (or as themselves when only
+// one was held).
 func Evaluate(in Input) (events []Event, changed bool) {
-	allowed := func(kind string) bool {
-		return len(in.Config.Events) == 0 || slices.Contains(in.Config.Events, kind)
-	}
+	ev := &evaluator{in: in, cooldown: in.Config.CooldownDuration(), quiet: in.Config.InQuietHours(in.Now)}
 	staleAfter := in.Config.StaleDuration()
 	inGrace := in.Now.Sub(in.Start) <= StaleGrace
+	spikeRounds, spikeRate, spikeMin := in.Config.SpikeSettings()
 
+	if in.State.Accounts == nil {
+		in.State.Accounts = map[string]*store.AccountState{}
+	}
+	var running, failing int // unpaused accounts, and those of them that are failing
 	for _, acct := range in.Accounts {
 		as := in.State.Accounts[acct.Name]
 		if as == nil {
 			continue
 		}
-		get := func(kind string) (store.Notice, bool) { n, ok := as.Notified[kind]; return n, ok }
-		put := func(kind string, n store.Notice) {
-			if as.Notified == nil {
-				as.Notified = map[string]store.Notice{}
-			}
-			as.Notified[kind] = n
-			changed = true
-		}
-		del := func(kind string) {
-			if _, ok := as.Notified[kind]; ok {
-				delete(as.Notified, kind)
-				changed = true
-			}
-		}
-		// announce records an alert and hands it out.
-		announce := func(kind, key, msg string) {
-			n := store.Notice{At: in.Now, Key: key}
-			if kind == Recovered && !allowed(kind) {
-				return // one-shot and filtered out: nothing to remember
-			}
-			if allowed(kind) {
-				n.Pending, n.Tried, n.Msg = true, in.Now, msg
-				events = append(events, Event{Event: kind, Account: acct.Name, Message: msg, Time: in.Now})
-			}
-			put(kind, n)
-		}
+		s := scope{ev: ev, account: acct.Name, notified: &as.Notified, sent: &as.LastSent}
+		get, put, del := s.get, s.put, s.del
 		raise := func(kind, key, msg string) { // an announced problem starts or continues an episode
 			del(Recovered)
-			announce(kind, key, msg)
-			if _, ok := get(recordUnhealthy); !ok {
+			cooled := s.announce(kind, key, msg)
+			if _, ok := get(recordUnhealthy); !ok && !cooled {
 				put(recordUnhealthy, store.Notice{At: in.Now, Key: kind})
 			}
 		}
@@ -122,16 +251,49 @@ func Evaluate(in Input) (events []Event, changed bool) {
 			del(Stale)
 		}
 
-		if as.Status == store.StatusOK && !stale && !acct.Paused {
-			if _, ok := get(recordUnhealthy); ok {
+		// A failure spike: many real failures over the last rounds. Calls that
+		// found nothing do not count (see callstat). When the log holds too few
+		// rounds to tell, what was announced stays as it is.
+		spiking := false
+		if in.Calls != nil && as.Status == store.StatusOK && !acct.Paused {
+			sp := callstat.SpikeOf(in.Calls[acct.Name], in.APIs, acct.Categories, spikeRounds, spikeRate, spikeMin)
+			_, had := get(FailureSpike)
+			switch {
+			case sp.Active:
+				spiking = true
+				if !had {
+					raise(FailureSpike, fmt.Sprintf("%d/%d/%.4f", sp.Failures, sp.Rounds, sp.Rate), fmt.Sprintf(
+						"%d of the last %d calls failed (%.0f%%) over the last %d rounds",
+						sp.Failures, sp.Calls, sp.Rate*100, sp.Rounds))
+				}
+			case !sp.Enough:
+				spiking = had
+			default:
+				del(FailureSpike)
+			}
+		} else if _, had := get(FailureSpike); had && as.Status == store.StatusOK && !acct.Paused {
+			spiking = true // the log was not read: keep what is announced
+		} else if had && (as.Status != store.StatusOK || acct.Paused) {
+			del(FailureSpike) // another condition takes over
+		}
+
+		if !acct.Paused && as.Status != store.StatusPaused && as.Status != store.StatusPeriodEnded {
+			running++
+			if as.Status == store.StatusNeedsAttention || spiking {
+				failing++
+			}
+		}
+
+		if as.Status == store.StatusOK && !stale && !acct.Paused && !spiking {
+			if n, ok := get(recordUnhealthy); ok {
 				del(recordUnhealthy)
-				announce(Recovered, "", "is working again")
+				s.announce(Recovered, n.Key, "is working again")
 			}
 		}
 
 		if as.Status == store.StatusPeriodEnded {
 			if _, ok := get(PeriodEnded); !ok {
-				announce(PeriodEnded, "", "the run period has ended; no more rounds will run")
+				s.announce(PeriodEnded, "", "the run period has ended; no more rounds will run")
 			}
 		} else {
 			del(PeriodEnded)
@@ -152,29 +314,38 @@ func Evaluate(in Input) (events []Event, changed bool) {
 				case had && prevDate != acct.SecretExpires:
 					// The expiry date changed: the secret was renewed. Start over.
 					del(SecretExpiring)
-					announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
+					s.announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
 				case !had || level < prevLevel:
-					announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
+					s.announce(SecretExpiring, strconv.Itoa(level)+"@"+acct.SecretExpires, secretMessage(days, acct.SecretExpires))
 				}
 			}
 		}
 
-		// Alerts that were handed out but not confirmed are tried again, at
-		// most once per RetryAfter each.
-		for _, kind := range sortedKinds(as.Notified) {
-			n := as.Notified[kind]
-			if !n.Pending || in.Now.Sub(n.Tried) < RetryAfter || !allowed(kind) {
-				continue
-			}
-			if slices.ContainsFunc(events, func(e Event) bool { return e.Account == acct.Name && e.Event == kind }) {
-				continue
-			}
-			n.Tried = in.Now
-			put(kind, n)
-			events = append(events, Event{Event: kind, Account: acct.Name, Message: n.Msg, Time: in.Now})
-		}
+		s.retry()
 	}
-	return events, changed
+
+	// Every account that is not paused fails at once: probably not the
+	// accounts' own fault. One account alone is already covered by its own alerts.
+	g := scope{ev: ev, notified: &in.State.Notified, sent: &in.State.LastSent}
+	if running >= 2 && failing == running {
+		if _, ok := g.get(AllFailing); !ok {
+			g.announce(AllFailing, "", fmt.Sprintf("all %d accounts that are running are failing; check the network, the proxy and the Microsoft 365 service status first", running))
+		}
+	} else {
+		g.del(AllFailing)
+	}
+	g.retry()
+
+	// What was held during the quiet hours goes out as one message.
+	switch len(ev.held) {
+	case 0:
+	case 1:
+		ev.events = append(ev.events, ev.held[0])
+	default:
+		ev.events = append(ev.events, Event{Event: Digest, Time: in.Now, Items: ev.held,
+			Message: fmt.Sprintf("%d alerts were held during the quiet hours", len(ev.held))})
+	}
+	return ev.events, ev.changed
 }
 
 func sortedKinds(m map[string]store.Notice) []string {
@@ -188,27 +359,46 @@ func sortedKinds(m map[string]store.Notice) []string {
 
 // MarkDelivered records that the alert of the given kind for the account has
 // reached the destination for the attempt made at tried (the event Time).
-// It reports whether the state changed.
+// An empty account means a global alert. It reports whether the state changed.
 func MarkDelivered(st *store.State, account, kind string, tried time.Time) bool {
-	as := st.Accounts[account]
-	if as == nil {
-		return false
+	notified := st.Notified
+	if account != "" {
+		as := st.Accounts[account]
+		if as == nil {
+			return false
+		}
+		notified = as.Notified
 	}
-	n, ok := as.Notified[kind]
+	n, ok := notified[kind]
 	// A late callback from an earlier attempt must not settle a newer one.
 	if !ok || !n.Tried.Equal(tried) {
 		return false
 	}
 	if kind == Recovered {
-		delete(as.Notified, kind) // a one-shot message: nothing left to remember
+		delete(notified, kind) // a one-shot message: nothing left to remember
 		return true
 	}
 	if !n.Pending {
 		return false
 	}
 	n.Pending, n.Msg = false, ""
-	as.Notified[kind] = n
+	notified[kind] = n
 	return true
+}
+
+// MarkEvent is MarkDelivered for a whole event: a digest settles every
+// alert it carried.
+func MarkEvent(st *store.State, ev Event) bool {
+	if ev.Event != Digest {
+		return MarkDelivered(st, ev.Account, ev.Event, ev.Time)
+	}
+	changed := false
+	for _, it := range ev.Items {
+		if MarkDelivered(st, it.Account, it.Event, it.Time) {
+			changed = true
+		}
+	}
+	return changed
 }
 
 // secretLevel maps the days left to the threshold reached: 30, 7, 1 or 0

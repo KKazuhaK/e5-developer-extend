@@ -13,7 +13,7 @@ import (
 var t0 = time.Date(2026, 11, 17, 10, 0, 0, 0, time.UTC)
 
 func TestEventNamesMatchConfig(t *testing.T) {
-	kinds := []string{NeedsAttention, Recovered, AutoPaused, Stale, SecretExpiring, PeriodEnded}
+	kinds := []string{NeedsAttention, Recovered, AutoPaused, Stale, SecretExpiring, PeriodEnded, FailureSpike, AllFailing}
 	if !slices.Equal(kinds, config.NotifyEvents) {
 		t.Errorf("config.NotifyEvents = %v, notify kinds = %v", config.NotifyEvents, kinds)
 	}
@@ -29,7 +29,9 @@ type rig struct {
 }
 
 func newRig() *rig {
-	r := &rig{now: t0, start: t0.Add(-100 * time.Hour), cfg: config.Default().Notify,
+	cfg := config.Default().Notify
+	cfg.Cooldown = "0" // the cooldown has its own tests
+	r := &rig{now: t0, start: t0.Add(-100 * time.Hour), cfg: cfg,
 		acct: config.Account{Name: "main", Auth: config.AuthClientSecret}, st: store.NewState()}
 	r.as = &store.AccountState{Status: store.StatusOK, LastSuccess: t0.Add(-time.Hour)}
 	r.st.Accounts["main"] = r.as

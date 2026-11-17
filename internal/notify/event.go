@@ -6,6 +6,8 @@ package notify
 import (
 	"encoding/json"
 	"time"
+
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
 
 // Event kinds. The same names are accepted in the config's notify.events.
@@ -16,9 +18,24 @@ const (
 	Stale          = "stale"
 	SecretExpiring = "secret_expiring"
 	PeriodEnded    = "period_ended"
+	FailureSpike   = "failure_spike"
+	AllFailing     = "all_failing"
 	// Test is only sent by `e5extend notify test`.
 	Test = "test"
+	// Digest is the summary of alerts that were held during the quiet hours.
+	Digest = "digest"
 )
+
+// LevelOf is the level of an event kind: critical, warning or info.
+func LevelOf(kind string) string {
+	switch kind {
+	case NeedsAttention, AutoPaused, AllFailing:
+		return config.LevelCritical
+	case Stale, SecretExpiring, FailureSpike:
+		return config.LevelWarning
+	}
+	return config.LevelInfo
+}
 
 // Event is one alert.
 type Event struct {
@@ -26,6 +43,28 @@ type Event struct {
 	Account string    // account name from the config; empty for global events
 	Message string    // what happened and what to do, without secrets
 	Time    time.Time // when the condition was detected
+
+	// Origin is, for Recovered, the event that ended (failure_spike, ...).
+	Origin string
+	// Failures, Rounds and FailRate describe a failure_spike.
+	Failures, Rounds int
+	FailRate         float64
+	// Items are the held events of a Digest.
+	Items []Event
+}
+
+// Level is the level of the event; a digest has the highest of its items.
+func (e Event) Level() string {
+	if e.Event != Digest {
+		return LevelOf(e.Event)
+	}
+	lv := config.LevelInfo
+	for _, it := range e.Items {
+		if config.LevelRank(it.Level()) > config.LevelRank(lv) {
+			lv = it.Level()
+		}
+	}
+	return lv
 }
 
 // Text is the one-line form used by chat-style webhooks.
@@ -59,5 +98,21 @@ func (e Event) MarshalJSON() ([]byte, error) {
 	})
 }
 
-// VaultKey is where the webhook address is stored.
+// VaultKey is where older versions stored the webhook address. It is still
+// read, as the url of the channel "webhook"; new writes use ChannelSecretKey.
 const VaultKey = "notify/webhook"
+
+// LegacyChannelID is the id of the channel an old notify/webhook entry stands for.
+const LegacyChannelID = "webhook"
+
+// Level names, for convenience.
+const (
+	LevelInfo     = config.LevelInfo
+	LevelWarning  = config.LevelWarning
+	LevelCritical = config.LevelCritical
+)
+
+// ChannelSecretKey is the vault key of one secret field of a channel.
+func ChannelSecretKey(channelID, field string) string {
+	return "notify/" + channelID + "/" + field
+}
