@@ -39,7 +39,7 @@ export const wailsApi: Api = {
   accounts: {
     add: (i) => AccountService.Add(cast(i)),
     update: (i) => AccountService.Update(cast(i)),
-    rename: (f, t) => AccountService.Rename(f, t),
+    rename: async (f, t) => arr(await AccountService.Rename(f, t)),
     remove: (n) => AccountService.Remove(n),
     setSecret: (n, s) => AccountService.SetSecret(n, s),
     login: (n) => AccountService.Login(n),

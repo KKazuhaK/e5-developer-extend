@@ -698,14 +698,14 @@ func TestAccountRenameMovesTheAccountAndAllowsUpdate(t *testing.T) {
 	if err := acc.Add(AccountInput{Name: "taken", Auth: config.AuthDeviceCode, Tenant: "t.example", ClientID: testGUID}); err != nil {
 		t.Fatal(err)
 	}
-	if err := acc.Rename("app", "taken"); err == nil {
+	if _, err := acc.Rename("app", "taken"); err == nil {
 		t.Fatal("renamed onto an existing account")
 	}
-	if err := acc.Rename("app", "Not Valid"); err == nil {
+	if _, err := acc.Rename("app", "Not Valid"); err == nil {
 		t.Fatal("renamed to an invalid name")
 	}
-	if err := acc.Rename("app", "work"); err != nil {
-		t.Fatal(err)
+	if warns, err := acc.Rename("app", "work"); err != nil || warns == nil || len(warns) != 0 {
+		t.Fatalf("rename: %v %#v", err, warns)
 	}
 	if _, err := acc.Get("app"); err == nil {
 		t.Error("the old name still exists")

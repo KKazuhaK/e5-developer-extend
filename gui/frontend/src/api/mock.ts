@@ -574,13 +574,14 @@ export const mockApi: Api = {
       }
       a.input = rest;
     },
-    async rename(from, to) {
+    async rename(from, to): Promise<string[]> {
       await wait(300);
       const a = find(from);
       if (accounts.some((x) => x.input.name === to)) throw new Error(`账号 ${to} 已存在。请换一个名称。`);
       if (!/^[a-z0-9_-]{1,64}$/.test(to)) throw new Error("名称只能包含小写字母、数字、- 和 _，最长 64 个字符");
       clearLogin(from);
       a.input = { ...a.input, name: to };
+      return [];
     },
     async remove(name) {
       await lag();

@@ -140,6 +140,8 @@ export const en: Dict = {
   "edit.saved": "Saved {name}",
   "edit.renamedOnly": "{old} is now called {name}, but the other changes were not saved: {detail}",
   "edit.nameErr": "Use lowercase letters, digits, - and _ only, up to 64 characters",
+  "edit.renameWarnings": "{name} was renamed, with notes: {detail}",
+  "edit.pausedFailed": "Your changes were saved, but pausing or resuming the account failed: {detail}",
   "edit.fixErrors": "Fix the fields marked in red first.",
   "edit.clearedTitle": "{name} has to sign in again",
   "edit.clearedBody": "You changed the tenant, the app or the user, so the saved sign-in was discarded. Sign in to start calling again.",

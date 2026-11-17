@@ -141,14 +141,14 @@ describe("identityChanged", () => {
 });
 
 describe("saveAccountEdit", () => {
-  const fake = (fail?: "rename" | "update") => {
+  const fake = (fail?: "rename" | "update" | "pause") => {
     const calls: string[] = [];
     return {
       calls,
       api: {
-        rename: async (a: string, b: string) => { calls.push(`rename ${a}>${b}`); if (fail === "rename") throw new Error("exists"); },
-        update: async (i: AccountInput) => { calls.push(`update ${i.name}${i.secret ? " +secret" : ""}`); if (fail === "update") throw new Error("disk"); },
-        pause: async (n: string) => { calls.push(`pause ${n}`); },
+        rename: async (a: string, b: string) => { calls.push(`rename ${a}>${b}`); if (fail === "rename") throw new Error("exists"); return ["old entry kept"]; },
+        update: async (i: AccountInput) => { calls.push(`update ${i.name}${i.secret ? " +secret" : ""}${i.categories.length ? "" : " defaults"}`); if (fail === "update") throw new Error("disk"); },
+        pause: async (n: string) => { calls.push(`pause ${n}`); if (fail === "pause") throw new Error("busy"); },
         resume: async (n: string) => { calls.push(`resume ${n}`); },
       },
     };
@@ -165,13 +165,13 @@ describe("saveAccountEdit", () => {
     const f = fake();
     const out = await saveAccountEdit(f.api, input(), input({ name: " work ", secret: "s3" }), unpaused);
     expect(f.calls).toEqual(["rename main>work", "update work +secret"]);
-    expect("result" in out && out.result).toEqual({ name: "work", renamed: true, signInCleared: false });
+    expect("result" in out && out.result).toEqual({ name: "work", renamed: true, signInCleared: false, warnings: ["old entry kept"] });
   });
   it("does not rename when the name is the same, and reports a discarded sign-in", async () => {
     const f = fake();
     const out = await saveAccountEdit(f.api, input(), input({ tenant: "other.example" }), unpaused);
     expect(f.calls).toEqual(["update main"]);
-    expect("result" in out && out.result).toEqual({ name: "main", renamed: false, signInCleared: true });
+    expect("result" in out && out.result).toEqual({ name: "main", renamed: false, signInCleared: true, warnings: [] });
   });
   it("applies the paused toggle last, under the current name", async () => {
     const f = fake();
@@ -183,13 +183,30 @@ describe("saveAccountEdit", () => {
   });
   it("stops at a failed rename without updating", async () => {
     const f = fake("rename");
-    await expect(saveAccountEdit(f.api, input(), input({ name: "work" }), unpaused)).rejects.toMatchObject({ message: "exists", name: "main", renamed: false });
+    await expect(saveAccountEdit(f.api, input(), input({ name: "work" }), unpaused)).rejects.toMatchObject({ message: "exists", account: "main", renamed: false, stage: "rename" });
     expect(f.calls).toEqual(["rename main>work"]);
   });
   it("says the rename went through when the update fails after it", async () => {
     const f = fake("update");
     const err = await saveAccountEdit(f.api, input(), input({ name: "work" }), unpaused).catch((e) => e);
     expect(err).toBeInstanceOf(EditSaveError);
-    expect(err).toMatchObject({ message: "disk", name: "work", renamed: true });
+    expect(err).toMatchObject({ message: "disk", account: "work", renamed: true, stage: "update" });
+  });
+  it("saves a selection equal to the defaults as an empty list, after validating it as ticked", async () => {
+    const f = fake();
+    const defaults = ["mail", "files"];
+    const out = await saveAccountEdit(f.api, input({ categories: ["files", "mail"] }), input({ categories: ["files", "mail"] }), unpaused, defaults);
+    expect("errors" in out).toBe(false);
+    expect(f.calls).toEqual(["update main defaults"]);
+    // An empty selection is still refused.
+    const bad = await saveAccountEdit(f.api, input(), input({ categories: [] }), unpaused, defaults);
+    expect("errors" in bad && bad.errors.categories).toBe("categories");
+    expect(f.calls).toHaveLength(1);
+  });
+  it("reports a failed pause on its own, after the rename and the update went through", async () => {
+    const f = fake("pause");
+    const err = await saveAccountEdit(f.api, input(), input({ name: "work" }), { was: false, now: true }).catch((e) => e);
+    expect(err).toMatchObject({ message: "busy", account: "work", renamed: true, stage: "paused" });
+    expect(f.calls).toEqual(["rename main>work", "update work", "pause work"]);
   });
 });

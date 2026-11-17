@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch";
 import { ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, fieldAria } from "@/components/common";
 import { EditSaveError, needsSecret, needsUsername, saveAccountEdit } from "@/lib/account";
 import type { AccountErrorCode } from "@/lib/account";
-import { categoriesToSave, preselect } from "@/lib/recommend";
+import { preselect } from "@/lib/recommend";
 import { errMsg } from "@/lib/utils";
 import { CategoriesStep, type RecState } from "./AccountSteps";
 import { SignInDialog } from "./AccountDialogs";
@@ -60,7 +60,7 @@ export function AccountEdit({ name, onClose }: { name: string; onClose: () => vo
   }, [name]);
 
   // Paused is a property of the live account, not of the stored input.
-  const summary = snapshot.data?.accounts.find((a) => a.name === name);
+  const summary = snapshot.data?.accounts.find((a) => a.name === (original?.name ?? name));
   const pausedSeen = useRef(false);
   useEffect(() => {
     if (summary && !pausedSeen.current) {
@@ -123,9 +123,7 @@ export function AccountEdit({ name, onClose }: { name: string; onClose: () => vo
     setSaveError(null);
     setSaving(true);
     try {
-      // Exactly the catalog defaults is saved as an empty list so new default categories keep applying.
-      const toSave = { ...input, categories: categoriesToSave(input.categories, defaultCategories) };
-      const out = await saveAccountEdit(api.accounts, original, toSave, { was: wasPaused, now: paused });
+      const out = await saveAccountEdit(api.accounts, original, input, { was: wasPaused, now: paused }, defaultCategories);
       if ("errors" in out) {
         setErrors(out.errors);
         setSaveError(t("edit.fixErrors"));
@@ -133,6 +131,7 @@ export function AccountEdit({ name, onClose }: { name: string; onClose: () => vo
       }
       void snapshot.refresh();
       const { result } = out;
+      if (result.warnings.length) toast.error(t("edit.renameWarnings", { name: result.name, detail: result.warnings.join("; ") }));
       if (result.signInCleared) {
         setCleared(result.name);
         return;
@@ -140,10 +139,16 @@ export function AccountEdit({ name, onClose }: { name: string; onClose: () => vo
       toast.success(t("edit.saved", { name: result.name }));
       onClose();
     } catch (e) {
-      if (e instanceof EditSaveError && e.renamed) {
+      if (e instanceof EditSaveError && e.stage === "paused") {
+        // Renamed and updated; only the pause switch failed. Carry on from what is stored now.
+        setOriginal({ ...input, name: e.account, secret: undefined });
+        setInput((i) => (i ? { ...i, name: e.account } : i));
+        setSaveError(t("edit.pausedFailed", { detail: e.message }));
+        void snapshot.refresh();
+      } else if (e instanceof EditSaveError && e.renamed) {
         // The rename went through: carry on under the new name so a second try does not rename again.
-        setOriginal((o) => (o ? { ...o, name: e.name } : o));
-        setSaveError(t("edit.renamedOnly", { old: original.name, name: e.name, detail: e.message }));
+        setOriginal((o) => (o ? { ...o, name: e.account } : o));
+        setSaveError(t("edit.renamedOnly", { old: original.name, name: e.account, detail: e.message }));
         void snapshot.refresh();
       } else {
         setSaveError(errMsg(e));

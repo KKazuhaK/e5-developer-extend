@@ -139,6 +139,8 @@ export const zh = {
   "edit.saved": "已保存 {name}",
   "edit.renamedOnly": "{old} 已改名为 {name}，但其余修改没有保存：{detail}",
   "edit.nameErr": "只能用小写字母、数字、- 和 _，最长 64 个字符",
+  "edit.renameWarnings": "{name} 已改名，但有提示：{detail}",
+  "edit.pausedFailed": "修改已保存，但暂停或恢复账号失败：{detail}",
   "edit.fixErrors": "请先修改标红的字段。",
   "edit.clearedTitle": "{name} 需要重新登录",
   "edit.clearedBody": "你改了租户、应用或用户，已保存的登录已被丢弃。重新登录后才会继续调用。",

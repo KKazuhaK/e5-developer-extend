@@ -20,7 +20,7 @@ export interface Api {
     add(input: AccountInput): Promise<void>;
     update(input: AccountInput): Promise<void>;
     /** Gives the account a new name; its secret, sign-in and statistics move with it. Update it under the new name afterwards. */
-    rename(from: string, to: string): Promise<void>;
+    rename(from: string, to: string): Promise<string[]>;
     remove(name: string): Promise<void>;
     setSecret(name: string, secret: string): Promise<void>;
     /** Starts a login; progress and result arrive via onLoginEvent. */

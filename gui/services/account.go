@@ -49,14 +49,20 @@ func (s *AccountService) Update(in AccountInput) error {
 
 // Rename gives an account a new name; its secret, sign-in and statistics move
 // with it. A sign-in in progress under the old name is abandoned. Update the
-// other fields afterwards under the new name.
-func (s *AccountService) Rename(from, to string) error {
+// other fields afterwards under the new name. The warnings are problems after
+// the rename went through (an old vault entry that could not be deleted, state
+// that could not be carried over); the caller shows them.
+func (s *AccountService) Rename(from, to string) ([]string, error) {
 	s.CancelLogin(from)
-	_, err := s.b.Ops.RenameAccount(context.Background(), from, to)
-	if err == nil {
-		s.b.Ops.ReloadEngine()
+	warnings, err := s.b.Ops.RenameAccount(context.Background(), from, to)
+	if err != nil {
+		return []string{}, err
 	}
-	return err
+	s.b.Ops.ReloadEngine()
+	if warnings == nil {
+		warnings = []string{}
+	}
+	return warnings, nil
 }
 
 // Remove deletes an account with its stored secret and sign-in.

@@ -1,5 +1,6 @@
 import type { AccountInput, AuthKind } from "@/api/types";
 import { isValidDate } from "@/lib/settings";
+import { categoriesToSave } from "@/lib/recommend";
 
 export const AUTH_KINDS: AuthKind[] = ["device_code", "browser", "client_secret", "password"];
 
@@ -101,7 +102,8 @@ export function identityChanged(orig: AccountInput, next: AccountInput): boolean
 
 /** The calls the edit form makes, in the order it makes them. */
 export interface EditApi {
-  rename(from: string, to: string): Promise<void>;
+  /** Resolves to the warnings of a rename that went through. */
+  rename(from: string, to: string): Promise<string[]>;
   update(input: AccountInput): Promise<void>;
   pause(name: string): Promise<void>;
   resume(name: string): Promise<void>;
@@ -112,46 +114,63 @@ export interface EditSaveResult {
   name: string;
   renamed: boolean;
   signInCleared: boolean;
+  /** Problems after a rename that went through; the rename itself succeeded. */
+  warnings: string[];
 }
 
-/** A save that failed. `name` is what the account is called now: the new name when the rename went through. */
+/** Which call of a save failed. */
+export type EditStage = "rename" | "update" | "paused";
+
+/**
+ * A save that failed. `account` is what the account is called now (the new name when the rename went through);
+ * `stage` says what failed: after "paused" the rename and the update are done.
+ */
 export class EditSaveError extends Error {
-  constructor(message: string, readonly name: string, readonly renamed: boolean) {
+  constructor(message: string, readonly account: string, readonly renamed: boolean, readonly stage: EditStage) {
     super(message);
   }
 }
 
 /**
- * Saves the edit form: rename first when the name changed, then the update under the (new) name, then the
- * paused state when it changed. Nothing is sent when a field is invalid (errors are returned instead).
+ * Saves the edit form: validate everything, then rename when the name changed, then the update under the (new)
+ * name, then the paused state when it changed. Nothing is sent when a field is invalid (errors are returned
+ * instead). The categories are validated as ticked; only then is a selection equal to the catalog defaults saved
+ * as an empty list, so new default categories keep applying.
  */
 export async function saveAccountEdit(
-  api: EditApi, original: AccountInput, input: AccountInput, paused: { was: boolean; now: boolean },
+  api: EditApi, original: AccountInput, input: AccountInput, paused: { was: boolean; now: boolean }, defaultCategories: string[] = [],
 ): Promise<{ errors: ReturnType<typeof validateEditForm> } | { result: EditSaveResult }> {
   const errors = validateEditForm(input);
   if (Object.keys(errors).length) return { errors };
   const payload: AccountInput = {
     ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim(),
-    secret: input.secret || undefined,
+    secret: input.secret || undefined, categories: categoriesToSave(input.categories, defaultCategories),
   };
   const renamed = payload.name !== original.name;
   let current = original.name;
-  const fail = (e: unknown): never => {
-    throw new EditSaveError(e instanceof Error ? e.message : String(e), current, current !== original.name);
+  let warnings: string[] = [];
+  const fail = (e: unknown, stage: EditStage): never => {
+    throw new EditSaveError(e instanceof Error ? e.message : String(e), current, current !== original.name, stage);
   };
   if (renamed) {
     try {
-      await api.rename(original.name, payload.name);
+      warnings = await api.rename(original.name, payload.name);
     } catch (e) {
-      fail(e);
+      fail(e, "rename");
     }
     current = payload.name;
   }
   try {
     await api.update(payload);
-    if (paused.was !== paused.now) await (paused.now ? api.pause(current) : api.resume(current));
   } catch (e) {
-    fail(e);
+    fail(e, "update");
   }
-  return { result: { name: current, renamed, signInCleared: identityChanged(original, payload) } };
+  if (paused.was !== paused.now) {
+    try {
+      await (paused.now ? api.pause(current) : api.resume(current));
+    } catch (e) {
+      fail(e, "paused");
+    }
+  }
+  return { result: { name: current, renamed, signInCleared: identityChanged(original, payload), warnings } };
 }
