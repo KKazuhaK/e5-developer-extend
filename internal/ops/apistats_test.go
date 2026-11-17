@@ -20,6 +20,10 @@ func TestAPIStatsRows(t *testing.T) {
 	state.Accounts["b"] = &store.AccountState{Status: store.StatusOK, APIStats: map[string]*store.APIStat{
 		"user.me": {OK: 2, LastClass: "ok", LastStatus: 200, LastAt: now.Add(time.Hour)},
 	}}
+	// An account that was removed from the configuration is not counted.
+	state.Accounts["gone"] = &store.AccountState{Status: store.StatusOK, APIStats: map[string]*store.APIStat{
+		"user.me": {OK: 100, LastClass: "ok", LastStatus: 200, LastAt: now.Add(2 * time.Hour)},
+	}}
 	if err := store.New(e.dataDir).SaveState(state); err != nil {
 		t.Fatal(err)
 	}

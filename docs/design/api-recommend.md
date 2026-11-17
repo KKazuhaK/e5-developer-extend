@@ -28,16 +28,16 @@ func (o *Ops) RecommendCategories(ctx context.Context, name string) (Recommendat
 
 | 探测 | 探测的 API（目录里的 id，按顺序取第一个有权限的） | 决定的分类 | 判“没有”的结果 | 原因码 |
 |---|---|---|---|---|
-| 邮箱 | `mail.settings`、`mail.folders`、`mail.messages`、`cal.list`、`contacts.list` | mail、calendar、contacts、tasks、insights | HTTP 404、400 | `no_mailbox` |
-| OneDrive | `drive.info`、`drive.root` | files、notes | HTTP 404、400 | `no_onedrive` |
-| Teams | `teams.joined` | teams | HTTP 404（403 是策略或权限问题，只算 `maybe`） | `no_teams_license` |
+| 邮箱 | `mail.settings`、`mail.folders`、`mail.messages`、`cal.list`、`contacts.list` | mail、calendar、contacts、tasks、people | HTTP 404、400 | `no_mailbox` |
+| OneDrive | `drive.info`、`drive.root` | files、notes、insights | HTTP 404、400 | `no_onedrive` |
+| Teams | `teams.joined` | teams、presence | HTTP 404（403 是策略或权限问题，只算 `maybe`） | `no_teams_license` |
 | SharePoint | `sites.root` | sites | HTTP 404 | `no_sharepoint` |
 
 - 请求的**路径来自目录**（`API.Path(kind)`），不在代码里再写一遍；全部是 GET，永远不写。
 - 探测不会下载大量数据：返回单个对象的 API（`mail.settings`、`drive.info`、`sites.root`）不带查询；`teams.joined` 也不带任何查询
   （Graph 文档说明 List joinedTeams 不支持 OData 查询参数，结果只是用户自己的团队）；其余集合 API 一律 `$top=1&$select=id`。测试检查了这一点。
 - “没有”只认 HTTP 404 / 400（Teams、SharePoint 只认 404）；402、403、405、409、422 等其他 4xx 都不能证明“没有”，一律 `maybe` + `probe_failed`。
-- 其他分类（user、org、group、apps、presence）没有探测：只要权限够就是 `recommended`。`reports`（需要管理员角色）和 `bookings`（默认关闭，不是每个租户都开了 Bookings，原因码 `optional`）不探测，永远是 `maybe`，只在账号已经选了的时候保留。
+- 其他分类（user、org、group、apps）没有探测：只要权限够就是 `recommended`。`reports`（需要管理员角色）和 `bookings`（默认关闭，不是每个租户都开了 Bookings，原因码 `optional`）不探测，永远是 `maybe`，只在账号已经选了的时候保留。
 - `reports` 没有安全的探测（报表需要管理员角色，请求会返回一个很大的 CSV），权限够时一律 `maybe`，原因 `needs_admin_role`。
 - `tasks` 里有 To Do（要 Exchange）也有 Planner（不要）；按 To Do 算，没有邮箱就是 `unavailable`（一半的调用会 404）。
 - 应用身份读的是 `/users/{user}/...`：目标用户是账号的 `username`；没填就取租户用户列表的第一个（需要 `User.Read.All`）。

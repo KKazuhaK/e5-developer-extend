@@ -47,6 +47,61 @@ func TestEmbeddedCatalog(t *testing.T) {
 	}
 }
 
+func TestAllOfScopes(t *testing.T) {
+	apis := mustLoad(t)
+	have := func(s ...string) map[string]bool {
+		m := map[string]bool{}
+		for _, x := range s {
+			m[strings.ToLower(x)] = true
+		}
+		return m
+	}
+	var dr API
+	for _, a := range apis {
+		if a.ID == "user.directreports" {
+			dr = a
+		}
+	}
+	if dr.ID == "" {
+		t.Fatal("user.directreports missing")
+	}
+	for _, c := range []struct {
+		granted []string
+		want    bool
+	}{
+		{[]string{"User.Read"}, false},
+		{[]string{"User.ReadBasic.All"}, false},
+		{[]string{"User.Read", "User.ReadBasic.All"}, true},
+		{[]string{"User.Read.All"}, true},
+		{[]string{"Directory.Read.All"}, true},
+		{nil, false},
+	} {
+		if got := dr.Allows(Delegated, have(c.granted...)); got != c.want {
+			t.Errorf("granted %v: Allows = %v, want %v", c.granted, got, c.want)
+		}
+		if got := ids(Available(apis, Delegated, c.granted, []string{"user"})); strings.Contains(got, "user.directreports") != c.want {
+			t.Errorf("granted %v: Available = %s", c.granted, got)
+		}
+	}
+	// A bad all-of entry without a path is rejected like any-of scopes.
+	if _, err := Parse([]byte("- {id: a, category: c, delegated: /me, scopes: {delegated: [X], app_all: [Y, Z]}}")); err == nil {
+		t.Error("all-of scopes without a path accepted")
+	}
+	// Deprecated or unsupported entries stay out.
+	byID := map[string]API{}
+	for _, a := range apis {
+		byID[a.ID] = a
+	}
+	for _, id := range []string{"insights.used", "insights.shared"} {
+		if _, ok := byID[id]; ok {
+			t.Errorf("%s is deprecated and must not be in the catalog", id)
+		}
+	}
+	if byID["bookings.currencies"].App != "" || len(byID["bookings.currencies"].Scopes.App) != 0 {
+		t.Error("bookings.currencies has no application support")
+	}
+}
+
 func TestParseValidation(t *testing.T) {
 	cases := map[string]string{
 		"duplicate": "- {id: a, category: c, delegated: /me, scopes: {delegated: [X]}}\n- {id: a, category: c, delegated: /me, scopes: {delegated: [X]}}",
@@ -120,19 +175,28 @@ func docPath(s string) string {
 	return s
 }
 
-func docScopes(s string) []string {
+// docScopes reads a permission cell: any-of entries separated by commas, and
+// at most one all-of combination written "A + B".
+func docScopes(s string) (anyOf, allOf []string) {
 	s = cleanCell(s)
 	if s == "—" || s == "" || s == "同左" {
-		return nil
+		return nil, nil
 	}
-	var out []string
 	for _, p := range strings.Split(s, ",") {
-		if p = strings.TrimSpace(p); p != "" {
-			out = append(out, p)
+		if p = strings.TrimSpace(p); p == "" {
+			continue
 		}
+		if strings.Contains(p, "+") {
+			for _, q := range strings.Split(p, "+") {
+				allOf = append(allOf, strings.TrimSpace(q))
+			}
+			continue
+		}
+		anyOf = append(anyOf, p)
 	}
-	sort.Strings(out)
-	return out
+	sort.Strings(anyOf)
+	sort.Strings(allOf)
+	return anyOf, allOf
 }
 
 func sorted(in []string) []string {
@@ -180,11 +244,11 @@ func TestDocTableMatchesYAML(t *testing.T) {
 		if ap != a.App {
 			t.Errorf("%s: app path doc %q yaml %q", id, ap, a.App)
 		}
-		if got := docScopes(cells[3]); !reflect.DeepEqual(got, sorted(a.Scopes.Delegated)) {
-			t.Errorf("%s: delegated scopes doc %v yaml %v", id, got, sorted(a.Scopes.Delegated))
+		if got, all := docScopes(cells[3]); !reflect.DeepEqual(got, sorted(a.Scopes.Delegated)) || !reflect.DeepEqual(all, sorted(a.Scopes.DelegatedAll)) {
+			t.Errorf("%s: delegated scopes doc %v + %v yaml %v + %v", id, got, all, sorted(a.Scopes.Delegated), sorted(a.Scopes.DelegatedAll))
 		}
-		if got := docScopes(cells[5]); !reflect.DeepEqual(got, sorted(a.Scopes.App)) {
-			t.Errorf("%s: app scopes doc %v yaml %v", id, got, sorted(a.Scopes.App))
+		if got, all := docScopes(cells[5]); !reflect.DeepEqual(got, sorted(a.Scopes.App)) || !reflect.DeepEqual(all, sorted(a.Scopes.AppAll)) {
+			t.Errorf("%s: app scopes doc %v + %v yaml %v + %v", id, got, all, sorted(a.Scopes.App), sorted(a.Scopes.AppAll))
 		}
 	}
 	for id := range apis {
@@ -199,7 +263,7 @@ func TestRecommendedPermissionsAreUsedByTheCatalog(t *testing.T) {
 	used := map[string]map[string]bool{Delegated: {}, App: {}}
 	for _, a := range apis {
 		for _, k := range []string{Delegated, App} {
-			for _, s := range a.ScopesFor(k) {
+			for _, s := range append(slices.Clone(a.ScopesFor(k)), a.AllScopesFor(k)...) {
 				used[k][s] = true
 			}
 		}

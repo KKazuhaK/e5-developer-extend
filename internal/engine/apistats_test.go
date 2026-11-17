@@ -2,6 +2,7 @@ package engine
 
 import (
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -59,7 +60,8 @@ func TestAPIStatsAreCounted(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
 	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 30, 30
 	f.h.setStatus(func(p string) (int, map[string]string) {
-		if p == "/me/contacts" {
+		switch p {
+		case "/me/contacts":
 			return http.StatusInternalServerError, nil
 		}
 		return 200, nil
@@ -101,5 +103,34 @@ func TestAPIStatsAreCounted(t *testing.T) {
 	f2.start()
 	if got := f2.acct("main").APIStats["contacts.list"]; got == nil || got.Failed != before {
 		t.Errorf("counters lost over a restart: %+v, want %d failures", got, before)
+	}
+}
+
+// A throttled call is not a failure: the per-API counters agree with Totals.
+func TestAPIStatsDoNotCountThrottling(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 30, 30
+	f.auths["main"].tok.Scopes = []string{"Contacts.Read", "Tasks.Read"} // contacts.list, todo.lists, planner.tasks
+	f.h.setStatus(func(p string) (int, map[string]string) {
+		if strings.Contains(p, "contacts") {
+			return http.StatusTooManyRequests, map[string]string{"Retry-After": "1"}
+		}
+		return 200, nil
+	})
+	f.start()
+	f.round("main")
+	f.round("main")
+
+	as := f.acct("main")
+	var ok, failed int
+	for _, s := range as.APIStats {
+		ok += s.OK
+		failed += s.Failed
+	}
+	if ok != as.Totals.OK || failed != as.Totals.Failed || failed != 0 {
+		t.Errorf("per-API %d/%d, totals %d/%d", ok, failed, as.Totals.OK, as.Totals.Failed)
+	}
+	if c := as.APIStats["contacts.list"]; c != nil && (c.Failed != 0 || c.LastClass != "throttled") {
+		t.Errorf("contacts.list = %+v", c)
 	}
 }

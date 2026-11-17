@@ -170,6 +170,25 @@ func TestFullE5User(t *testing.T) {
 	}
 }
 
+// people needs a mailbox, insights (trending documents) needs OneDrive and
+// SharePoint, presence needs Teams.
+func TestNewCategoriesFollowTheirService(t *testing.T) {
+	run := func(missing map[string]int) (*fake, Recommendation) {
+		f := newFake(t, missing)
+		return f, Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
+	}
+	f, r := run(map[string]int{"/me/mailboxSettings": 404})
+	expect(t, f, r, "people", Unavailable, ReasonNoMailbox)
+	expect(t, f, r, "insights", Recommended, "")
+	expect(t, f, r, "presence", Recommended, "")
+	f, r = run(map[string]int{"/me/drive": 404})
+	expect(t, f, r, "insights", Unavailable, ReasonNoOneDrive)
+	expect(t, f, r, "people", Recommended, "")
+	f, r = run(map[string]int{"/me/joinedTeams": 404})
+	expect(t, f, r, "presence", Unavailable, ReasonNoTeams)
+	expect(t, f, r, "insights", Recommended, "")
+}
+
 func TestNoMailbox(t *testing.T) {
 	f := newFake(t, map[string]int{"/me/mailboxSettings": 404})
 	r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))

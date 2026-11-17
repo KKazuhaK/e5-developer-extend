@@ -130,7 +130,7 @@ active period and a proxy are under **Advanced settings**. By default it runs al
 | Light | 2 to 4 hours | 2 to 5 | Less noise |
 | **Standard (default)** | 40 minutes to 2 hours | 3 to 8 | Everyday use |
 | Frequent | 20 minutes to 1 hour | 5 to 12 | A bit busier |
-| Intensive (like Renew Plus) | 8 to 17 minutes | 15 to 25 | About the intensity of Microsoft365 E5 Renew Plus |
+| Intensive (like the original tool) | 8 to 17 minutes | 15 to 25 | About the intensity of the tool this app replaces |
 | Rescue (temporary) | 5 to 10 minutes | 20 to 30 | The last few days before the subscription expires; switch back to Standard afterwards, the app does not do it for you |
 
 When a round asks for more APIs than the account can use, it calls all the usable ones. The harder it runs, the more

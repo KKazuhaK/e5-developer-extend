@@ -41,7 +41,9 @@
   query:
     $select: ["id,displayName", "id,displayName,jobTitle"]
   scopes:
-    delegated: [User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All]
+    # The docs name User.Read and User.ReadBasic.All together as the minimum.
+    delegated: [User.Read.All, Directory.Read.All]
+    delegated_all: [User.Read, User.ReadBasic.All]
     app: [User.Read.All, Directory.Read.All]
   default: true
 
@@ -325,8 +327,11 @@
     app: [Team.ReadBasic.All, TeamSettings.Read.All]
   default: true
 
-# Insights, people and presence have no application path: the docs do not
-# support application permissions for /me/insights and /me/people.
+# Insights, people and presence: no application path for /me/insights and
+# /me/people (the docs support delegated permissions only). Presence has an
+# application path under /users/{id}/presence.
+# insights.used and insights.shared are left out: deprecated, they stop
+# returning data after November 2026.
 - id: insights.trending
   category: insights
   name: Trending documents
@@ -337,29 +342,9 @@
     delegated: [Sites.Read.All]
   default: true
 
-- id: insights.used
-  category: insights
-  name: Used documents
-  delegated: /me/insights/used
-  query:
-    $top: ["5", "10"]
-  scopes:
-    delegated: [Sites.Read.All]
-  default: true
-
-- id: insights.shared
-  category: insights
-  name: Shared documents
-  delegated: /me/insights/shared
-  query:
-    $top: ["5", "10"]
-  scopes:
-    delegated: [Sites.Read.All]
-  default: true
-
 # People API is in maintenance mode but still answers.
 - id: people.list
-  category: insights
+  category: people
   name: Relevant people
   delegated: /me/people
   query:
@@ -379,7 +364,8 @@
     app: [Presence.Read.All]
   default: true
 
-# Off by default: not every tenant has Bookings turned on.
+# Off by default: not every tenant has Bookings turned on. bookingCurrencies has
+# no application path (see below).
 - id: bookings.businesses
   category: bookings
   name: Bookings businesses
@@ -394,10 +380,8 @@
   category: bookings
   name: Bookings currencies
   delegated: /solutions/bookingCurrencies
-  app: /solutions/bookingCurrencies
   scopes:
     delegated: [Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All]
-    app: [Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All]
   default: false
 
 # Needs an Entra reporting admin role when signed in as a user; answers with a

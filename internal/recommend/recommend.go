@@ -138,21 +138,21 @@ var probes = []probe{
 	{
 		Name:       "mailbox",
 		APIs:       []string{"mail.settings", "mail.folders", "mail.messages", "cal.list", "contacts.list"},
-		Categories: []string{"mail", "calendar", "contacts", "tasks", "insights"},
+		Categories: []string{"mail", "calendar", "contacts", "tasks", "people"},
 		Absent:     []int{http.StatusNotFound, http.StatusBadRequest},
 		Reason:     ReasonNoMailbox,
 	},
 	{
 		Name:       "onedrive",
 		APIs:       []string{"drive.info", "drive.root"},
-		Categories: []string{"files", "notes"},
+		Categories: []string{"files", "notes", "insights"},
 		Absent:     []int{http.StatusNotFound, http.StatusBadRequest},
 		Reason:     ReasonNoOneDrive,
 	},
 	{
 		Name:       "teams",
 		APIs:       []string{"teams.joined"},
-		Categories: []string{"teams"},
+		Categories: []string{"teams", "presence"},
 		// 403 is a policy or permission matter, not proof of a missing license.
 		Absent: []int{http.StatusNotFound},
 		Reason: ReasonNoTeams,
@@ -359,10 +359,8 @@ func pickAPI(in Input, byID map[string]catalog.API, p probe) (catalog.API, bool)
 		if !ok || a.Path(in.Kind) == "" {
 			continue
 		}
-		for _, s := range a.ScopesFor(in.Kind) {
-			if have[strings.ToLower(s)] {
-				return a, true
-			}
+		if a.Allows(in.Kind, have) {
+			return a, true
 		}
 	}
 	return catalog.API{}, false

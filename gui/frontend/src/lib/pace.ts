@@ -16,7 +16,7 @@ export const PACES: Record<PaceId, PaceSpec> = {
   light: { intervalMin: "2h", intervalMax: "4h", apisPerRoundMin: 2, apisPerRoundMax: 5 },
   standard: { intervalMin: "40m", intervalMax: "2h", apisPerRoundMin: 3, apisPerRoundMax: 8 },
   frequent: { intervalMin: "20m", intervalMax: "1h", apisPerRoundMin: 5, apisPerRoundMax: 12 },
-  /** About the pace of Microsoft365 E5 Renew Plus: a round every 8 to 17 minutes. */
+  /** The intensity of the tool this app replaces: a round every 8 to 17 minutes. */
   intensive: { intervalMin: "8m", intervalMax: "17m", apisPerRoundMin: 15, apisPerRoundMax: 25 },
   /** For the few days before the subscription expires; go back to Standard afterwards. */
   rescue: { intervalMin: "5m", intervalMax: "10m", apisPerRoundMin: 20, apisPerRoundMax: 30 },

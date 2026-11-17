@@ -67,8 +67,10 @@ e5extend doctor          # 全面检查
 
 桌面版概览页右上角的“续期失败？”按钮会打开同样的清单。按顺序看：
 
-1. **旧版沙盒订阅正在被微软停用。** 微软在逐步退役旧的 Microsoft 365 开发者沙盒订阅（Legacy sandbox retirement），这类订阅不再靠活动续期，
-   和本工具无关。先读微软的说明：<https://learn.microsoft.com/en-us/office/developer-program/legacy-subscription-retirement-faq>。
+1. **先确认是不是“旧版沙盒”（Legacy sandbox）订阅。** 在开发者控制面板上，这类订阅会标着“Legacy sandbox”。微软在退役它们，没有给出退役日期。
+   仍符合资格的成员会得到最后一次 60 天的续期，并且应在它结束之前创建新的订阅；不符合资格的成员，订阅在当前期限结束时到期。
+   到期后的 30 天里订阅是只读的（只有管理员能登录），之后会被永久删除，无法恢复，所以要提前备份数据。
+   这是微软的政策，和本工具无关，本工具也无法改变它。以微软的说明为准：<https://learn.microsoft.com/en-us/office/developer-program/legacy-subscription-retirement-faq>。
 2. **看开发者控制面板。** 登录 Microsoft 365 开发者计划的控制面板，确认订阅是否还在、什么时候到期、有没有被标成不符合条件。
 3. **看概览页的“E5 订阅”卡片。** 它读取租户里的订阅状态和到期日（读不到时可以手动填到期日）；状态变化、续期成功和到期前 30、7、1 天都会通知。
 4. **跑一次健康检查。** 桌面版的“健康”页，或 `e5extend doctor`：确认账号没有停在 `needs_attention`、调用没有大量失败、权限够用。

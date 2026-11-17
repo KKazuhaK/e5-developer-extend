@@ -215,7 +215,7 @@ const CATALOG: { id: string; category: string; name: string; scopes: string[] }[
   { id: "reports.mail", category: "reports", name: "邮件活动报告", scopes: ["Reports.Read.All"] },
   { id: "apps.list", category: "apps", name: "应用注册", scopes: ["Application.Read.All"] },
   { id: "insights.trending", category: "insights", name: "热门文档", scopes: ["Sites.Read.All"] },
-  { id: "people.list", category: "insights", name: "相关人员", scopes: ["People.Read"] },
+  { id: "people.list", category: "people", name: "相关人员", scopes: ["People.Read"] },
   { id: "presence.me", category: "presence", name: "在线状态", scopes: ["Presence.Read"] },
   { id: "bookings.businesses", category: "bookings", name: "Bookings 业务", scopes: ["Bookings.Read.All"] },
 ];

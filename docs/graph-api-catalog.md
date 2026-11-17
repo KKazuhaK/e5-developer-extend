@@ -32,7 +32,7 @@
 | user | user.me | `/me` | User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users/{user}` | User.Read.All, Directory.Read.All |
 | user | user.list | `/users?$top=20` | User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users?$top=20` | User.Read.All, Directory.Read.All |
 | user | user.memberof | `/me/memberOf` | User.Read, GroupMember.Read.All, Directory.Read.All | `/users/{user}/memberOf` | Directory.Read.All |
-| user | user.directreports | `/me/directReports` | User.Read, User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users/{user}/directReports` | User.Read.All, Directory.Read.All |
+| user | user.directreports | `/me/directReports` | User.Read + User.ReadBasic.All, User.Read.All, Directory.Read.All | `/users/{user}/directReports` | User.Read.All, Directory.Read.All |
 | user | user.settings | `/me/settings`⁷ | User.Read, User.Read.All | — | — |
 | org | org.info | `/organization` | User.Read¹, Organization.Read.All, Directory.Read.All | `/organization` | Organization.Read.All, Directory.Read.All |
 | org | org.domains | `/domains` | Domain.Read.All, Directory.Read.All | `/domains` | Domain.Read.All, Directory.Read.All |
@@ -60,12 +60,10 @@
 | tasks | planner.tasks | `/me/planner/tasks` | Tasks.Read, Group.Read.All | `/users/{user}/planner/tasks` | Tasks.Read.All |
 | teams | teams.joined | `/me/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All | `/users/{user}/joinedTeams` | Team.ReadBasic.All, TeamSettings.Read.All |
 | insights | insights.trending | `/me/insights/trending?$top=10`⁸ | Sites.Read.All | — | — |
-| insights | insights.used | `/me/insights/used?$top=10`⁸ | Sites.Read.All | — | — |
-| insights | insights.shared | `/me/insights/shared?$top=10`⁸ | Sites.Read.All | — | — |
-| insights | people.list | `/me/people?$top=10`⁹ | People.Read, People.Read.All | — | — |
+| people | people.list | `/me/people?$top=10`⁹ | People.Read, People.Read.All | — | — |
 | presence | presence.me | `/me/presence` | Presence.Read, Presence.Read.All | `/users/{user}/presence` | Presence.Read.All |
 | bookings | bookings.businesses | `/solutions/bookingBusinesses`¹⁰ | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All | `/solutions/bookingBusinesses` | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All |
-| bookings | bookings.currencies | `/solutions/bookingCurrencies`¹⁰ | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All | `/solutions/bookingCurrencies` | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All |
+| bookings | bookings.currencies | `/solutions/bookingCurrencies`¹⁰ | Bookings.Read.All, Bookings.ReadWrite.All, Bookings.Manage.All | — | — |
 | reports | reports.active | `/reports/getOffice365ActiveUserDetail(period='D7')`⁶ | Reports.Read.All（还需管理员角色） | 同左 | Reports.Read.All |
 
 `{user}`：应用身份下的目标用户 ID 或 UPN。来自配置，或者启动时从 `/users` 随机取一个。
@@ -80,16 +78,17 @@
 5. OneNote 的**应用身份已于 2025-03-31 停用**（Message Center MC1011142）。参考页的表格里还列着 `Notes.Read.All`，但实际已经调不通。
 6. 报表接口返回 302 跳转到 CSV，客户端要跟随跳转。委托身份调用时，用户还必须有 Entra 的报表相关管理员角色。
 7. `GET /me/settings`（v1.0，用户设置）只支持委托身份。原版的“区域和语言设置”（`/me/settings/regionalAndLanguageSettings`）只在 beta 里，我们只用 v1.0，所以没有收。
-8. 洞察（`/me/insights/*`）只支持委托身份，需要邮箱；权限用已有的 `Sites.Read.All`。
-9. People API 处于维护模式但仍可调用；只有委托身份。
-10. Bookings 默认关闭（不是每个租户都开了 Bookings），列表接口不支持 `$top`。需要 `Bookings.Read.All`。
+8. `/me/insights/trending` 只支持委托身份；权限用已有的 `Sites.Read.All`，数据来自 SharePoint 和 OneDrive 上的文档，所以 API 推荐按 OneDrive 的探测结果判断 `insights` 分类。
+9. People API 处于维护模式但仍可调用；只有委托身份，数据来自邮箱，所以 API 推荐按邮箱的探测结果判断 `people` 分类。
+10. Bookings 默认关闭（不是每个租户都开了 Bookings），列表接口不支持 `$top`。需要 `Bookings.Read.All`。`bookingCurrencies` 的文档没有应用权限，所以只有委托路径。
 
 ## 从初稿删掉或降级的条目
 
 | 条目 | 处理 | 原因 |
 |---|---|---|
+| `insights.used`、`insights.shared`（`/me/insights/used`、`/shared`） | **不收** | 已弃用：2026 年 11 月之后不再返回数据 |
 | `drive.recent`（`/me/drive/recent`）、`drive.sharedWithMe` | **删除** | 已弃用：降级运行到 2026 年 11 月，之后不再返回数据，也就是现在 |
-| `user.people`（`/me/people`） | **重新加入**为 `people.list`（insights 分类） | People API 进入维护模式，但还能调用；原版也在用 |
+| `user.people`（`/me/people`） | **重新加入**为 `people.list`（`people` 分类） | People API 进入维护模式，但还能调用；原版也在用 |
 | `/me/manager` | 不收 | 没有上级的账号（开发者租户里常见）会返回 404，每轮都显示为失败；只收 `user.directreports`（空列表也是 200） |
 | 某个团队的频道列表 | 不收 | 需要先取团队 ID 再请求第二步，引擎目前一次只发一条独立的请求 |
 | OneNote 应用身份 | 删除应用路径 | 见脚注 5 |

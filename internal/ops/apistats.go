@@ -7,7 +7,7 @@ import (
 )
 
 // APIStatRow is the call statistics of one API: of one account, or summed over
-// all accounts when no account is named.
+// all accounts of the configuration when no account is named.
 type APIStatRow struct {
 	ID         string  `json:"id"`
 	Category   string  `json:"category"`
@@ -28,14 +28,20 @@ func (o *Ops) APIStats(account string) ([]APIStatRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	cfg, _, err := o.LoadConfigOrDefault()
+	if err != nil {
+		return nil, err
+	}
 	if account != "" {
-		cfg, _, err := o.LoadConfigOrDefault()
-		if err != nil {
-			return nil, err
-		}
 		if _, err := o.FindAccount(cfg, account); err != nil {
 			return nil, err
 		}
+	}
+	// Only accounts that are in the configuration count: the state may still
+	// hold one that was removed.
+	inConfig := map[string]bool{}
+	for _, a := range cfg.Accounts {
+		inConfig[a.Name] = true
 	}
 	dataDir, err := paths.DataDir()
 	if err != nil {
@@ -47,7 +53,7 @@ func (o *Ops) APIStats(account string) ([]APIStatRow, error) {
 	}
 	sum := map[string]*store.APIStat{}
 	for name, as := range state.Accounts {
-		if account != "" && name != account {
+		if !inConfig[name] || (account != "" && name != account) {
 			continue
 		}
 		for id, st := range as.APIStats {
