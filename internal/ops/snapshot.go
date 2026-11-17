@@ -3,10 +3,8 @@ package ops
 import (
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
@@ -283,17 +281,19 @@ func EngineHost(dataDir string) string {
 	return HostGUI
 }
 
-// PidAlive reports whether a process with this id exists.
+// PidAlive reports whether a process with this id exists and belongs to this
+// user (another user's process counts as gone).
 func PidAlive(pid int) bool { return pidAlive(pid) }
 
-func pidAlive(pid int) bool {
-	p, err := os.FindProcess(pid)
-	if err != nil {
+// ProcStart is a token for when the process started ("" when unknown). With
+// the id it names one process even after the id is reused.
+func ProcStart(pid int) string { return procStart(pid) }
+
+// PidMatches reports whether the process with this id is alive and, when
+// start is known, is the one that started at that time.
+func PidMatches(pid int, start string) bool {
+	if !pidAlive(pid) {
 		return false
 	}
-	if runtime.GOOS == "windows" {
-		_ = p.Release()
-		return true
-	}
-	return p.Signal(syscall.Signal(0)) == nil
+	return start == "" || procStart(pid) == start
 }

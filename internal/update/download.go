@@ -93,6 +93,7 @@ func (d *Downloader) Fetch(ctx context.Context, a Asset, dir string, progress fu
 	if maxTime <= 0 {
 		maxTime = defaultMaxTime
 	}
+	callerCtx := ctx
 	ctx, stop := context.WithTimeout(ctx, maxTime)
 	defer stop()
 	ctx, cancel := context.WithCancelCause(ctx)
@@ -101,6 +102,13 @@ func (d *Downloader) Fetch(ctx context.Context, a Asset, dir string, progress fu
 	defer timer.Stop()
 	fail := func(err error) error {
 		switch {
+		case callerCtx.Err() != nil:
+			// The caller's own context ended, not the stall or the cap.
+			if errors.Is(callerCtx.Err(), context.DeadlineExceeded) {
+				err = errors.New("the time limit of the request passed")
+			} else {
+				err = errors.New("cancelled")
+			}
 		case errors.Is(context.Cause(ctx), errStalled):
 			err = fmt.Errorf("%w (%s)", errStalled, stall)
 		case errors.Is(ctx.Err(), context.DeadlineExceeded):

@@ -205,7 +205,7 @@ func TestUpdateServiceErrorCodes(t *testing.T) {
 	}{
 		{"no signing key in this build", func(u *updateRig) {
 			h := u.b.Ops.Update
-			h.PublicKey = update.PublicKeyText // the placeholder
+			h.PublicKey = "PLACEHOLDER" // a build without a real key
 			u.b.Ops.Update = h
 		}, "manual_no_key", "OLD", false},
 		{"signed by another key", func(u *updateRig) {

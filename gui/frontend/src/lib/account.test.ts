@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AccountInput } from "@/api/types";
-import { EditSaveError, appIdentityName, identityChanged, saveAccountEdit, validateEditForm, isSignInFrequency, reasonHead, secretRequired, grantedScopes, needsSecret, needsUsername, summarizeByCategory, validateAccountInput } from "./account";
+import { EditSaveError, appIdentityName, identityChanged, saveAccountEdit, validateEditForm, isSignInFrequency, reasonHead, secretRequired, needsSecret, needsUsername, summarizeByCategory, validateAccountInput } from "./account";
 
 const GUID = "0b4f6c1e-9a2d-4c7e-8f31-5d6a7b8c9d0e";
 const input = (p: Partial<AccountInput> = {}): AccountInput => ({
@@ -50,9 +50,6 @@ describe("catalog summaries", () => {
     { category: "mail", usable: false, scopes: ["MailboxSettings.Read"] },
     { category: "user", usable: true, scopes: ["User.Read", "Mail.Read"] },
   ];
-  it("grantedScopes unions the scopes of usable APIs only", () => {
-    expect(grantedScopes(entries)).toEqual(["Mail.Read", "Mail.ReadBasic", "User.Read"]);
-  });
   it("summarizeByCategory counts usable and total", () => {
     expect(summarizeByCategory(entries)).toEqual([
       { category: "mail", usable: 1, total: 2 },

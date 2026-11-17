@@ -47,13 +47,6 @@ export function validateAccountInput(
   return e;
 }
 
-/** Union of scopes of the usable APIs, sorted. This is "what was granted" as far as the catalog can tell. */
-export function grantedScopes(entries: { usable: boolean; scopes: string[] }[]): string[] {
-  const s = new Set<string>();
-  for (const e of entries) if (e.usable) e.scopes.forEach((x) => s.add(x));
-  return [...s].sort();
-}
-
 export function summarizeByCategory(entries: { category: string; usable: boolean }[]): { category: string; usable: number; total: number }[] {
   const m = new Map<string, { usable: number; total: number }>();
   for (const e of entries) {

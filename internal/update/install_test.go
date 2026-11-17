@@ -224,7 +224,7 @@ func TestInstallRefusals(t *testing.T) {
 		exe := filepath.Join(bin, "e5extend")
 		writeExe(t, exe, "OLD")
 		i := f.installer("linux", "amd64")
-		i.PublicKey = PublicKeyText
+		i.PublicKey = placeholderKey
 		_, err := i.Install(context.Background(), f.rel, inst(exe, bin), "0.2.0")
 		var me *ManualError
 		if !errors.As(err, &me) || me.Plan.Reason != ReasonNoKey || f.hits.Load() != 0 {
@@ -602,6 +602,18 @@ func TestDownloaderStallAndCap(t *testing.T) {
 	d = &Downloader{Allow: func(string) bool { return true }, Stall: time.Second, MaxTime: 300 * time.Millisecond}
 	if _, err = d.Fetch(context.Background(), Asset{Name: "b.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "took longer") {
 		t.Fatalf("overall cap: %v", err)
+	}
+	// A deadline of the caller is not the cap, and a cancel is neither.
+	d = &Downloader{Allow: func(string) bool { return true }, Stall: time.Second, MaxTime: time.Minute}
+	cctx, ccancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer ccancel()
+	if _, err = d.Fetch(cctx, Asset{Name: "c.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "time limit of the request") || strings.Contains(err.Error(), "took longer") {
+		t.Fatalf("caller deadline: %v", err)
+	}
+	kctx, kcancel := context.WithCancel(context.Background())
+	time.AfterFunc(100*time.Millisecond, kcancel)
+	if _, err = d.Fetch(kctx, Asset{Name: "d.bin", URL: slow.URL}, dir, nil); err == nil || !strings.Contains(err.Error(), "cancelled") {
+		t.Fatalf("caller cancel: %v", err)
 	}
 }
 

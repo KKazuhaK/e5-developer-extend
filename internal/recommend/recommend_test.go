@@ -430,3 +430,24 @@ func TestCannotProbeIsNotAFailedProbe(t *testing.T) {
 		}
 	})
 }
+
+func TestLeastScopesPrefersTheAllOfGroup(t *testing.T) {
+	apis := loadAPIs(t)
+	var dr catalog.API
+	for _, a := range apis {
+		if a.ID == "user.directreports" {
+			dr = a
+		}
+	}
+	if got := leastScopes(dr, catalog.Delegated, nil); !slices.Equal(got, []string{"User.Read", "User.ReadBasic.All"}) {
+		t.Errorf("delegated = %v", got)
+	}
+	plain := catalog.API{Scopes: catalog.Scopes{Delegated: []string{"Mail.ReadBasic", "Mail.Read"}}}
+	if got := leastScopes(plain, catalog.Delegated, nil); !slices.Equal(got, []string{"Mail.ReadBasic"}) {
+		t.Errorf("plain = %v", got)
+	}
+	in := Input{Kind: catalog.Delegated, APIs: []catalog.API{{ID: "x", Category: "user", Delegated: "/me/x", Scopes: dr.Scopes}}, Granted: []string{"user.read"}}
+	if got := permissionProblem(in, "user"); got != ReasonMissingPermission+":User.ReadBasic.All" {
+		t.Errorf("problem = %q", got)
+	}
+}

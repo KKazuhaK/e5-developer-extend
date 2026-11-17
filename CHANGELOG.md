@@ -8,7 +8,7 @@
 
 - 账号可以改名：`e5extend account rename <旧名称> <新名称>`，桌面版的编辑页里直接改“账号名称”。改名保留历史和密钥：Secret、已保存的登录、统计、告警记录、订阅信息和调用日志都留在账号上，不需要重新登录，也不会触发告警；按新名称查看日志时，改名前写入的条目也会显示。做法是给账号一个固定的 ID（配置里的 `id`，新添加的账号一开始就有；没有 ID 的老账号第一次改名时以旧名称作为 ID），所有按账号保存的数据都以 ID 为键，改名只改 `config.toml`。名称规则不变（小写字母、数字、`-`、`_`，1-64 个字符）。带 `id` 的配置不能被旧版本（v0.2.0 及以前）读取：旧版后台服务会记一条 `config_error` 并继续用旧配置，重启到新版本后才生效。详见 [docs/design/account-rename.md](docs/design/account-rename.md)。
 - 检查更新和一键升级。引擎每天查一次 GitHub 上有没有新版本（走配置的代理，支持 `ETag`，遇到限流或离线按退避重试，开发构建从不检查），结果存在数据目录的 `update.json`。`config.toml` 新增 `[update]`：`check = true`（默认；`false` 只关闭每天的自动检查，手动检查不受影响）、`channel = "stable"`（默认）或 `"prerelease"`。新增告警事件 `update_available`（提示级别，每个版本只通知一次，走现有渠道、过滤、免打扰和重试）；`doctor` 在有新版本时多一行 `update`（不影响退出码）；`e5extend update check [--json]`、`e5extend update install [--yes]`。
-- 升级前验证发布签名：发布流水线用 Ed25519 密钥给 `SHA256SUMS` 签名（minisign 兼容格式，文件 `SHA256SUMS.minisig`，可用 `minisign -Vm SHA256SUMS -P <公钥>` 自己验证），仓库密钥 `RELEASE_SIGNING_KEY` 不存在时发布照常成功、只是没有签名，程序也就只提示新版本并给出发布页。公钥编进程序（`internal/update/pubkey.go`，目前是占位符，**仓库所有者需要运行一次 `go run scripts/release/gen-signing-key.go` 并设置密钥**，步骤见 [docs/design/update.md](docs/design/update.md) 和 [docs/design/release.md](docs/design/release.md)）。
+- 升级前验证发布签名：发布流水线用 Ed25519 密钥给 `SHA256SUMS` 签名（minisign 兼容格式，文件 `SHA256SUMS.minisig`，可用 `minisign -Vm SHA256SUMS -P <公钥>` 自己验证），仓库密钥 `RELEASE_SIGNING_KEY` 不存在时发布照常成功、只是没有签名，程序也就只提示新版本并给出发布页。公钥编进程序（`internal/update/pubkey.go`，`RWQh2HcJZFOJwdJXpwW2YFjr8hItSVKWgwOQWcMS0lbd7ZJo0I2HTZ41`），私钥是仓库密钥 `RELEASE_SIGNING_KEY`；细节见 [docs/design/update.md](docs/design/update.md) 和 [docs/design/release.md](docs/design/release.md)。
 - 按安装方式升级：Windows 安装包（静默运行新安装包）、Windows 命令行 zip（改名替换，正在运行的文件先改名为 `.old`）、macOS 应用（挂载 dmg 替换 `.app`）、macOS / Linux 的 tar 包（原子替换）、Linux deb / rpm（命令行包和桌面包一起装；桌面版用 `pkexec`，命令行不是 root 时给出确切的 `sudo` 命令）；Docker 只通知。升级后自动重启后台服务（服务管理器新增 `Restart`），先验证签名和 SHA-256，任何一步失败都不会改动现有程序。详见 [docs/design/update.md](docs/design/update.md) 和 [安装 → 升级](docs/user/install.md#升级)。
 - 桌面版：概览页新版本横幅（版本号、发布说明、“立即升级”带进度、“稍后”按版本隐藏）、“关于”页的当前/最新版本和“立即检查”、托盘菜单“升级到 x.y.z”；Mock 变体 `?update=available|downloading|error|manual|restart|none`。
 - Windows：`e5extend service install --headless` 让后台任务无人登录也运行（Windows Server / Server Core 开机后不用登录，用户注销后也不停）。任务的登录类型改为 S4U（不保存 Windows 密码），在登录触发器和重复触发器之外增加开机触发器（延迟 30 秒），失败重启等设置不变。因为 S4U 会话读不到用户的凭据管理器，主密钥会复制成配置目录里的 `master.key.dpapi`：用 DPAPI 本机范围加密，ACL 只授予当前用户、SYSTEM 和 Administrators。需要“作为批处理作业登录”权限（管理员默认有），注册任务通常要在管理员命令行里执行；权限不够时会打印完整的命令。`service status` 显示 `headless:`，`doctor` 新增 `headless` 项（密钥文件缺失、读不了、ACL 过宽）。卸载只在任务是 headless 时删除这个文件。其他平台上 `--headless` 会报错并指向 Linux 的 `--key-file` / `--enable-linger`。默认安装（登录时运行）不变。详见 [docs/user/background.md](docs/user/background.md) 和 [docs/design/service-doctor-notify.md](docs/design/service-doctor-notify.md)。
@@ -30,6 +30,12 @@
 - 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
 - 返回 403 的接口现在在第一次就暂停 24 小时（之前连续 3 次后暂停 7 天），404 也一样；`failure_spike` 和“今日失败”不再把 403、404 和限流算作失败。
 - 自动暂停的原因里说明会自动再试一次。
+- 升级后重启服务：Windows 任务计划程序读不出任务是否在运行，改用引擎的锁和宿主标记判断：引擎在作为服务运行就重启，没有运行就保持停止（避免把用户手动停掉的任务又启动），两个信号都读不到时才提示自己重启。
+- 托盘退出（macOS 的“退出”不运行 Go 的 defer）时也会删除 `gui-tray.pid`；`gui-tray.pid` 现在同时记录进程启动时间，进程号被别的进程复用时不会被当成托盘。升级后重启应用的辅助进程最多等旧托盘退出 90 秒，确认旧托盘仍在运行才不再另起新托盘（它只会撞上单实例锁），无法确认身份的进程等满时限后照常启动。
+- Windows 上的进程存活判断（`PidAlive`）改为真正查询进程，以前一律返回“存活”；其他用户的进程（权限不足）一律视为不是自己的。
+- 下载被调用方取消或超时时，错误信息与 30 分钟总时限分开显示。
+- 稳定通道：最新一个发布的标签带预发布后缀（但 GitHub 没标成预发布）时，改为提示最新的正式稳定版，而不是什么都不报。
+- API 目录（桌面版）和权限提示：直属下级这类“几个权限必须同时具备”的接口，目录里新增 `scopeSets`，推荐里的缺权限提示改为建议最小权限组合中尚未授予的部分（`User.Read` + `User.ReadBasic.All`），不再建议需要管理员同意的 `User.Read.All`。
 
 ### 文档
 
