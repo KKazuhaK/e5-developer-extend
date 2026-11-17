@@ -66,6 +66,7 @@ func (a *app) newAccountAddCmd() *cobra.Command {
 			if err := a.ops().AddAccount(contextOrBackground(cmd), in); err != nil {
 				return err
 			}
+			a.ops().ReloadEngine()
 			fmt.Fprintf(cmd.OutOrStdout(), "added account %q (%s)\n", acct.Name, acct.Auth)
 			fmt.Fprintf(cmd.OutOrStdout(), "next: e5extend account login %s\n", acct.Name)
 			return nil
@@ -121,6 +122,7 @@ func (a *app) newAccountSetSecretCmd() *cobra.Command {
 			if err := o.SetSecret(contextOrBackground(cmd), name, secret, expires); err != nil {
 				return err
 			}
+			o.ReloadEngine()
 			fmt.Fprintf(cmd.OutOrStdout(), "stored the new secret for account %q\nnext: e5extend account login %s   (verifies it)\n", name, name)
 			return nil
 		},
@@ -174,6 +176,7 @@ func (a *app) newAccountLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			a.ops().ReloadEngine()
 			out := cmd.OutOrStdout()
 			if res.Delegated {
 				fmt.Fprintf(out, "signed in as %s\n", res.Account)
@@ -239,6 +242,7 @@ func (a *app) newAccountRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			o.ReloadEngine()
 			for _, w := range warnings {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}

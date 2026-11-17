@@ -280,6 +280,7 @@ func (a *app) accountAddAuto(cmd *cobra.Command, acct config.Account, f setupFla
 		}
 		return fmt.Errorf("the app registration is ready (client ID %s) but adding the account failed: %w", res.ClientID, err)
 	}
+	o.ReloadEngine()
 	fmt.Fprintf(out, "\nadded account %q (%s)\n", acct.Name, acct.Auth)
 
 	if !res.ConsentGranted {

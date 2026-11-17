@@ -17,6 +17,7 @@ import (
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 )
@@ -476,4 +477,34 @@ func TestDirFlagsOverrideEnvironment(t *testing.T) {
 	if !strings.Contains(out, filepath.Join(cfg, "config.toml")) || !strings.Contains(out, data) {
 		t.Errorf("flags not applied:\n%s", out)
 	}
+}
+
+// A running engine must hear about account changes made on the command line
+// at once, not at its next periodic config check (up to 15 minutes later).
+func TestAccountChangesAskARunningEngineToReload(t *testing.T) {
+	e := newEnv(t)
+	release, err := engine.AcquireLock(e.dataDir) // stands in for a running engine
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	reload := filepath.Join(e.dataDir, "trigger", ".reload")
+	expectReload := func(what string) {
+		t.Helper()
+		if _, err := os.Stat(reload); err != nil {
+			t.Fatalf("%s did not ask the engine to reload: %v", what, err)
+		}
+		if err := os.Remove(reload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	e.mustRun("", "account", "add", "main", "--auth", "device_code", "--tenant", "contoso.onmicrosoft.com", "--client-id", testGUID)
+	expectReload("account add")
+	e.mustRun("s3cr3t-value\n", "account", "add", "svc", "--auth", "client_secret",
+		"--tenant", "contoso.onmicrosoft.com", "--client-id", testGUID)
+	expectReload("account add (client secret)")
+	e.mustRun("n3w-s3cr3t\n", "account", "set-secret", "svc")
+	expectReload("account set-secret")
+	e.mustRun("", "account", "remove", "svc", "--yes")
+	expectReload("account remove")
 }
