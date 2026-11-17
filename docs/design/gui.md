@@ -108,7 +108,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 | `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
 | `LogService` | `Read(account, sinceHours, limit)` |
 | `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
-| `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`UninstallService()` |
+| `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`StartService()`、`UninstallService()` |
 | `CatalogService` | `List(account)`、`Categories()` |
 
 - 出错时 Go 返回 error，前端得到 rejected promise。错误信息里带上 ops 给出的修复建议。
