@@ -28,6 +28,10 @@ jobs:
       - name: Install, crash, restart, uninstall
         shell: bash
         run: bash scripts/service-e2e.sh
+      - name: Headless task (S4U, boot trigger, DPAPI key file)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: bash scripts/service-e2e-headless.sh
       - name: Engine log
         if: always()
         shell: bash

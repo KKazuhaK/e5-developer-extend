@@ -131,6 +131,7 @@ func clearKeyEnv(t *testing.T) {
 	t.Helper()
 	t.Setenv(EnvMasterKey, "")
 	t.Setenv(EnvMasterKeyFile, "")
+	t.Setenv(EnvMasterKeyDPAPIFile, "")
 	t.Setenv("CREDENTIALS_DIRECTORY", "")
 	// Results must not depend on whether the tests run over SSH.
 	setRemote(t, false)

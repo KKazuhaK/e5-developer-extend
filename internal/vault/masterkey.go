@@ -42,6 +42,7 @@ const (
 	SourceEnv        Source = "environment"
 	SourceCredential Source = "systemd credential"
 	SourceKeyFile    Source = "key file"
+	SourceDPAPIFile  Source = "DPAPI key file"
 	SourceKeyring    Source = "system keyring"
 )
 
@@ -256,6 +257,13 @@ func fromEnvOrCredential() ([]byte, Source, error) {
 			return nil, "", fmt.Errorf("%s: %w", EnvMasterKeyFile, err)
 		}
 		return key, SourceKeyFile, nil
+	}
+	if p := os.Getenv(EnvMasterKeyDPAPIFile); p != "" {
+		key, err := ReadDPAPIKeyFile(p)
+		if err != nil {
+			return nil, "", fmt.Errorf("%s: read the key file: %s", EnvMasterKeyDPAPIFile, pathless(err))
+		}
+		return key, SourceDPAPIFile, nil
 	}
 	if dir := os.Getenv("CREDENTIALS_DIRECTORY"); dir != "" {
 		p := filepath.Join(dir, CredentialName)

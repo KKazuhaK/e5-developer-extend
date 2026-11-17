@@ -6,6 +6,7 @@
 
 ### 新增
 
+- Windows：`e5extend service install --headless` 让后台任务无人登录也运行（Windows Server / Server Core 开机后不用登录，用户注销后也不停）。任务的登录类型改为 S4U（不保存 Windows 密码），在登录触发器和重复触发器之外增加开机触发器（延迟 30 秒），失败重启等设置不变。因为 S4U 会话读不到用户的凭据管理器，主密钥会复制成配置目录里的 `master.key.dpapi`：用 DPAPI 本机范围加密，ACL 只授予当前用户、SYSTEM 和 Administrators。需要“作为批处理作业登录”权限（管理员默认有），注册任务通常要在管理员命令行里执行；权限不够时会打印完整的命令。`service status` 显示 `headless:`，`doctor` 新增 `headless` 项（密钥文件缺失、读不了、ACL 过宽）。卸载只在任务是 headless 时删除这个文件。其他平台上 `--headless` 会报错并指向 Linux 的 `--key-file` / `--enable-linger`。默认安装（登录时运行）不变。详见 [docs/user/background.md](docs/user/background.md) 和 [docs/design/service-doctor-notify.md](docs/design/service-doctor-notify.md)。
 - 限流重试：收到 429（或带 `Retry-After` 的 503）时，按 `Retry-After`（秒数或 HTTP 日期）等待后重试同一个调用，同一轮里最多再试 2 次；要求等待超过 60 秒的直接跳过这次调用。限流不算失败：不计入连续失败（自动暂停）和 `failure_spike`，调用日志里的类别是 `throttled`。
 - 接口不可用：某个接口返回 403 或 404 时，对这个账号暂停 24 小时（写进状态，重启后仍有效），之后几轮改调别的接口；这不算这一轮失败。一轮只有在所有调用都因 403/404 以外的原因失败时才算失败。`e5extend status`、`doctor`（`account.<名称>.apis`）、桌面版概览和账号页显示“N 个 API 暂停 24 小时”，以及今日限流次数。
 - 自动恢复：因连续失败被自动暂停的账号，在暂停后 6 小时、再过 12 小时、之后每 24 小时用一次轻量调用（`/me`，应用身份用 `/organization` 或最便宜的可用接口）探测；成功就自动恢复并发 `recovered`。手动暂停的账号不会被自动恢复；`invalid_grant`、需要重新登录等仍是 `needs_attention`，不探测。`status`、`doctor` 和桌面版显示下一次探测的时间。
@@ -14,6 +15,7 @@
 
 ### 变更
 
+- 默认每天都调用（以前只在周一到周五）。已有的配置不变；要改回只在工作日，在桌面版“设置 → 调用节奏”里选“仅工作日”，或在配置里写 `work_days = ["mon", "tue", "wed", "thu", "fri"]`。
 - 返回 403 的接口现在在第一次就暂停 24 小时（之前连续 3 次后暂停 7 天），404 也一样；`failure_spike` 和“今日失败”不再把 403、404 和限流算作失败。
 - 自动暂停的原因里说明会自动再试一次。
 

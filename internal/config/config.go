@@ -193,7 +193,7 @@ func Default() *Config {
 			APIsPerRoundMin: 3,
 			APIsPerRoundMax: 8,
 			RandomOrder:     true,
-			WorkDays:        []string{"mon", "tue", "wed", "thu", "fri"},
+			WorkDays:        []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"},
 			WorkStart:       "08:00",
 			WorkEnd:         "22:00",
 		},

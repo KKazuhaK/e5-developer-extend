@@ -158,11 +158,14 @@ already has data you can **Merge** or **Replace**. No new sign-in is needed. Det
 
 ## Tracking the subscription end date
 
-The **E5 subscription** card on the Overview page shows, per tenant, the SKU (such as `DEVELOPERPACK_E5`), its status,
-the end date and the days left. **Renewal history** opens the past renewals and **Refresh now** reads the subscription
-again right away. The engine reads it once a day (`GET /directory/subscriptions`), once per tenant.
+The **E5 subscription** section on the Overview page has one compact card per subscription, laid out side by side (one
+column in a narrow window, two at the default width, three when wider). A card shows the tenant (its domain), the SKU
+(such as `DEVELOPERPACK_E5`), the status, the end date and the days left on a bar (grey above 30 days, amber within 30,
+red within 7). **Renewal history** opens the past renewals in a dialog. The refresh icon on a card reads that tenant
+again and **Refresh all** reads every tenant right away. Subscriptions that are not watched (such as `FLOW_FREE`) get
+no card; **N other subscriptions** lists them. The engine reads it once a day (`GET /directory/subscriptions`), once per tenant.
 
-![The E5 subscription card with its renewal history](../images/en/subscription.webp)
+![The E5 subscription cards with a renewal history dialog](../images/en/subscription.webp)
 
 You are warned 30, 7 and 1 days before the end, and told when the status turns bad or a renewal is seen, through the
 alert channels you set up. Only subscriptions whose SKU starts with `DEVELOPERPACK` alert; to watch others, set

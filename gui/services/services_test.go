@@ -633,6 +633,26 @@ func TestStartServiceNeedsAnInstalledServiceAndWithdrawsHandover(t *testing.T) {
 	}
 }
 
+// A headless (S4U) Windows task is reported like any other task: installed,
+// enabled, and "unknown" whether it runs, which the frontend settles from the
+// engine's heartbeat (see lib/service.ts); its key-file checks are the
+// doctor's business, not a reason to call the service stopped.
+func TestServiceInfoOfAHeadlessTask(t *testing.T) {
+	r := newRig(t)
+	r.b.Ops.Platform = service.Windows
+	fr := &service.FakeRunner{Replies: map[string]service.Output{"schtasks /Query": {Stdout: "<Task><Principals><Principal>" +
+		"<LogonType>S4U</LogonType></Principal></Principals><Settings><Enabled>true</Enabled></Settings>" +
+		"<Actions><Exec><Arguments>--dpapi-key-file C:\\c\\master.key.dpapi run</Arguments></Exec></Actions></Task>"}}}
+	r.b.Ops.Runner = fr
+	info, err := NewHealthService(r.b).ServiceInfo()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Platform != "windows" || !info.Installed || info.Enabled != "yes" || info.Running != "unknown" {
+		t.Errorf("info = %+v", info)
+	}
+}
+
 func TestRecommendProbesTheSignedInAccount(t *testing.T) {
 	r := newRig(t)
 	acc := NewAccountService(r.b)

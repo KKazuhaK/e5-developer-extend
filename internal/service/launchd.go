@@ -92,6 +92,9 @@ func (m *launchd) Plan(o InstallOptions) (Plan, error) {
 	if o.KeyFile {
 		return Plan{}, errors.New("--key-file is only for Linux; on macOS the job runs in your login session and reads the keychain")
 	}
+	if o.Headless {
+		return Plan{}, errors.New(headlessWindowsOnly + "; macOS has no equivalent: a LaunchAgent runs in your login session")
+	}
 	if o.DataDir == "" {
 		return Plan{}, errors.New("service: data directory is required")
 	}
