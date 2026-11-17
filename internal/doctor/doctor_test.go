@@ -86,6 +86,7 @@ func (r *rig) deps() Deps {
 		HTTP:       func(*config.Config) *http.Client { return r.graph.Client() },
 		Service:    func() (service.Status, error) { return r.svc, r.svcErr },
 		Hint:       func(error, string) string { return "hint" },
+		HintCode:   func(error) string { return "hint.loginRequired" },
 	}
 }
 
@@ -104,6 +105,7 @@ func (r *rig) run(offline bool) map[string]Check {
 	out := map[string]Check{}
 	for _, c := range Run(context.Background(), r.deps(), Options{Offline: offline}) {
 		out[c.ID] = c
+		checkCodes(r.t, c)
 	}
 	return out
 }
