@@ -209,7 +209,35 @@ func checkService(d Deps) []Check {
 			out = append(out, l)
 		}
 	}
+	if d.GOOS == service.Windows && err == nil && st.Installed && st.Headless == service.Yes {
+		out = append(out, checkHeadless(st))
+	}
 	return out
+}
+
+// checkHeadless looks at the key file a headless Windows task depends on: the
+// task runs without a user profile, so without that file the engine cannot
+// open the vault.
+func checkHeadless(st service.Status) Check {
+	h := Check{ID: "headless", Title: "Headless mode"}
+	switch {
+	case st.KeyFileMissing:
+		h.Level = Fail
+		h.setDetail(M("headless.keyMissing"))
+		h.setFix(M("fix.headlessInstall"))
+	case st.KeyFileErr != "":
+		h.Level = Fail
+		h.setDetail(M("headless.keyUnreadable", "reason", st.KeyFileErr))
+		h.setFix(M("fix.headlessInstall"))
+	case len(st.KeyFileBroad) > 0:
+		h.Level = Warn
+		h.setDetail(M("headless.keyAcl", "principals", strings.Join(st.KeyFileBroad, ", ")))
+		h.setFix(M("fix.headlessInstall"))
+	default:
+		h.Level = OK
+		h.setDetail(M("headless.ok"))
+	}
+	return h
 }
 
 func checkAccount(ctx context.Context, d Deps, cfg *config.Config, acct config.Account, as *store.AccountState, offline bool) []Check {
