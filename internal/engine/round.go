@@ -188,6 +188,8 @@ func (e *Engine) execute(ctx context.Context, acct config.Account, roundID strin
 func (e *Engine) attentionReason(err error, name string) string {
 	var label string
 	switch {
+	case auth.IsSignInFrequency(err):
+		label = auth.SignInFrequencyLabel
 	case errors.Is(err, auth.ErrLoginRequired):
 		label = "login required"
 	case errors.Is(err, auth.ErrInvalidClient):

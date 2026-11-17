@@ -142,8 +142,9 @@ func Hint(err error, name string) string {
 		// Seen on a real tenant: a Conditional Access "sign-in frequency" policy
 		// caps the refresh token's lifetime, so signing in again only buys that
 		// much time and the background job keeps stopping.
-		return "a Conditional Access sign-in frequency policy in this tenant ends the sign-in after a fixed time, so it cannot keep running in the background; " +
-			"exclude this app registration from that policy (Entra > Protection > Conditional Access), then run `e5extend account login " + name + "`"
+		return "ways out, in order: (a) use the app identity, which user sign-in policies do not affect: e5extend account add " + name + "-app --auto --auth client_secret; " +
+			"(b) password sign-in, only if the account has no MFA (the password is stored encrypted on this machine; E5 developer tenants usually enforce MFA, so this rarely works); " +
+			"(c) exclude this app registration from the Conditional Access policy (Entra > Protection > Conditional Access), then run `e5extend account login " + name + "`"
 	case strings.Contains(text, "AADSTS50126"):
 		return "the stored password is wrong or expired: run `e5extend account set-secret " + name + "`"
 	case strings.Contains(text, "AADSTS50076"), strings.Contains(text, "AADSTS50079"):
