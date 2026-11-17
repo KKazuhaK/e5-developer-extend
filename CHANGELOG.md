@@ -7,6 +7,7 @@
 ### 新增
 
 - 账号可以改名：`e5extend account rename <旧名称> <新名称>`，桌面版的编辑页里直接改“账号名称”。Secret、已保存的登录、统计、告警记录和订阅信息都跟着新名称走，改名不会触发告警；已写入的调用日志仍用旧名称，但按新名称查看日志时会一并显示。名称规则不变（小写字母、数字、`-`、`_`，1-64 个字符）。后台引擎在运行时，改名通过数据目录里的 `state.rename.json` 交给引擎，由引擎在重新加载配置时应用。
+- Windows：`e5extend service install --headless` 让后台任务无人登录也运行（Windows Server / Server Core 开机后不用登录，用户注销后也不停）。任务的登录类型改为 S4U（不保存 Windows 密码），在登录触发器和重复触发器之外增加开机触发器（延迟 30 秒），失败重启等设置不变。因为 S4U 会话读不到用户的凭据管理器，主密钥会复制成配置目录里的 `master.key.dpapi`：用 DPAPI 本机范围加密，ACL 只授予当前用户、SYSTEM 和 Administrators。需要“作为批处理作业登录”权限（管理员默认有），注册任务通常要在管理员命令行里执行；权限不够时会打印完整的命令。`service status` 显示 `headless:`，`doctor` 新增 `headless` 项（密钥文件缺失、读不了、ACL 过宽）。卸载只在任务是 headless 时删除这个文件。其他平台上 `--headless` 会报错并指向 Linux 的 `--key-file` / `--enable-linger`。默认安装（登录时运行）不变。详见 [docs/user/background.md](docs/user/background.md) 和 [docs/design/service-doctor-notify.md](docs/design/service-doctor-notify.md)。
 
 ### 变更
 

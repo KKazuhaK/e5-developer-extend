@@ -239,6 +239,78 @@ func TestServiceAndLinger(t *testing.T) {
 	}
 }
 
+func TestHeadlessCheck(t *testing.T) {
+	r := newRig(t)
+	d := r.deps()
+	d.GOOS = "windows"
+	run := func(st service.Status) map[string]Check {
+		r.svc = st
+		d.Service = func() (service.Status, error) { return st, nil }
+		out := map[string]Check{}
+		for _, c := range Run(context.Background(), d, Options{Offline: true}) {
+			out[c.ID] = c
+		}
+		return out
+	}
+	base := service.Status{Installed: true, Enabled: service.Yes, Running: service.Unknown, Headless: service.Yes, KeyFile: `C:\c\master.key.dpapi`}
+	expect(t, run(base), "headless", OK, "signed in")
+	m := base
+	m.KeyFileMissing = true
+	got := run(m)
+	expect(t, got, "headless", Fail, "missing")
+	if !strings.Contains(got["headless"].Fix, "service install --headless") {
+		t.Errorf("fix = %q", got["headless"].Fix)
+	}
+	u := base
+	u.KeyFileErr = "Access is denied."
+	expect(t, run(u), "headless", Fail, "Access is denied.")
+	b := base
+	b.KeyFileBroad = []string{`BUILTIN\Users`, `Everyone`}
+	expect(t, run(b), "headless", Warn, `BUILTIN\Users, Everyone`)
+	// An interactive task, or another platform, has no such check.
+	i := base
+	i.Headless = service.No
+	if _, ok := run(i)["headless"]; ok {
+		t.Error("headless check for an interactive task")
+	}
+	d.GOOS = "linux"
+	if _, ok := run(base)["headless"]; ok {
+		t.Error("headless check on linux")
+	}
+}
+
+type staleVault struct{ err error }
+
+func (staleVault) Has(string) (bool, error)     { return true, nil }
+func (v staleVault) Get(string) ([]byte, error) { return []byte("x"), v.err }
+
+func TestHeadlessCheckAclAndStaleKey(t *testing.T) {
+	r := newRig(t)
+	d := r.deps()
+	d.GOOS = "windows"
+	st := service.Status{Installed: true, Enabled: service.Yes, Headless: service.Yes, KeyFile: `C:\c\master.key.dpapi`}
+	d.Service = func() (service.Status, error) { return st, nil }
+	run := func() map[string]Check {
+		out := map[string]Check{}
+		for _, c := range Run(context.Background(), d, Options{Offline: true}) {
+			out[c.ID] = c
+		}
+		return out
+	}
+	st.KeyFileACLErr = "Access is denied."
+	expect(t, run(), "headless", Warn, "Access is denied.")
+	st.KeyFileACLErr = ""
+	st.KeyFileDir, st.KeyFileDirBroad = `C:\c`, []string{`BUILTIN\Users`}
+	got := run()
+	expect(t, got, "headless", Warn, `C:\c can be changed by BUILTIN\Users`)
+	st.KeyFileDirBroad = nil
+	// The key from the file opens the vault: fine. A wrong key: stale.
+	d.OpenVaultWithKeyFile = func(*config.Config, string) (Vault, error) { return staleVault{}, nil }
+	expect(t, run(), "headless", OK, "signed in")
+	d.OpenVaultWithKeyFile = func(*config.Config, string) (Vault, error) { return staleVault{vault.ErrWrongKey}, nil }
+	expect(t, run(), "headless", Fail, "does not match the vault")
+}
+
 func TestTokenChecks(t *testing.T) {
 	r := newRig(t)
 	cases := []struct {
