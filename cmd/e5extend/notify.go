@@ -408,16 +408,21 @@ func (a *app) newNotifyClearCmd() *cobra.Command {
 }
 
 func (a *app) newNotifyTestCmd() *cobra.Command {
-	return &cobra.Command{
+	var event string
+	var digest int
+	cmd := &cobra.Command{
 		Use:   "test [id]",
 		Short: "Send a test message to every channel, or to one",
-		Args:  cobra.MaximumNArgs(1),
+		Long: "Send a test message. --event <kind> sends the example of that event (one of " + strings.Join(notify.SampleKinds(), ", ") + "),\n" +
+			"--digest N a quiet-hours summary of N example items (a large N shows how long messages are split).\n" +
+			"Samples are marked as tests, take the real sending path, and change no alert state or cooldown.",
+		Args: cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			id := ""
 			if len(args) == 1 {
 				id = args[0]
 			}
-			res, err := a.ops().TestChannels(contextOrBackground(cmd), id)
+			res, err := a.ops().TestChannelsWith(contextOrBackground(cmd), id, ops.TestOptions{Event: event, Digest: digest})
 			if err != nil {
 				return withHint(err, "")
 			}
@@ -436,6 +441,9 @@ func (a *app) newNotifyTestCmd() *cobra.Command {
 			return nil
 		},
 	}
+	cmd.Flags().StringVar(&event, "event", "", "send the example of this event kind")
+	cmd.Flags().IntVar(&digest, "digest", 0, "send a sample quiet-hours digest of N items")
+	return cmd
 }
 
 func (a *app) newNotifyPreviewCmd() *cobra.Command {

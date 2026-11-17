@@ -246,7 +246,7 @@ e5extend notify channel list
 e5extend notify channel add <名称> --type <类型> [--min-level … --events … --language … --template-file …] [类型自己的参数]
 e5extend notify channel edit <名称> [只写要改的参数] [--secret <字段>] [--clear-secret <字段>] [--clear-template]
 e5extend notify channel remove <名称>        # 同时从 vault 删除它的敏感信息
-e5extend notify test [<名称>]                # 不给名称就发给所有渠道，逐个报告结果
+e5extend notify test [<名称>] [--event <事件> | --digest N]   # 不给名称就发给所有渠道，逐个报告结果；--event 发该事件的示例，--digest N 发 N 条的免打扰汇总示例（看长消息怎么拆）。示例带“[测试]”标记，走真实发送路径，不改变告警状态和冷却
 e5extend notify preview <事件> [--type … --language … --template-file …]
 e5extend notify set-webhook <地址>           # 旧命令，等价于设置名为 webhook 的通用 Webhook 渠道
 ```

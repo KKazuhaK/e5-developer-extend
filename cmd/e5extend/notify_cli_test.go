@@ -334,3 +334,68 @@ func TestSetWebhookIsAnAliasOfTheWebhookChannel(t *testing.T) {
 		t.Errorf("list:\n%s", list)
 	}
 }
+
+func TestNotifyTestEventAndDigest(t *testing.T) {
+	e := newEnv(t)
+	t.Setenv(vault.EnvMasterKey, vault.EncodeKey(make([]byte, 32)))
+	var mu sync.Mutex
+	var bodies []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		bodies = append(bodies, string(b))
+		mu.Unlock()
+		_, _ = io.WriteString(w, `{"errcode":0}`)
+	}))
+	defer srv.Close()
+	e.mustRun("", "config", "init")
+	e.mustRun(srv.URL+"/wc/TOKEN123\n", "notify", "channel", "add", "wc", "--type", "wecom", "--language", "en")
+	e.mustRun(srv.URL+"/hook\n", "notify", "channel", "add", "hook", "--type", "webhook")
+	before, _ := os.ReadFile(filepath.Join(e.dataDir, "state.json"))
+
+	out := e.mustRun("", "notify", "test", "wc", "--event", "failure_spike")
+	if !strings.Contains(out, "wc: test alert delivered") {
+		t.Errorf("output: %s", out)
+	}
+	mu.Lock()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `Test\\] High failure rate`) || !strings.Contains(bodies[0], "75%") {
+		t.Errorf("event sample: %v", bodies)
+	}
+	bodies = nil
+	mu.Unlock()
+
+	// A big digest takes the real path: split into several WeCom messages, each within 4096 bytes.
+	e.mustRun("", "notify", "test", "wc", "--digest", "40")
+	mu.Lock()
+	if len(bodies) < 2 {
+		t.Fatalf("40 items went out in %d message(s)", len(bodies))
+	}
+	for _, b := range bodies {
+		var m struct {
+			Markdown struct{ Content string } `json:"markdown"`
+		}
+		if err := json.Unmarshal([]byte(b), &m); err != nil || len(m.Markdown.Content) > 4096 || !strings.Contains(m.Markdown.Content, "Test") {
+			t.Errorf("message of %d bytes: %v %.120s", len(m.Markdown.Content), err, b)
+		}
+	}
+	bodies = nil
+	mu.Unlock()
+
+	// The webhook JSON says it is a test, for every kind of sample.
+	e.mustRun("", "notify", "test", "hook", "--event", "all_failing")
+	mu.Lock()
+	if len(bodies) != 1 || !strings.Contains(bodies[0], `"test":true`) || !strings.Contains(bodies[0], `"event":"all_failing"`) {
+		t.Errorf("webhook: %v", bodies)
+	}
+	mu.Unlock()
+
+	after, _ := os.ReadFile(filepath.Join(e.dataDir, "state.json"))
+	if string(before) != string(after) {
+		t.Error("a test changed the alert state")
+	}
+	for _, args := range [][]string{{"--event", "boom"}, {"--digest", "-1"}, {"--event", "stale", "--digest", "3"}} {
+		if _, _, err := e.run("", append([]string{"notify", "test"}, args...)...); err == nil {
+			t.Errorf("%v accepted", args)
+		}
+	}
+}

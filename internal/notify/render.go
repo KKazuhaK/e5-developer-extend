@@ -151,6 +151,10 @@ func NewData(ev Event, lang, host string, loc *time.Location) Data {
 		Message: ev.Message, Time: t.In(loc).Format("2006-01-02 15:04 MST"), Hint: Hint(ev.Event, ev.Account, lang),
 		Failures: ev.Failures, Rounds: ev.Rounds, Origin: ev.Origin,
 	}
+	if ev.IsTest {
+		// Titles and headlines are built from the label, so the mark shows everywhere.
+		d.EventLabel = map[string]string{"zh": "[测试] ", "en": "[Test] "}[lang] + d.EventLabel
+	}
 	if ev.Event == FailureSpike && ev.Rounds > 0 {
 		d.FailRate = fmt.Sprintf("%.0f%%", ev.FailRate*100)
 	}
@@ -353,6 +357,21 @@ func SampleEvent(kind string, now time.Time) Event {
 		ev.Items = []Event{SampleEvent(Stale, now), SampleEvent(SecretExpiring, now)}
 	}
 	return ev
+}
+
+// SampleDigest is a quiet-hours summary of n example items.
+func SampleDigest(n int, now time.Time) Event {
+	d := SampleEvent(Digest, now)
+	d.Items = nil
+	kinds := []string{Stale, SecretExpiring, FailureSpike, Recovered, PeriodEnded}
+	for i := 0; i < n; i++ {
+		it := SampleEvent(kinds[i%len(kinds)], now)
+		it.Account = fmt.Sprintf("demo-%d", i+1)
+		it.IsTest = true
+		d.Items = append(d.Items, it)
+	}
+	d.Message = fmt.Sprintf("%d alerts were held during the quiet hours", n)
+	return d
 }
 
 // SampleKinds are the kinds a template is checked with.

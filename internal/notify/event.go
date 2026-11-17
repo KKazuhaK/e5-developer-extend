@@ -45,6 +45,8 @@ type Event struct {
 	Message string    // what happened and what to do, without secrets
 	Time    time.Time // when the condition was detected
 
+	// IsTest marks a sample sent by `notify test`: the message says so.
+	IsTest bool
 	// Attempt identifies this hand-out of the alert, for MarkEvent; Time stays
 	// the moment the condition was first detected. Zero means Time.
 	Attempt time.Time
@@ -91,6 +93,7 @@ type payload struct {
 	Text    string `json:"text"`
 	Content string `json:"content"`
 	// Level, Origin and Items are only present when they apply.
+	Test   bool      `json:"test,omitempty"`
 	Level  string    `json:"level,omitempty"`
 	Origin string    `json:"origin,omitempty"`
 	Items  []payload `json:"items,omitempty"`
@@ -107,7 +110,7 @@ func (e Event) payload() payload {
 	p := payload{
 		Event: e.Event, Account: e.Account, Message: e.Message,
 		Time: t.Format(time.RFC3339), Text: e.Text(), Content: e.Text(),
-		Level: e.Level(), Origin: e.Origin,
+		Level: e.Level(), Origin: e.Origin, Test: e.IsTest,
 	}
 	for _, it := range e.Items {
 		p.Items = append(p.Items, it.payload())

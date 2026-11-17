@@ -620,6 +620,28 @@ type TestResult struct {
 // through every channel when id is empty. A channel that fails does not stop
 // the others.
 func (o *Ops) TestChannels(ctx context.Context, id string) ([]TestResult, error) {
+	return o.TestChannelsWith(ctx, id, TestOptions{})
+}
+
+// TestOptions choose what a test sends: the plain test message, a sample of
+// one event kind, or a sample quiet-hours digest of Digest items.
+type TestOptions struct {
+	Event  string
+	Digest int
+}
+
+// TestChannelsWith is TestChannels with a sample event or digest. It goes
+// through the real send path (splitting, escaping) and touches no alert state.
+func (o *Ops) TestChannelsWith(ctx context.Context, id string, opt TestOptions) ([]TestResult, error) {
+	if opt.Event != "" && opt.Digest > 0 {
+		return nil, errors.New("use either --event or --digest, not both")
+	}
+	if opt.Event != "" && !slices.Contains(notify.SampleKinds(), opt.Event) {
+		return nil, fmt.Errorf("unknown event %q (use %s)", opt.Event, strings.Join(notify.SampleKinds(), ", "))
+	}
+	if opt.Digest < 0 || opt.Digest > 500 {
+		return nil, errors.New("--digest takes a number from 1 to 500")
+	}
 	cfg, path, err := o.LoadConfigOrDefault()
 	if err != nil {
 		return nil, err
@@ -643,7 +665,16 @@ func (o *Ops) TestChannels(ctx context.Context, id string) ([]TestResult, error)
 	}
 	ctx, cancel := context.WithTimeout(ctx, 3*notify.DefaultTimeout)
 	defer cancel()
-	ev := notify.Event{Event: notify.Test, Message: "this is a test alert; alerts are working", Time: time.Now()}
+	ev := notify.Event{Event: notify.Test, Message: "this is a test alert; alerts are working", Time: time.Now(), IsTest: true}
+	switch {
+	case opt.Digest > 0:
+		ev = notify.SampleDigest(opt.Digest, time.Now())
+	case opt.Event == notify.Digest:
+		ev = notify.SampleDigest(2, time.Now())
+	case opt.Event != "":
+		ev = notify.SampleEvent(opt.Event, time.Now())
+	}
+	ev.IsTest = true
 	out := make([]TestResult, len(ids))
 	var wg sync.WaitGroup
 	for i, cid := range ids {
