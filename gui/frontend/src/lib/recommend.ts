@@ -42,3 +42,17 @@ export function preselect(all: string[], rec: RecommendResult | null): string[] 
 export function adviceByCategory(rec: RecommendResult | null): Map<string, CategoryAdvice> {
   return new Map((rec?.categories ?? []).map((c) => [c.category, c]));
 }
+
+/**
+ * How a selection differs from the advice: drop = selected categories found unavailable,
+ * add = recommended categories not selected. Both follow the order of all.
+ */
+export function diffFromRecommended(all: string[], selected: string[], rec: RecommendResult | null): { drop: string[]; add: string[] } {
+  if (!rec) return { drop: [], add: [] };
+  const status = new Map(rec.categories.map((c) => [c.category, c.status]));
+  const sel = new Set(selected);
+  return {
+    drop: all.filter((c) => sel.has(c) && status.get(c) === "unavailable"),
+    add: all.filter((c) => !sel.has(c) && status.get(c) === "recommended"),
+  };
+}

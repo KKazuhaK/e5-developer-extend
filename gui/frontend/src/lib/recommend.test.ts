@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RecommendResult } from "@/api/types";
-import { adviceByCategory, preselect, reasonMsg } from "./recommend";
+import { adviceByCategory, diffFromRecommended, preselect, reasonMsg } from "./recommend";
 
 const rec: RecommendResult = {
   needsLogin: false,
@@ -50,5 +50,19 @@ describe("adviceByCategory", () => {
   it("indexes by category", () => {
     expect(adviceByCategory(rec).get("mail")?.reason).toBe("no_mailbox");
     expect(adviceByCategory(null).size).toBe(0);
+  });
+});
+
+describe("diffFromRecommended", () => {
+  const all = ["mail", "user", "reports", "files"];
+  it("is empty when the selection follows the advice", () => {
+    expect(diffFromRecommended(all, ["user", "files"], rec)).toEqual({ drop: [], add: [] });
+  });
+  it("names unavailable categories to drop and recommended ones missing", () => {
+    expect(diffFromRecommended(all, ["mail", "user"], rec)).toEqual({ drop: ["mail"], add: ["files"] });
+  });
+  it("does not flag maybe categories and needs a result", () => {
+    expect(diffFromRecommended(all, ["user", "files", "reports"], rec)).toEqual({ drop: [], add: [] });
+    expect(diffFromRecommended(all, ["mail"], null)).toEqual({ drop: [], add: [] });
   });
 });

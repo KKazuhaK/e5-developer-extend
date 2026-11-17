@@ -17,7 +17,7 @@ import type { AccountErrorCode } from "@/lib/account";
 import { cn, errMsg } from "@/lib/utils";
 import { BrowserPrompt, DevicePrompt } from "@/components/signin";
 import { progressMsg, validateAutoStart } from "@/lib/appsetup";
-import { adviceByCategory, preselect, reasonMsg } from "@/lib/recommend";
+import { adviceByCategory, diffFromRecommended, preselect, reasonMsg } from "@/lib/recommend";
 import { AppSetupStep, AutoStartForm, ChoiceCard, ConsentNotice, type AdminMethod } from "./AppSetupFlow";
 
 type Mode = "add" | "edit";
@@ -135,7 +135,8 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         setInput((i) => (i.categories.length ? i : { ...i, categories: [...allCategories] }));
       } else {
         setRec({ phase: "ok", result, message: "" });
-        setInput((i) => ({ ...i, categories: preselect(allCategories, result) }));
+        // A fresh account (no categories yet) starts from the recommendation; an existing choice is kept and compared.
+        setInput((i) => (i.categories.length ? i : { ...i, categories: preselect(allCategories, result) }));
       }
     } catch (e) {
       if (seq !== probeSeq.current) return;
@@ -466,7 +467,7 @@ function CategoriesStep({
   categories: string[] | null; error: string | null; selected: string[]; onChange: (c: string[]) => void;
   rec: RecState | null; onRetry: () => void; invalid: boolean;
 }) {
-  const { t } = useI18n();
+  const { t, tl, lang } = useI18n();
   if (error) return <ErrorBlock message={error} />;
   if (!categories || !rec || rec.phase === "run") {
     return (
@@ -478,10 +479,18 @@ function CategoriesStep({
   }
   const advice = adviceByCategory(rec.result);
   const recommended = preselect(categories, rec.result);
+  const diff = rec.phase === "ok" ? diffFromRecommended(categories, selected, rec.result) : { drop: [], add: [] };
+  const names = (ids: string[]) => ids.map((c) => tl(`cat.${c}`, c)).join(lang === "zh" ? "、" : ", ");
   return (
     <div>
       <p className="mb-3 text-[13px] text-muted-foreground">{t("wizard.categoriesHint")}</p>
       {rec.phase === "ok" && <p className="mb-3 text-[13px] text-muted-foreground">{t("rec.summary", { n: recommended.length })}</p>}
+      {(diff.drop.length > 0 || diff.add.length > 0) && (
+        <p role="status" className="mb-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">
+          {diff.drop.length > 0 && <span className="block">{t("rec.diff.drop", { names: names(diff.drop) })}</span>}
+          {diff.add.length > 0 && <span className="block">{t("rec.diff.add", { names: names(diff.add) })}</span>}
+        </p>
+      )}
       {rec.phase === "login" && <p role="status" className="mb-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">{t("rec.needsLogin")}</p>}
       {rec.phase === "fail" && (
         <div role="alert" className="mb-3 flex items-center gap-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">

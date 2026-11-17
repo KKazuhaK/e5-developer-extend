@@ -195,6 +195,8 @@ export const en: Dict = {
   "rec.needsLogin": "Not signed in yet, so which APIs work cannot be checked; the categories below carry no advice. Sign in first, then come back to this step.",
   "rec.failed": "The check did not finish ({detail}). You can pick categories yourself or try again later.",
   "rec.retry": "Check again",
+  "rec.diff.drop": "Your selection differs from the recommendation: consider unticking {names}",
+  "rec.diff.add": "Consider also ticking {names}",
   "rec.summary": "Checked: {n} categories recommended. Unavailable categories are not ticked; calling them would only return 404.",
   "rec.badge.recommended": "Recommended",
   "rec.badge.unavailable": "Unavailable",

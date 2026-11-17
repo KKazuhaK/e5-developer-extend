@@ -194,6 +194,8 @@ export const zh = {
   "rec.needsLogin": "还没有登录，无法检查哪些 API 可用，下面的分类不带推荐。先完成登录，再回到这一步查看。",
   "rec.failed": "检查没有完成（{detail}）。可以自己勾选，或稍后重试。",
   "rec.retry": "重新检查",
+  "rec.diff.drop": "当前选择与推荐不同：建议取消 {names}",
+  "rec.diff.add": "建议再勾选 {names}",
   "rec.summary": "已检查：{n} 个分类推荐。不可用的分类不会被勾选，调用它们只会得到 404。",
   "rec.badge.recommended": "推荐",
   "rec.badge.unavailable": "不可用",
