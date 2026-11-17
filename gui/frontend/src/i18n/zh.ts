@@ -286,6 +286,7 @@ export const zh = {
   "settings.svcStart": "启动",
   "settings.svcStarted": "后台服务已启动",
   "settings.svcStoppedWarn": "服务已安装但没有运行，关闭窗口之后不会再有东西调用 Microsoft Graph。",
+  "settings.svcUnknown": "已安装（系统没有告知它是否在运行）",
   "settings.svcNext": "下次运行：{when}",
   "settings.svcLoadFailed": "读不到后台服务的状态",
   "settings.pace": "调用节奏",

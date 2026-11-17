@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { AlertTriangle, Play, Power } from "lucide-react";
 import { api } from "@/api";
 import type { ServiceInfo, ServiceResult } from "@/api";
@@ -16,7 +16,7 @@ import { serviceState, type ServiceState } from "@/lib/service";
 import { formatWhen } from "@/lib/time";
 import { errMsg } from "@/lib/utils";
 
-const TONE: Record<ServiceState, "success" | "warning" | "muted"> = { running: "success", stopped: "warning", notInstalled: "muted", unsupported: "muted" };
+const TONE: Record<ServiceState, "success" | "warning" | "muted"> = { running: "success", stopped: "warning", notInstalled: "muted", unsupported: "muted", unknown: "muted" };
 
 /**
  * Both switches act at once and neither goes through the page's Save button.
@@ -32,6 +32,7 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
   const [svc, setSvc] = useState<ServiceInfo | null>(null);
   const [svcError, setSvcError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false); // set at once, so two clicks in one render cannot both pass
   const [confirmOff, setConfirmOff] = useState(false);
   const [autoBusy, setAutoBusy] = useState(false);
   const [result, setResult] = useState<ServiceResult | null>(null);
@@ -63,7 +64,8 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
 
   // Install, start and uninstall share one guard: while one runs, nothing else starts.
   const change = async (kind: "install" | "start" | "uninstall") => {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     try {
       const r = kind === "install" ? await api.health.installService() : kind === "start" ? await api.health.startService() : await api.health.uninstallService();
@@ -75,16 +77,17 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
       toast.error(errMsg(e));
       await load();
     } finally {
+      busyRef.current = false;
       setBusy(false);
       setConfirmOff(false);
     }
   };
 
-  const state = svc ? serviceState(svc) : null;
   const snap = snapshot.data;
+  const state = svc ? serviceState(svc, snap?.engine) : null;
   const nextRun = snap?.engine.running ? snap.accounts.map((a) => a.nextRun).filter((x): x is string => !!x).sort()[0] ?? null : null;
   const statusText: Record<ServiceState, string> = {
-    running: t("settings.svcRunning"), stopped: t("settings.svcStopped"), notInstalled: t("settings.svcNotInstalled"), unsupported: t("settings.svcUnsupported"),
+    running: t("settings.svcRunning"), stopped: t("settings.svcStopped"), notInstalled: t("settings.svcNotInstalled"), unsupported: t("settings.svcUnsupported"), unknown: t("settings.svcUnknown"),
   };
 
   return (
@@ -107,9 +110,9 @@ export function RunningCard({ startAtLogin, onStartAtLogin }: { startAtLogin: bo
             <Switch
               className="mt-0.5"
               aria-describedby={hintId}
-              checked={state === "running" || state === "stopped"}
+              checked={state === "running" || state === "stopped" || state === "unknown"}
               disabled={!svc || state === "unsupported" || busy}
-              onCheckedChange={(v) => { if (!busy) { if (v) void change("install"); else setConfirmOff(true); } }}
+              onCheckedChange={(v) => { if (!busyRef.current) { if (v) void change("install"); else setConfirmOff(true); } }}
             />
             <span>
               <span className="flex items-center gap-2">

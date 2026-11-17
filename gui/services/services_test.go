@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -594,20 +595,29 @@ func TestStartServiceNeedsAnInstalledServiceAndWithdrawsHandover(t *testing.T) {
 	r.b.RequestHandover = func(context.Context) error { asked++; return nil }
 	r.b.CancelHandover = func() { cancels++ }
 	h := NewHealthService(r.b)
-	// Not installed: the start fails and the handover is withdrawn.
-	if _, err := h.StartService(); err == nil || cancels != 1 {
-		t.Fatalf("not installed: err=%v cancels=%d", err, cancels)
+	// Not installed: nothing is started and the tray is not even asked.
+	if _, err := h.StartService(); !errors.Is(err, service.ErrNotInstalled) || asked != 0 || cancels != 0 {
+		t.Fatalf("not installed: err=%v asked=%d cancels=%d", err, asked, cancels)
 	}
 	if _, err := h.InstallService(); err != nil {
 		t.Fatal(err)
 	}
+	fr.Replies = map[string]service.Output{
+		"systemctl --user is-enabled": {Stdout: "enabled\n"}, "systemctl --user is-active": {Stdout: "inactive\n"}, "loginctl": {Stdout: "yes\n"},
+	}
 	fr.Calls = nil
 	cancels = 0
 	res, err := h.StartService()
-	if err != nil || len(res.Actions) != 1 || cancels != 0 || asked != 3 {
+	if err != nil || len(res.Actions) != 1 || cancels != 0 || asked != 2 {
 		t.Fatalf("start: %+v %v cancels=%d asked=%d", res, err, cancels, asked)
 	}
-	if got := strings.Join(fr.Commands(), "|"); got != "systemctl --user start e5extend.service" {
+	if got := strings.Join(fr.Commands(), "|"); !strings.Contains(got, "systemctl --user start e5extend.service") {
 		t.Fatalf("commands = %s", got)
+	}
+	// A failing start after the handover withdraws it.
+	fr.FailOn = []string{"systemctl --user start"}
+	cancels = 0
+	if _, err := h.StartService(); err == nil || cancels != 1 {
+		t.Fatalf("failed start: err=%v cancels=%d", err, cancels)
 	}
 }

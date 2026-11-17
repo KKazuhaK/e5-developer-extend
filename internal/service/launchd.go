@@ -179,23 +179,32 @@ func (m *launchd) Status() (Status, error) {
 	return st, nil
 }
 
-// Start starts the loaded job, or loads it first when it is not loaded.
+// Start starts the job. A loaded job that is only disabled is enabled and
+// kicked again; a job that is not loaded at all is bootstrapped last.
 func (m *launchd) Start() (Result, error) {
 	var res Result
 	if !fileExists(m.plistPath()) {
 		return res, ErrNotInstalled
 	}
 	ctx := context.Background()
-	if _, err := m.env.Runner.Run(ctx, "launchctl", "kickstart", m.target()); err == nil {
-		res.Actions = append(res.Actions, "ran launchctl kickstart "+m.target())
+	run := func(args ...string) error {
+		_, err := m.env.Runner.Run(ctx, "launchctl", args...)
+		if err == nil {
+			res.Actions = append(res.Actions, "ran launchctl "+strings.Join(args, " "))
+		}
+		return err
+	}
+	if run("kickstart", m.target()) == nil {
 		return res, nil
 	}
-	if _, err := m.env.Runner.Run(ctx, "launchctl", "enable", m.target()); err != nil {
+	if err := run("enable", m.target()); err != nil {
 		return res, fmt.Errorf("enable %s: %w", Label, err)
 	}
-	if _, err := m.env.Runner.Run(ctx, "launchctl", "bootstrap", m.domain(), m.plistPath()); err != nil {
+	if run("kickstart", m.target()) == nil {
+		return res, nil
+	}
+	if err := run("bootstrap", m.domain(), m.plistPath()); err != nil {
 		return res, fmt.Errorf("load %s: %w", Label, err)
 	}
-	res.Actions = append(res.Actions, "ran launchctl enable "+m.target(), "ran launchctl bootstrap "+m.domain()+" "+m.plistPath())
 	return res, nil
 }

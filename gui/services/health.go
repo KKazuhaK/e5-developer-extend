@@ -82,6 +82,14 @@ func (s *HealthService) undoHandover() {
 func (s *HealthService) StartService() (ServiceResult, error) {
 	b := s.b
 	defer b.begin()()
+	// Nothing to start: say so before the tray is asked to give anything up.
+	st, err := b.Ops.ServiceStatus()
+	if err != nil {
+		return ServiceResult{}, err
+	}
+	if !st.Installed {
+		return ServiceResult{}, service.ErrNotInstalled
+	}
 	handed := false
 	if b.RequestHandover != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

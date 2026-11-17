@@ -287,6 +287,7 @@ export const en: Dict = {
   "settings.svcStart": "Start",
   "settings.svcStarted": "Background service started",
   "settings.svcStoppedWarn": "The service is installed but not running, so nothing keeps calling Microsoft Graph once you close the window.",
+  "settings.svcUnknown": "Installed (the system does not report whether it is running)",
   "settings.svcNext": "Next run: {when}",
   "settings.svcLoadFailed": "Could not read the background service state",
   "settings.pace": "Call pace",
