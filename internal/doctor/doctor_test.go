@@ -383,6 +383,43 @@ func TestNotifyCheck(t *testing.T) {
 	}
 }
 
+func TestNotifyChannelChecks(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.Channels = []config.Channel{
+		{ID: "tg", Type: config.ChannelTelegram, ChatID: "1"},
+		{ID: "hook", Type: config.ChannelSlack},
+	}
+	// Required secrets are missing.
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "telegram channel tg: bot_token is not set")
+	expect(t, got, "notify", Warn, "slack channel hook: url is not set")
+	// Both set: fine, and the count is shown.
+	r.v.has["notify/tg/bot_token"], r.v.has["notify/hook/url"] = true, true
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+	// One cannot be decrypted; nothing of the secret is shown.
+	r.v.err["notify/tg/bot_token"] = vault.ErrWrongKey
+	got = r.run(true)
+	expect(t, got, "notify", Warn, "tg")
+	expect(t, got, "notify", Warn, "cannot be decrypted")
+	r.v.err = map[string]error{}
+	// Plain http servers and unencrypted mail are flagged.
+	r.cfg.Notify.Channels = []config.Channel{
+		{ID: "ntfy", Type: config.ChannelNtfy, Topic: "t", Server: "http://ntfy.lan"},
+		{ID: "mail", Type: config.ChannelEmail, SMTPHost: "h", From: "a@b.co", To: []string{"c@d.co"}, Security: config.SecurityNone},
+	}
+	got = r.run(true)
+	expect(t, got, "notify", Warn, "over http")
+	expect(t, got, "notify", Warn, "not encrypted")
+	// A custom template that does not render is flagged.
+	r.cfg.Notify.Channels = []config.Channel{{ID: "hook", Type: config.ChannelSlack, Template: "{{.Nope}}"}}
+	r.v.has["notify/hook/url"] = true
+	expect(t, r.run(true), "notify", Warn, "custom template")
+	// The webhook of older versions counts as a channel next to the new ones.
+	r.cfg.Notify.Channels = []config.Channel{{ID: "hook", Type: config.ChannelSlack}}
+	r.v.has[notifyKey] = true
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+}
+
 func TestOutputAndExitCodes(t *testing.T) {
 	checks := []Check{{ID: "a", Title: "A", Level: OK, Detail: "fine"}, {ID: "b", Title: "B", Level: Warn, Detail: "hmm", Fix: "do x"}}
 	if ExitCode(checks) != 1 {
