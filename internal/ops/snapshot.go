@@ -135,26 +135,9 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	y, m, d := now.Date()
 	midnight := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	today, _ := st.Read(store.Filter{Since: midnight})
-	type counts struct{ ok, failed, throttled int }
-	byAcct := map[string]*counts{}
+	todayBy := map[string][]store.Entry{}
 	for _, en := range today {
-		if en.API == "" || en.API == "users.pick" {
-			continue
-		}
-		c := byAcct[en.Account]
-		if c == nil {
-			c = &counts{}
-			byAcct[en.Account] = c
-		}
-		switch en.Class {
-		case "ok":
-			c.ok++
-		case "throttled":
-			c.throttled++
-		case "network", "canceled", "forbidden", "not_found":
-		default:
-			c.failed++
-		}
+		todayBy[en.Account] = append(todayBy[en.Account], en)
 	}
 
 	apis, _ := catalog.Load()
@@ -172,9 +155,8 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 			Name: acct.Name, Auth: acct.Auth, Tenant: acct.Tenant, Account: acct, State: as,
 			TotalAPIs: len(apis), Paused: acct.Paused,
 		}
-		if c := byAcct[acct.Name]; c != nil {
-			sum.TodayOK, sum.TodayFailed, sum.TodayThrottled = c.ok, c.failed, c.throttled
-		}
+		cn := callstat.Tally(todayBy[acct.Name], midnight)
+		sum.TodayOK, sum.TodayFailed, sum.TodayThrottled = cn.OK, cn.Failed, cn.Throttled
 		if acct.SecretExpires != "" {
 			s := acct.SecretExpires
 			sum.SecretExpires = &s

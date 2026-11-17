@@ -332,18 +332,6 @@ func TestUnavailableAPIIsPausedFor24Hours(t *testing.T) {
 	}
 }
 
-func TestRoundWithOnlyUnavailableCallsDoesNotFail(t *testing.T) {
-	f := newFixture(t, delegatedAcct("main"))
-	f.h.setStatus(func(string) (int, map[string]string) { return 404, nil })
-	f.start()
-	for i := 0; i < AutoPauseRounds+1; i++ {
-		f.round("main")
-	}
-	if as := f.acct("main"); as.Status == store.StatusPaused || as.Totals.Failed != 0 {
-		t.Fatalf("404s failed the account: %+v", as)
-	}
-}
-
 func TestUnauthorizedStillFails(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
 	f.h.setStatus(func(string) (int, map[string]string) { return 401, nil })

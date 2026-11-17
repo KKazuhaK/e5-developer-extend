@@ -21,6 +21,7 @@ type outcome struct {
 	calls, ok, failed int
 	throttled         bool   // some call ended throttled (it is no failure)
 	unavailable       int    // calls refused with 403/404; the API is paused for the account
+	allSkipped        bool   // every API the account may call is paused after a 403/404
 	netStop           bool   // a network error cut the round short
 	skipped           string // whole round skipped: network, needs_attention
 	attention         string // set when the account needs the user
@@ -115,19 +116,29 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 	case out.skipped == "network":
 		e.setNextLocked(as, now.Add(e.rnd(5*time.Minute, 15*time.Minute)))
 	default:
-		if as.Status == store.StatusNeedsAttention {
+		// Only a round that made progress ends an attention state: one that
+		// only met throttling or refusals (403/404) proves nothing.
+		refused := out.unavailable > 0 || out.allSkipped
+		if as.Status == store.StatusNeedsAttention && out.ok > 0 {
 			as.Status, as.Reason = store.StatusOK, ""
 			follow = append(follow, "recovered")
 		}
 		switch {
 		case out.ok > 0:
 			as.LastSuccess, as.ConsecutiveFailedRound = now, 0
-		case out.failed > 0:
+		case as.Status == store.StatusNeedsAttention:
+			e.setNextLocked(as, now.Add(attentionRetry))
+		case out.failed > 0 || refused:
+			// A round in which every call was refused is no success: an
+			// account that lost its license or mailbox ends up paused (and probed).
 			as.ConsecutiveFailedRound++
 			if as.ConsecutiveFailedRound >= AutoPauseRounds {
 				as.Status = store.StatusPaused
-				as.Reason = fmt.Sprintf("%d rounds in a row failed (last error: %s); it is tried again automatically, or fix the cause and run: e5extend account resume %s",
-					as.ConsecutiveFailedRound, out.lastFail, acct.Name)
+				what := fmt.Sprintf("%d rounds in a row failed (last error: %s)", as.ConsecutiveFailedRound, out.lastFail)
+				if out.failed == 0 {
+					what = fmt.Sprintf("%d rounds in a row had no successful call: every API answered 403/404 (license or mailbox removed?)", as.ConsecutiveFailedRound)
+				}
+				as.Reason = fmt.Sprintf("%s; it is tried again automatically, or fix the cause and run: e5extend account resume %s", what, acct.Name)
 				as.NextRun = time.Time{}
 				as.NextProbe, as.Probes = now.Add(probeDelay(0)), 0
 				follow = append(follow, "auto_pause")
@@ -265,10 +276,17 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 	}
 
 	var cands []catalog.API
-	for _, a := range catalog.Available(e.apis, kind, tok.Scopes, acct.Categories) {
+	allowed := catalog.Available(e.apis, kind, tok.Scopes, acct.Categories)
+	for _, a := range allowed {
 		if !skip[a.ID] {
 			cands = append(cands, a)
 		}
+	}
+	if len(cands) == 0 && len(allowed) > 0 {
+		// Every API the account may call answered 403/404 within the last 24
+		// hours: that is a refused round, not a permission problem to fix.
+		out.allSkipped, out.lastFail = true, graph.Forbidden
+		return out
 	}
 	if len(cands) == 0 {
 		out.attention = "no usable APIs: check the app's granted permissions and the account's categories (e5extend account test " + acct.Name + ")"
@@ -324,6 +342,7 @@ func (e *Engine) callAPIs(ctx context.Context, acct config.Account, roundID stri
 			// is no failure of the round.
 			out.calls++
 			out.unavailable++
+			out.lastFail = res.Class
 			e.updateAccount(acct.Name, func(as *store.AccountState) {
 				if as.APISkipUntil == nil {
 					as.APISkipUntil = map[string]time.Time{}

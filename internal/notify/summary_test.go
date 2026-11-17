@@ -2,6 +2,7 @@ package notify
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -16,8 +17,10 @@ func summaryRig() *spikeRig {
 	r.cfg.DailySummaryAt = "21:00"
 	r.now = time.Date(2026, 11, 17, 21, 0, 30, 0, time.UTC)
 	r.as.LastSuccess = r.now.Add(-30 * time.Minute)
+	n := 0
 	call := func(ago time.Duration, class string, status int) store.Entry {
-		return store.Entry{TS: r.now.Add(-ago), Account: "main", Round: "r1", API: "user.me", Class: class, Status: status}
+		n++
+		return store.Entry{TS: r.now.Add(-ago), Account: "main", Round: "r1", API: fmt.Sprint("api", n), Class: class, Status: status}
 	}
 	r.calls["main"] = []store.Entry{
 		call(time.Hour, "ok", 200), call(2*time.Hour, "ok", 200), call(3*time.Hour, "ok", 200),

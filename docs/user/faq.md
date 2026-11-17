@@ -76,15 +76,19 @@ e5extend doctor          # 全面检查
 成功就自动恢复并发 `recovered` 告警。你手动暂停的账号（`account pause`）永远不会被自动恢复。需要你处理的状态（`invalid_grant`、需要重新登录等）仍然是
 `needs_attention`，不会探测，修好之后会自己恢复，或者运行 `e5extend account resume <名称>`。
 
-## 开发者订阅（Legacy sandbox）2026-11-04 之后会怎样？
+## 开发者订阅标着 Legacy sandbox 怎么办？
 
-微软在 [旧版订阅退役 FAQ](https://learn.microsoft.com/en-us/office/developer-program/legacy-subscription-retirement-faq) 里宣布：
-旧版（Legacy）沙盒订阅会在 **2026-11-04** 退役。按那份 FAQ 的说明，Legacy 沙盒订阅还会有**最后一次 60 天的续期**，之后**既不能再续期，也不能转换**。
+微软在 [旧版订阅退役 FAQ](https://learn.microsoft.com/en-us/office/developer-program/legacy-subscription-retirement-faq)（2026 年 11 月发布）里说明，
+开发者控制台（dashboard）上标着 **Legacy sandbox** 的订阅正在退役。那份 FAQ 没有给出一个统一的退役日期，要点是：
 
-- 你的订阅属于哪一种、还剩多少天，请到开发者控制台（Microsoft 365 Developer Program 的 dashboard）查看，以那里显示的为准。
-- 这件事由微软决定，**没有任何工具能改变它**，包括 e5extend：它只发只读调用、报告到期日和状态，不会也不能让一个已被退役的订阅继续存在。
-- e5extend 的到期提醒（30、7、1 天）仍然有用：它读到的是租户里实际的到期日。看到提醒后，请按上面的链接确认你的订阅是否还能续期，
-  并提前备份租户里需要保留的数据。
+- **仍然符合资格的成员**：旧订阅会得到**最后一次 60 天的续期**（会发邮件，dashboard 显示到期日）。要继续开发，需要在到期前从 dashboard 新建订阅并自己搬走要保留的内容；新订阅是另一个租户，域名和租户 ID 都不同，数据不会自动迁移。
+- **不再符合资格的成员**：旧订阅不会续期，到**当前订阅期结束**时到期。
+- 到期后订阅进入只读状态 30 天（只有管理员能登录恢复数据），再过 30 天**永久删除**，删除后无法恢复。
+- Legacy 订阅**不能再次续期，不能转换**成支持附加购买的订阅，权益也不能转给别的订阅。
+
+请现在就到开发者控制台看你的订阅是不是 Legacy sandbox、到期日是哪天，并**备份**租户里需要保留的内容（应用注册、代码和配置、文件和邮件等，清单见上面的链接）。
+
+这件事由微软决定，**没有任何工具能改变它**，包括 e5extend：它只发只读调用、报告到期日和状态，不能让订阅续期。以微软页面和你的 dashboard 为准。
 
 ## 会不会保证续期？
 

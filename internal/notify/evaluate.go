@@ -346,6 +346,12 @@ func Evaluate(in Input) (events []Event, changed bool) {
 				}
 			case !sp.Enough:
 				spiking = had
+				if had && as.LastSuccess.After(as.ResumedAt) && !as.ResumedAt.IsZero() {
+					// The pause ended and the account has succeeded since: the
+					// spike announced before it is over, no full window needed.
+					spiking = false
+					del(FailureSpike)
+				}
 			default:
 				del(FailureSpike)
 			}

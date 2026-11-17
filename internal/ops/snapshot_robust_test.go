@@ -4,6 +4,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 )
 
@@ -21,8 +24,8 @@ func TestSnapshotShowsThrottlingPausedAPIsAndAutoResume(t *testing.T) {
 	if err := st.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
-	for _, class := range []string{"ok", "throttled", "throttled", "forbidden", "not_found", "server_error"} {
-		if err := st.Append(store.Entry{TS: now, Account: "main", Round: "r1", API: "user.me", Class: class}); err != nil {
+	for _, en := range mixedLog(now) {
+		if err := st.Append(en); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -31,7 +34,44 @@ func TestSnapshotShowsThrottlingPausedAPIsAndAutoResume(t *testing.T) {
 		t.Fatalf("%+v %v", snap, err)
 	}
 	a := snap.Accounts[0]
-	if a.TodayOK != 1 || a.TodayFailed != 1 || a.TodayThrottled != 2 || a.PausedAPIs != 1 || a.AutoResumeAt == nil || a.AutoResumeTries != 1 {
+	if a.TodayOK != 1 || a.TodayFailed != 1 || a.TodayThrottled != 1 || a.PausedAPIs != 1 || a.AutoResumeAt == nil || a.AutoResumeTries != 1 {
 		t.Errorf("%+v", a)
+	}
+}
+
+// mixedLog: a throttled-then-ok call, a throttled call, a failure, and refusals.
+func mixedLog(now time.Time) []store.Entry {
+	e := func(api, class string, status int, ago time.Duration) store.Entry {
+		return store.Entry{TS: now.Add(-ago), Account: "main", Round: "r1", API: api, Class: class, Status: status}
+	}
+	return []store.Entry{
+		e("a", "throttled", 429, 5*time.Second), e("a", "ok", 200, 4*time.Second),
+		e("b", "throttled", 429, 3*time.Second), e("b", "throttled", 429, 2*time.Second),
+		e("c", "server_error", 500, time.Second),
+		e("d", "forbidden", 403, time.Second), e("e", "not_found", 404, time.Second),
+	}
+}
+
+// The status page and the daily summary classify the same log the same way.
+func TestSnapshotAndDailySummaryAgree(t *testing.T) {
+	now := time.Now()
+	entries := mixedLog(now)
+	cn := callstat.Tally(entries, now.Add(-time.Hour))
+
+	cfg := config.Default()
+	cfg.Notify.DailySummaryAt = now.Format("15:04")
+	acct := config.Account{Name: "main", Auth: config.AuthClientSecret}
+	st := store.NewState()
+	st.Accounts["main"] = &store.AccountState{Status: store.StatusOK}
+	evs, _ := notify.Evaluate(notify.Input{Now: now, Start: now.Add(-100 * time.Hour), Config: cfg.Notify,
+		Accounts: []config.Account{acct}, State: st, Calls: map[string][]store.Entry{"main": entries}})
+	var row notify.SummaryRow
+	for _, ev := range evs {
+		if ev.Event == notify.DailySummary {
+			row = ev.Summary[0]
+		}
+	}
+	if row.OK != cn.OK || row.Failed != cn.Failed || row.Throttled != cn.Throttled || cn != (callstat.Counts{OK: 1, Failed: 1, Throttled: 1}) {
+		t.Errorf("summary %+v, tally %+v", row, cn)
 	}
 }

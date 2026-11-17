@@ -103,20 +103,8 @@ func (ev *evaluator) buildSummary() (string, []SummaryRow) {
 	for _, acct := range in.Accounts {
 		row := SummaryRow{Account: acct.Name, State: SumOK}
 		as := in.State.Accounts[acct.Name]
-		for _, c := range in.Calls[acct.Name] {
-			if c.TS.Before(since) || c.API == "" || c.API == "users.pick" || !callstat.IsCall(c) {
-				continue
-			}
-			switch {
-			case c.Class == "ok":
-				row.OK++
-			case callstat.IsThrottled(c.Class):
-				row.Throttled++
-			case c.Class == "" || c.Class == "canceled" || callstat.IsMissing(c.Class, c.Status) || callstat.IsUnavailable(c.Class):
-			default:
-				row.Failed++
-			}
-		}
+		cn := callstat.Tally(in.Calls[acct.Name], since)
+		row.OK, row.Failed, row.Throttled = cn.OK, cn.Failed, cn.Throttled
 		switch {
 		case acct.Paused:
 			row.State = SumPausedByUser

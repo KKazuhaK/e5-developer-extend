@@ -328,10 +328,10 @@ func TestSnapshotStatuses(t *testing.T) {
 	if err := st.SaveState(state); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(store.Entry{TS: now, Account: "ok", API: "mail.list", Status: 200, Class: "ok", LatencyMS: 12}); err != nil {
+	if err := st.Append(store.Entry{TS: now, Account: "ok", Round: "r1", API: "mail.list", Status: 200, Class: "ok", LatencyMS: 12}); err != nil {
 		t.Fatal(err)
 	}
-	if err := st.Append(store.Entry{TS: now, Account: "ok", API: "mail.list", Status: 500, Class: "server", LatencyMS: 12}); err != nil {
+	if err := st.Append(store.Entry{TS: now, Account: "ok", Round: "r2", API: "mail.list", Status: 500, Class: "server", LatencyMS: 12}); err != nil {
 		t.Fatal(err)
 	}
 

@@ -720,7 +720,8 @@ func (e *Engine) tick(ctx context.Context) {
 				case rt.running:
 				case as.NextProbe.IsZero():
 					as.NextProbe, changed = now.Add(probeDelay(as.Probes)), true
-				case !as.NextProbe.After(now):
+				case !as.NextProbe.After(now) && !e.sched.ended(now) && e.sched.within(now):
+					// Like a round, a probe waits for the work window and stops with the run period.
 					rt.running = true
 					e.wg.Add(1)
 					go e.probe(ctx, acct)

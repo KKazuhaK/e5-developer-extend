@@ -18,6 +18,7 @@ func pausedFixture(t *testing.T, n *fakeNotifier) (*fixture, time.Time) {
 	if n != nil {
 		f.opts.Notifier = n
 	}
+	f.cfg.Schedule.WorkStart, f.cfg.Schedule.WorkEnd = "00:00", "00:00" // all day; the window has its own test
 	f.h.setStatus(func(string) (int, map[string]string) { return 500, nil })
 	f.start()
 	for i := 0; i < AutoPauseRounds; i++ {

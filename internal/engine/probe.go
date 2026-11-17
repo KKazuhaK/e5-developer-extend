@@ -108,6 +108,7 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 			}
 		})
 		e.emit(store.Entry{Account: acct.Name, Event: "probe", Failed: 1, Message: "sign-in failed"})
+		e.event(acct.Name, "needs_attention", reason)
 		e.evalNotify()
 		return
 	}
@@ -126,6 +127,13 @@ func (e *Engine) runProbe(ctx context.Context, acct config.Account) {
 	case graph.Network, graph.Throttled, graph.Canceled:
 		e.afterProbe(acct, string(class), probeUnclear)
 	default:
+		if class == graph.AuthFailed { // do not trust the cached token at the next probe
+			e.withLock(func() {
+				if rt := e.rt[acct.Name]; rt != nil {
+					rt.forceTok = true
+				}
+			})
+		}
 		e.afterProbe(acct, string(class), probeFailed)
 	}
 }
