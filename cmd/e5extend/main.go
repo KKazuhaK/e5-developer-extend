@@ -1,4 +1,4 @@
-// Command e5extend is the command-line interface and background engine of e5-renew.
+// Command e5extend is the command-line interface and background engine of E5 Developer Extend.
 package main
 
 import (

@@ -1,7 +1,7 @@
 import { Browser, Events } from "@wailsio/runtime";
 import {
   AccountService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService,
-} from "../../bindings/github.com/KKazuhaK/e5-renew/gui/services";
+} from "../../bindings/github.com/KKazuhaK/e5-developer-extend/gui/services";
 import type { Api } from "./interface";
 import type { LoginEvent, RunDone, Snapshot } from "./types";
 

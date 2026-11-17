@@ -123,15 +123,15 @@ func TestCheckExecutable(t *testing.T) {
 		`C:\Users\u\AppData\Local\Temp\go-build1\e5extend.exe`,
 		`C:\Users\u\AppData\Local\Temp\e5extend.exe`,
 		"/mnt/scratch/e5extend",
-		"/private/var/folders/ab/xyz/T/AppTranslocation/1234/d/E5 Renew.app/Contents/MacOS/e5extend",
-		"/Volumes/E5 Renew/E5 Renew.app/Contents/MacOS/e5extend",
+		"/private/var/folders/ab/xyz/T/AppTranslocation/1234/d/E5 Developer Extend.app/Contents/MacOS/e5extend",
+		"/Volumes/E5 Developer Extend/E5 Developer Extend.app/Contents/MacOS/e5extend",
 	} {
 		if err := CheckExecutable(bad, "/mnt/scratch"); err == nil {
 			t.Errorf("%s accepted", bad)
 		}
 	}
 	for _, good := range []string{"/usr/local/bin/e5extend", "/home/u/.local/bin/e5extend", "/home/u/tmpfiles/e5extend", `C:\Program Files\e5extend\e5extend.exe`,
-		"/Applications/E5 Renew.app/Contents/MacOS/e5extend", "/Volumes/Backup/bin/e5extend"} {
+		"/Applications/E5 Developer Extend.app/Contents/MacOS/e5extend", "/Volumes/Backup/bin/e5extend"} {
 		if err := CheckExecutable(good, "/mnt/scratch"); err != nil {
 			t.Errorf("%s refused: %v", good, err)
 		}

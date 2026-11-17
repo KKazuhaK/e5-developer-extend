@@ -1,4 +1,4 @@
-// Command e5extend-gui is the desktop app of e5-renew. It starts in one of two
+// Command e5extend-gui is the desktop app of E5 Developer Extend. It starts in one of two
 // modes (docs/design/gui.md, section 1):
 //
 //	--tray    (default) tray icon and menu, runs the engine; never creates a web view
@@ -14,7 +14,7 @@ import (
 
 // AppName is the product name shown in titles and the tray. The packages use
 // the same name (packaging/, scripts/release/); the command stays "e5extend".
-const AppName = "E5 Renew"
+const AppName = "E5 Developer Extend"
 
 // Single-instance IDs of the two modes.
 const (

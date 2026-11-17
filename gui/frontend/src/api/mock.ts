@@ -240,7 +240,7 @@ function serviceInfo(): ServiceInfo {
     enabled: service.installed ? "enabled" : "not-found",
     running: service.installed ? (controls.host === "service" ? "active (running)" : "inactive") : "—",
     details: service.installed
-      ? ["单元文件：~/.config/systemd/user/e5renew.service", "可执行文件：~/.local/bin/e5renew run", "日志：journalctl --user -u e5renew"]
+      ? ["单元文件：~/.config/systemd/user/e5extend.service", "可执行文件：~/.local/bin/e5extend run", "日志：journalctl --user -u e5extend"]
       : [],
   };
 }
@@ -444,7 +444,7 @@ export const mockApi: Api = {
       return {
         cancelled: false, problem: null,
         summary: {
-          path: "~/e5renew-backup-20261116.e5backup", accounts: lastBackup.accounts, vaultEntries: accounts.length * 2 + 1,
+          path: "~/e5extend-backup-20261116.e5backup", accounts: lastBackup.accounts, vaultEntries: accounts.length * 2 + 1,
           includesLogs: withLogs, logFiles: withLogs ? 3 : 0, notes: [], noteCodes: [],
         },
       };
@@ -476,12 +476,12 @@ export const mockApi: Api = {
       await wait(offline ? 300 : 900);
       // English titles, details and fixes: this is what the real backend returns.
       const checks: DoctorCheck[] = [
-        { id: "config", title: "Configuration", level: "ok", detail: "~/.config/e5renew/config.toml is readable and valid", fix: "" },
+        { id: "config", title: "Configuration", level: "ok", detail: "~/.config/e5extend/config.toml is readable and valid", fix: "" },
         { id: "vault", title: "Vault", level: "ok", detail: "master key stored in the system keychain", fix: "" },
-        { id: "engine", title: "Engine", level: controls.host === "none" ? "warn" : "ok", detail: controls.host === "none" ? "no engine is running" : `running (${controls.host})`, fix: controls.host === "none" ? "start the tray app or run: e5renew service install" : "" },
+        { id: "engine", title: "Engine", level: controls.host === "none" ? "warn" : "ok", detail: controls.host === "none" ? "no engine is running" : `running (${controls.host})`, fix: controls.host === "none" ? "start the tray app or run: e5extend service install" : "" },
         service.installed
           ? { id: "service", title: "Background service", level: "ok", detail: "installed and enabled", fix: "" }
-          : { id: "service", title: "Background service", level: "warn", detail: "not installed: nothing runs after you sign out", fix: "run: e5renew service install" },
+          : { id: "service", title: "Background service", level: "warn", detail: "not installed: nothing runs after you sign out", fix: "run: e5extend service install" },
         { id: "linger", title: "Linger", level: service.installed ? "ok" : "warn", detail: service.installed ? "lingering is on" : "lingering is off", fix: service.installed ? "" : "run: loginctl enable-linger $USER" },
         { id: "clock", title: "Clock", level: "ok", detail: offline ? "skipped (offline)" : "0.4 s from Microsoft's servers", fix: "" },
         offline
@@ -489,7 +489,7 @@ export const mockApi: Api = {
           : { id: "network", title: "Network", level: "ok", detail: "login.microsoftonline.com and graph.microsoft.com reachable (87 ms)", fix: "" },
         ...(accounts.some((a) => a.input.name === "lab")
           ? [
-              { id: "account.lab.token", title: "lab sign-in", level: "fail", detail: "refresh token rejected (invalid_grant)", fix: "run: e5renew account login lab" } as DoctorCheck,
+              { id: "account.lab.token", title: "lab sign-in", level: "fail", detail: "refresh token rejected (invalid_grant)", fix: "run: e5extend account login lab" } as DoctorCheck,
               { id: "account.lab.state", title: "lab state", level: "fail", detail: "needs attention", fix: "sign in again, then resume the account" } as DoctorCheck,
             ]
           : []),
@@ -501,7 +501,7 @@ export const mockApi: Api = {
             ]
           : []),
         ...(accounts.some((a) => a.input.name === "dev-app")
-          ? [{ id: "account.dev-app.secret", title: "dev-app client secret", level: "warn", detail: `expires in 12 days (${day(12)})`, fix: "create a new secret in Entra, then run: e5renew account set-secret dev-app" } as DoctorCheck]
+          ? [{ id: "account.dev-app.secret", title: "dev-app client secret", level: "warn", detail: `expires in 12 days (${day(12)})`, fix: "create a new secret in Entra, then run: e5extend account set-secret dev-app" } as DoctorCheck]
           : []),
         { id: "notify", title: "Alerts", level: settings.notify.webhookConfigured ? "ok" : "warn", detail: settings.notify.webhookConfigured ? "webhook configured" : "no webhook configured", fix: settings.notify.webhookConfigured ? "" : "set one in Settings" },
         { id: "future.check", title: "Some future check", level: "ok", detail: "unknown ids fall back to the backend title", fix: "" },
@@ -516,7 +516,7 @@ export const mockApi: Api = {
       await wait(900);
       service.installed = true;
       return {
-        actions: ["wrote ~/.config/systemd/user/e5renew.service", "enabled and started e5renew.service"],
+        actions: ["wrote ~/.config/systemd/user/e5extend.service", "enabled and started e5extend.service"],
         warnings: ["the tray app is also running; the service takes over the engine"],
         manual: ["Run once so it survives sign-out: loginctl enable-linger $USER"],
       };
@@ -524,7 +524,7 @@ export const mockApi: Api = {
     async uninstallService() {
       await wait(700);
       service.installed = false;
-      return { actions: ["stopped and removed e5renew.service"], warnings: [], manual: [] };
+      return { actions: ["stopped and removed e5extend.service"], warnings: [], manual: [] };
     },
   },
   catalog: {

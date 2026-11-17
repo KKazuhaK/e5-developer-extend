@@ -466,7 +466,7 @@ func CheckExecutable(path string, tempDirs ...string) error {
 	if strings.Contains(p, "/apptranslocation/") ||
 		(strings.HasPrefix(p, "/volumes/") && strings.Contains(p, ".app/contents/macos/")) {
 		return fmt.Errorf("%s is a temporary copy (the app runs from the disk image or from a quarantined download); "+
-			"move E5 Renew to the Applications folder, open it from there and try again", path)
+			"move E5 Developer Extend to the Applications folder, open it from there and try again", path)
 	}
 	dirs := append([]string{"/tmp", "/var/tmp", "/private/tmp", "/private/var/folders", "/var/folders"}, tempDirs...)
 	for _, d := range dirs {
