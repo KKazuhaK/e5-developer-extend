@@ -2,7 +2,8 @@
 {{define "body"}}{{if .Digest}}{{.EventLabel}} · {{len .Digest}} alerts{{range .Digest}}
 [{{.LevelLabel}}] {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}} — {{.Message}}{{end}}
 {{.Time}} · {{.Host}}{{else}}[{{.LevelLabel}}] {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}
-{{.Message}}{{if .Rounds}}
+{{.Message}}{{range .Summary}}
+{{.Line}}{{end}}{{if .Rounds}}
 Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds{{end}}{{if .Origin}}
 Resolved: {{.OriginLabel}}{{end}}{{if .Hint}}
 Next step: {{.Hint}}{{end}}
@@ -16,7 +17,8 @@ Next step: {{.Hint}}{{end}}
 {{range .Digest}}<tr><td style="padding:6px 8px 6px 0;vertical-align:top;white-space:nowrap;color:#6b7280">{{.LevelLabel}}</td><td style="padding:6px 0"><b>{{.EventLabel}}</b>{{if .Account}} · {{.Account}}{{end}}<br>{{.Message}}</td></tr>
 {{end}}</table>
 {{else}}<p style="margin:0 0 12px;font-size:15px;line-height:1.5">{{.Message}}</p>
-{{if .Rounds}}<p style="margin:0 0 12px;font-size:14px">Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds</p>
+{{range .Summary}}<p style="margin:0 0 8px;font-size:14px">{{.Line}}</p>
+{{end}}{{if .Rounds}}<p style="margin:0 0 12px;font-size:14px">Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds</p>
 {{end}}{{if .Origin}}<p style="margin:0 0 12px;font-size:14px">Resolved: {{.OriginLabel}}</p>
 {{end}}{{if .Hint}}<p style="margin:0 0 12px;font-size:14px;color:#374151">Next step: {{.Hint}}</p>
 {{end}}{{end}}<hr style="border:none;border-top:1px solid #e5e7eb;margin:16px 0 8px">

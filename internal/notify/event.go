@@ -25,6 +25,8 @@ const (
 	SubscriptionExpiring = "subscription_expiring"
 	SubscriptionStatus   = "subscription_status"
 	SubscriptionRenewed  = "subscription_renewed"
+	// DailySummary is the opt-in message of the day: calls and state per account.
+	DailySummary = "daily_summary"
 	// Test is only sent by `e5extend notify test`.
 	Test = "test"
 	// Digest is the summary of alerts that were held during the quiet hours.
@@ -94,6 +96,32 @@ type Event struct {
 	SKU, SubStatus, EndDate string
 	// Severity overrides the level of the kind (see LevelOfKey).
 	Severity string
+	// Summary is one row per account of a DailySummary.
+	Summary []SummaryRow
+}
+
+// Account states of a summary row.
+const (
+	SumOK             = "ok"
+	SumNeedsAttention = "needs_attention"
+	SumPaused         = "paused"         // paused by the engine after failed rounds
+	SumPausedByUser   = "paused_by_user" // the account's paused setting
+	SumPeriodEnded    = "period_ended"
+)
+
+// SummaryRow is one account in a daily summary: what its calls did over the
+// last 24 hours and what state it is in. It holds numbers and names only.
+type SummaryRow struct {
+	Account string
+	// OK, Failed and Throttled count the calls of the last 24 hours. Calls that
+	// found nothing or were refused for good (404, 403) are in none of them.
+	OK, Failed, Throttled int
+	LastSuccess           time.Time // zero: none yet
+	State                 string    // one of the Sum* constants
+	PausedAPIs            int       // APIs left out for 24 hours after a 403 or 404
+	// SubDays is the days left of the E5 subscription of the account's tenant, when known.
+	SubDays    int
+	HasSubDays bool
 }
 
 // Level is the level of the event; a digest has the highest of its items.
@@ -141,6 +169,19 @@ type payload struct {
 	Level        string    `json:"level,omitempty"`
 	Origin       string    `json:"origin,omitempty"`
 	Items        []payload `json:"items,omitempty"`
+	Summary      []summary `json:"summary,omitempty"`
+}
+
+// summary is one account row of a daily summary in the JSON body.
+type summary struct {
+	Account     string `json:"account"`
+	OK          int    `json:"ok"`
+	Failed      int    `json:"failed"`
+	Throttled   int    `json:"throttled"`
+	LastSuccess string `json:"last_success,omitempty"`
+	State       string `json:"state"`
+	PausedAPIs  int    `json:"paused_apis,omitempty"`
+	SubDays     *int   `json:"subscription_days_left,omitempty"`
 }
 
 // MarshalJSON implements json.Marshaler.
@@ -161,6 +202,17 @@ func (e Event) payload() payload {
 	}
 	for _, it := range e.Items {
 		p.Items = append(p.Items, it.payload())
+	}
+	for _, r := range e.Summary {
+		row := summary{Account: r.Account, OK: r.OK, Failed: r.Failed, Throttled: r.Throttled, State: r.State, PausedAPIs: r.PausedAPIs}
+		if !r.LastSuccess.IsZero() {
+			row.LastSuccess = r.LastSuccess.Format(time.RFC3339)
+		}
+		if r.HasSubDays {
+			d := r.SubDays
+			row.SubDays = &d
+		}
+		p.Summary = append(p.Summary, row)
 	}
 	return p
 }

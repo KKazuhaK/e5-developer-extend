@@ -31,11 +31,14 @@ import (
 // Tunables that are not worth a config option.
 const (
 	// AutoPauseRounds is the number of consecutive failed rounds that pauses an account.
-	AutoPauseRounds   = 3
-	forbiddenLimit    = 3
-	forbiddenSkip     = 7 * 24 * time.Hour
-	attentionRetry    = 6 * time.Hour
-	maxRetryAfterWait = 5 * time.Minute
+	AutoPauseRounds = 3
+	// unavailableFor is how long an API that answered 403 or 404 is left out of the rounds of that account.
+	unavailableFor = 24 * time.Hour
+	attentionRetry = 6 * time.Hour
+	// A throttled call is repeated up to throttleRetries times when Retry-After
+	// asks for at most maxRetryAfterWait; a longer wait skips the call.
+	throttleRetries   = 2
+	maxRetryAfterWait = 60 * time.Second
 	defaultRetryAfter = 30 * time.Second
 )
 
@@ -532,16 +535,22 @@ func (e *Engine) init() {
 		e.event("", "state_reset", err.Error())
 	}
 	var fixed []string
+	var overdue map[string]time.Duration
 	e.withLock(func() {
 		e.state = st
 		now := e.clock.Now()
 		e.started = now
-		e.syncAccountsLocked(now, true)
+		overdue = e.syncAccountsLocked(now, true)
 		e.pruneTenantsLocked()
 		fixed = e.fixFarFutureLocked(now)
 		e.saveLocked()
 	})
 	e.reportClockFix(fixed)
+	for _, a := range e.cfg.Accounts { // in config order
+		if late, ok := overdue[a.Name]; ok {
+			e.event(a.Name, "catch_up", "the next round was overdue by "+late.Round(time.Minute).String()+"; one round runs soon, missed rounds are not made up")
+		}
+	}
 	e.applyPasswordResets()
 	e.adoptPending()
 	if e.o.ConfigPath != "" {
@@ -555,7 +564,7 @@ func (e *Engine) init() {
 // syncAccountsLocked makes the state match the configured accounts. On
 // startup, rounds missed while the engine was off are not made up: an overdue
 // next_run becomes a short delay.
-func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
+func (e *Engine) syncAccountsLocked(now time.Time, startup bool) (overdue map[string]time.Duration) {
 	names := map[string]bool{}
 	for _, a := range e.cfg.Accounts {
 		names[a.Name] = true
@@ -565,6 +574,13 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 			e.state.Accounts[a.Name] = as
 			e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		} else if startup && (as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention) && !as.NextRun.After(now) {
+			// One round soon, however many were missed.
+			if late := now.Sub(as.NextRun); late > e.sched.max {
+				if overdue == nil {
+					overdue = map[string]time.Duration{}
+				}
+				overdue[a.Name] = late
+			}
 			e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		}
 		if e.rt[a.Name] == nil {
@@ -577,6 +593,7 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 			delete(e.rt, n)
 		}
 	}
+	return overdue
 }
 
 // setNextLocked schedules the account at t, moved into the work window. If no
@@ -697,7 +714,21 @@ func (e *Engine) tick(ctx context.Context) {
 				}
 				continue
 			}
-			if as.Status == store.StatusPaused || rt.running {
+			if as.Status == store.StatusPaused {
+				// Paused by the engine after failed rounds: probe it now and then.
+				switch {
+				case rt.running:
+				case as.NextProbe.IsZero():
+					as.NextProbe, changed = now.Add(probeDelay(as.Probes)), true
+				case !as.NextProbe.After(now) && !e.sched.ended(now) && e.sched.within(now):
+					// Like a round, a probe waits for the work window and stops with the run period.
+					rt.running = true
+					e.wg.Add(1)
+					go e.probe(ctx, acct)
+				}
+				continue
+			}
+			if rt.running {
 				continue
 			}
 			if e.sched.ended(now) {
@@ -790,6 +821,8 @@ func (e *Engine) resumeAccount(name string, now time.Time) {
 			return
 		}
 		as.Status, as.Reason, as.ConsecutiveFailedRound = store.StatusOK, "", 0
+		as.NextProbe, as.Probes, as.ResumedAt = time.Time{}, 0, now
+		as.APISkipUntil = nil // the 24 h pauses would leave nothing to call and pause it again
 		e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 		e.saveLocked()
 		resumed = true

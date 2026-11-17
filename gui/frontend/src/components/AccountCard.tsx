@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { StatusBadge, Spinner } from "@/components/common";
+import { AccountNotes } from "@/components/AccountNotes";
 import { SignInFrequencyNotice } from "@/components/SignInFrequencyNotice";
 import { isSignInFrequency } from "@/lib/account";
 import { useI18n } from "@/i18n";
@@ -104,6 +105,7 @@ export function AccountCard({ a, actions }: { a: AccountSummary; actions: Accoun
           </dd>
         </div>
       </dl>
+      <AccountNotes a={a} />
 
       <div className="mt-auto flex min-h-8 flex-wrap items-center gap-1.5 pt-1">
         {attention ? (

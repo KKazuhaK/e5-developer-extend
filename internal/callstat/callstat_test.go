@@ -3,6 +3,7 @@ package callstat
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
@@ -51,9 +52,28 @@ func TestSpikeIgnoresKnownUnavailable(t *testing.T) {
 	}
 }
 
+func TestSpikeIgnoresThrottledAndRefusedCalls(t *testing.T) {
+	es := rounds(
+		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "mail.list", "throttled", 429, 3) },
+		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "mail.list", "forbidden", 403, 3) },
+		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "user.me", "ok", 200, 2) },
+	)
+	s := SpikeOf(es, apis, nil, 3, 0.5, 5)
+	if s.Active || s.Failures != 0 || s.Calls != 6 {
+		t.Errorf("%+v", s)
+	}
+	if !IsUnavailable("forbidden") || !IsUnavailable("not_found") || IsUnavailable("auth_failed") || !IsThrottled("throttled") {
+		t.Error("class helpers")
+	}
+	now := time.Unix(1000, 0)
+	if n := PausedAPIs(map[string]time.Time{"a": now.Add(time.Hour), "b": now.Add(-time.Hour)}, now); n != 1 {
+		t.Errorf("PausedAPIs = %d", n)
+	}
+}
+
 func TestSpikeCountsRealFailures(t *testing.T) {
 	es := rounds(
-		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "user.me", "throttled", 429, 2) },
+		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "user.me", "network", 0, 2) },
 		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "mail.list", "server_error", 503, 1) },
 		func(i int) []store.Entry { return calls(fmt.Sprint("r", i), "mail.list", "ok", 200, 1) },
 	)

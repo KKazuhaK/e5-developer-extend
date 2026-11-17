@@ -2,7 +2,8 @@
 {{define "body"}}{{if .Digest}}{{.EventLabel}} · 共 {{len .Digest}} 条{{range .Digest}}
 [{{.LevelLabel}}] {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}} — {{.Message}}{{end}}
 {{.Time}} · {{.Host}}{{else}}[{{.LevelLabel}}] {{.EventLabel}}{{if .Account}} · {{.Account}}{{end}}
-{{.Message}}{{if .Rounds}}
+{{.Message}}{{range .Summary}}
+{{.Line}}{{end}}{{if .Rounds}}
 失败率 {{.FailRate}}，近 {{.Rounds}} 轮共失败 {{.Failures}} 次{{end}}{{if .Origin}}
 已恢复：{{.OriginLabel}}{{end}}{{if .Hint}}
 建议：{{.Hint}}{{end}}

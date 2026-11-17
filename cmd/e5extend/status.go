@@ -65,6 +65,17 @@ func (a *app) newStatusCmd() *cobra.Command {
 				if as != nil && as.Reason != "" {
 					notes = append(notes, fmt.Sprintf("  %s: %s", sum.Name, as.Reason))
 				}
+				if sum.AutoResumeAt != nil {
+					if at, err := time.Parse(time.RFC3339, *sum.AutoResumeAt); err == nil {
+						notes = append(notes, fmt.Sprintf("  %s: tried again automatically at %s", sum.Name, at.Local().Format("2006-01-02 15:04")))
+					}
+				}
+				if sum.PausedAPIs > 0 {
+					notes = append(notes, fmt.Sprintf("  %s: %d APIs paused for 24 h (refused with 403 or 404)", sum.Name, sum.PausedAPIs))
+				}
+				if sum.TodayThrottled > 0 {
+					notes = append(notes, fmt.Sprintf("  %s: %d calls throttled today (not counted as failures)", sum.Name, sum.TodayThrottled))
+				}
 			}
 			if err := tw.Flush(); err != nil {
 				return err

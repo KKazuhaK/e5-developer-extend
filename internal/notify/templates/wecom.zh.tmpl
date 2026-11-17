@@ -5,7 +5,9 @@
 
 {{.Time | mdsafe}} · {{.Host | mdsafe}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | mdsafe}}**{{if .Account}} · {{.Account | mdsafe}}{{end}}
 
-{{.Message | mdsafe}}{{if .Rounds}}
+{{.Message | mdsafe}}{{range .Summary}}
+
+{{.Line | mdsafe}}{{end}}{{if .Rounds}}
 
 失败率 {{.FailRate}}，近 {{.Rounds}} 轮共失败 {{.Failures}} 次{{end}}{{if .Origin}}
 

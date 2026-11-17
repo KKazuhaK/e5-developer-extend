@@ -13,7 +13,7 @@ const withPace = (id: PaceId): Settings => {
   applyPace(sc, id);
   return {
     schedule: sc, network: { proxy: "" },
-    notify: { staleAfter: "72h", events: [], webhookConfigured: false, channels: 0, cooldown: "6h", quietHours: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5 },
+    notify: { staleAfter: "72h", events: [], webhookConfigured: false, channels: 0, cooldown: "6h", quietHours: "", dailySummaryAt: "", spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5 },
     ui: { language: "auto", theme: "system", startAtLogin: false },
   };
 };

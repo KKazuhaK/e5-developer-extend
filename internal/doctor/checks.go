@@ -315,7 +315,7 @@ func checkAccount(ctx context.Context, d Deps, cfg *config.Config, acct config.A
 		out = append(out, checkScopes(acct, id, title, scopes, recorded))
 	}
 
-	out = append(out, checkActivity(d, acct, as, id, title), checkState(acct, as, id, title), checkAPIs(d, acct, id, title))
+	out = append(out, checkActivity(d, acct, as, id, title), checkState(d, acct, as, id, title), checkAPIs(d, acct, as, id, title))
 	if acct.NeedsSecret() && acct.SecretExpires != "" {
 		out = append(out, checkSecret(d, acct, id, title))
 	}
@@ -446,7 +446,7 @@ func humanAge(d time.Duration) string {
 	return fmt.Sprintf("%d days", int(d.Hours()/24))
 }
 
-func checkState(acct config.Account, as *store.AccountState, id, title string) Check {
+func checkState(d Deps, acct config.Account, as *store.AccountState, id, title string) Check {
 	c := Check{ID: id + ".state", Title: title + " state"}
 	status := store.StatusOK
 	if as != nil {
@@ -467,7 +467,11 @@ func checkState(acct config.Account, as *store.AccountState, id, title string) C
 		c.setFix(M("fix.resumeAfter", "account", acct.Name))
 	case status == store.StatusPaused:
 		c.Level = Fail
-		c.setDetail(M("state.autoPaused", "reason", reason))
+		if as != nil && !as.NextProbe.IsZero() {
+			c.setDetail(M("state.autoPaused", "reason", reason), M("state.autoResume", "seconds", secs(max(as.NextProbe.Sub(d.now()), 0))))
+		} else {
+			c.setDetail(M("state.autoPaused", "reason", reason))
+		}
 		c.setFix(M("fix.resume", "account", acct.Name))
 	case status == store.StatusPeriodEnded:
 		c.Level = Warn
@@ -833,7 +837,7 @@ func checkNotify(d Deps, cfg *config.Config) Check {
 // checkAPIs warns about a category whose calls found nothing in each of its
 // last FailingRounds rounds, which usually means the account lacks the service
 // (no mailbox, no OneDrive). It only reads the local call log.
-func checkAPIs(d Deps, acct config.Account, id, title string) Check {
+func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title string) Check {
 	c := Check{ID: id + ".apis", Title: title + " APIs"}
 	apis, err := catalog.Load()
 	if err != nil {
@@ -876,6 +880,13 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 	// Only categories the account currently runs count: one switched off
 	// (for example by --apply) has old failures in the log but no problem.
 	enabled := callstat.EnabledCategories(apis, acct.Categories)
+	// APIs the account was refused (403/404) are left out for 24 hours.
+	var paused []Msg
+	if as != nil {
+		if n := callstat.PausedAPIs(as.APISkipUntil, d.now()); n > 0 {
+			paused = append(paused, M("apis.paused", "count", itoa(n)))
+		}
+	}
 	var parts []Msg
 	for _, cat := range order {
 		if !enabled[strings.ToLower(cat)] {
@@ -895,11 +906,11 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 	}
 	if len(parts) == 0 {
 		c.Level = OK
-		c.setDetail(M("apis.ok", "count", itoa(FailingRounds)))
+		c.setDetail(append([]Msg{M("apis.ok", "count", itoa(FailingRounds))}, paused...)...)
 		return c
 	}
 	c.Level = Warn
-	c.setDetail(parts...)
+	c.setDetail(append(parts, paused...)...)
 	c.setFix(M("fix.recommend", "account", acct.Name))
 	return c
 }

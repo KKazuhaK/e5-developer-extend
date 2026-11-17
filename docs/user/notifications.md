@@ -151,7 +151,7 @@ e5extend notify channel add mail --type email --preset gmail \
 | 事件 | 级别 | 什么时候发 |
 |---|---|---|
 | `needs_attention` | 严重 | 账号进入需要处理的状态（登录失效、权限被撤销等），带原因和建议 |
-| `auto_paused` | 严重 | 连续失败被自动暂停 |
+| `auto_paused` | 严重 | 连续失败被自动暂停；暂停后会按 6 小时、12 小时、之后每 24 小时探测一次，成功就自动恢复并发 `recovered` |
 | `all_failing` | 严重 | 所有没暂停的账号同时处于 `failure_spike` 或 `needs_attention`，且至少 2 个账号；只有 1 个账号时不发（和它自己的告警重复） |
 | `failure_spike` | 警告 | 调用失败率过高，见下 |
 | `stale` | 警告 | 超过 `notify.stale_after`（默认 72 小时）没有成功调用，之后每 24 小时最多再提醒一次 |
@@ -159,6 +159,7 @@ e5extend notify channel add mail --type email --preset gmail \
 | `subscription_expiring` | 警告 / 严重 | 关注的订阅离到期（`nextLifecycleDateTime`）30 天提醒一次（警告），7 天和 1 天各一次（严重），到期当天还会再提醒；续期后重新计 |
 | `subscription_status` | 严重 / 提示 | 订阅状态从 `Enabled` 变成 `Warning`、`Suspended`、`LockedOut` 或 `Deleted`（严重），或恢复为 `Enabled`（提示） |
 | `subscription_renewed` | 提示 | 订阅的到期时间向后移动了，写明从哪天移到哪天 |
+| `daily_summary` | 提示 | **默认关闭**。设置 `daily_summary_at = "21:00"` 后每天发一条：每个账号过去 24 小时的成功、失败、限流次数，最近成功时间，是否暂停或需要处理，暂停了几个 API，以及已知时 E5 订阅还剩几天。免打扰时段内到点的话，在时段结束时发；错过很久（比如当时机器关着）的当天摘要会跳过。每种渠道都有中英文内置模板；`e5extend notify preview daily_summary` 可以预览，`e5extend notify test --event daily_summary` 会发一条示例 |
 | `recovered` | 提示 | 之前的问题恢复了；`failure_spike` 解除时会写明“解除的是调用失败率过高” |
 | `period_ended` | 提示 | 运行期限结束 |
 
@@ -171,8 +172,10 @@ e5extend notify channel add mail --type email --preset gmail \
 - 失败率 ≥ `spike_rate`（默认 50%）；
 - 失败次数 ≥ `spike_min_failures`（默认 5）。
 
-只算“真异常”：429 限流、5xx、401/403、网络错误等。**不算**：
+只算“真异常”：5xx、401、网络错误等。**不算**：
 
+- 429 限流（和带 `Retry-After` 的 503）：微软要求放慢，不是故障，引擎会按它的要求等待并重试；
+- 返回 403 或 404：账号对这个接口没有权限或没有对应服务，该接口会对这个账号暂停 24 小时；
 - 返回 404、或表示“没有这项服务”的 400（比如账号没有邮箱、没有 OneDrive）：这是账号本身没有这项服务，不是故障，和 `e5extend doctor` 的 `account.<名称>.apis` 检查用的是同一个判断；
 - 已经不在这个账号当前启用分类里的调用；
 - 日志里还不够 `spike_rounds` 轮时（刚启动、刚改过配置）不判断，也不会误报恢复。
@@ -187,6 +190,7 @@ e5extend notify channel add mail --type email --preset gmail \
 |---|---|---|
 | `cooldown` | `6h` | 同一账号的同一告警在这段时间内不重复发送；严重告警冷却时间减半；留空表示默认值，只有 `0` 才关闭。管 `needs_attention`、`auto_paused`、`failure_spike`、`all_failing`、`subscription_status`；`stale`、`secret_expiring`、`subscription_expiring` 有各自的重复规则，`recovered`、`period_ended`、`subscription_renewed` 只发一次。被冷却压下的问题如果冷却结束时仍然存在，会在那时发出（时间显示的是它最初被发现的时间），之后恢复时正常发“已恢复”；冷却期间就已恢复的问题，既不发告警也不发“已恢复” |
 | `quiet_hours` | 空 | 例如 `"23:00-08:00"`（本机时间，可以跨午夜）。期间只发严重告警；其余的暂存，免打扰结束后**合并成一条**发出（只暂存了一条就按原样发；免打扰期间已经恢复的问题，暂存的告警和它的“已恢复”都会丢弃，不会收到没发过的问题的“已恢复”） |
+| `daily_summary_at` | 空（关闭） | 例如 `"21:00"`（本机时间）。设了才会发 `daily_summary`，每天一条；落在 `quiet_hours` 里就等到免打扰结束再发。桌面版在“告警 → 降噪”里有开关和时间 |
 | `spike_rounds` / `spike_rate` / `spike_min_failures` | 3 / 0.5 / 5 | 见上 |
 | `events` | 空（全部） | 全局只发这些事件 |
 

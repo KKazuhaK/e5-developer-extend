@@ -151,6 +151,7 @@ var english = map[string]string{
 	"state.paused":         "paused in the configuration",
 	"state.needsAttention": "needs attention: {reason}",
 	"state.autoPaused":     "paused automatically: {reason}",
+	"state.autoResume":     "it is tried again automatically in {dur}",
 	"state.periodEnded":    "the run period has ended",
 	"state.ok":             "ok",
 
@@ -212,6 +213,7 @@ var english = map[string]string{
 	"apis.failingNoOneDrive":   "category {category} keeps failing (not found; no OneDrive?)",
 	"apis.failingNoTeams":      "category {category} keeps failing (not found; no Teams license?)",
 	"apis.failingNoSharePoint": "category {category} keeps failing (not found; no SharePoint?)",
+	"apis.paused":              "{count} APIs paused for 24 h (the account was refused: 403 or 404)",
 	"apis.ok":                  "no category found nothing in its last {count} rounds",
 
 	// the run itself

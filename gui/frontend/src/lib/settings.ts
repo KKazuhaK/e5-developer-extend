@@ -3,7 +3,7 @@ import type { Settings, ValidationError } from "@/api/types";
 export const WEEKDAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"] as const;
 export const NOTIFY_EVENTS = [
   "needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
-  "subscription_expiring", "subscription_status", "subscription_renewed",
+  "subscription_expiring", "subscription_status", "subscription_renewed", "daily_summary",
 ] as const;
 /** Shortest allowed interval_min in the engine config. */
 export const MIN_INTERVAL_MS = 5 * 60_000;
@@ -121,6 +121,7 @@ export function validateSettings(s: Settings): Record<string, LocalCode> {
   if (n.cooldown.trim() !== "0" && ((parseDuration(n.cooldown) ?? 0) <= 0)) e["notify.cooldown"] = "cooldown";
   if (n.quietHours && !/^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/.test(n.quietHours)) e["notify.quietHours"] = "quiet";
   else if (n.quietHours && n.quietHours.slice(0, 5) === n.quietHours.slice(6)) e["notify.quietHours"] = "quiet";
+  if (n.dailySummaryAt && !isValidTime(n.dailySummaryAt)) e["notify.dailySummaryAt"] = "time";
   if (!Number.isInteger(n.spikeRounds) || n.spikeRounds < 1 || n.spikeRounds > 50) e["notify.spikeRounds"] = "spikeRounds";
   if (!(n.spikeRate > 0 && n.spikeRate <= 1)) e["notify.spikeRate"] = "spikeRate";
   if (!Number.isInteger(n.spikeMinFailures) || n.spikeMinFailures < 1) e["notify.spikeMinFailures"] = "spikeMin";

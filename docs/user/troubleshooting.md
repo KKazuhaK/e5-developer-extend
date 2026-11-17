@@ -61,12 +61,13 @@
 
 ## account.<名称>.state
 
-显示账号的状态和原因：`needs_attention`（需要你处理，原因里有命令）、`paused`（连续 3 轮失败后自动暂停）、
-配置里手动暂停、运行期限已结束。处理后 `e5extend account resume <名称>`。
+显示账号的状态和原因：`needs_attention`（需要你处理，原因里有命令）、`paused`（连续 3 轮失败后自动暂停；会在 6 小时、再过 12 小时、之后每 24 小时自动探测一次，成功就自动恢复，详情里写着下次探测的时间）、
+配置里手动暂停（不会自动恢复）、运行期限已结束。处理后 `e5extend account resume <名称>` 可以立刻恢复。
 
 ## account.<名称>.apis
 
 某个分类最近 3 轮的调用全部是 404（或 400）：通常是这个账号没有对应的服务（没有邮箱、没有 OneDrive、没有 Teams 许可）。
+返回 403 或 404 的接口会对这个账号暂停 24 小时，这一项的详情里会写“N 个 API 暂停 24 小时”。
 `e5extend account test <名称> --recommend` 看哪些分类可用，`--apply` 写进账号。这一项只读本地调用日志，`--offline` 时也会运行。
 
 ## account.<名称>.secret
@@ -96,14 +97,15 @@ Client Secret 还剩 30 天以内（警告）、7 天以内或已过期（失败
 | 事件 | 级别 | 什么时候发 |
 |---|---|---|
 | `needs_attention` | 严重 | 账号进入需要处理的状态，带原因和建议 |
-| `auto_paused` | 严重 | 连续失败被自动暂停 |
+| `auto_paused` | 严重 | 连续失败被自动暂停（之后会自动探测，成功就恢复并发 `recovered`） |
 | `all_failing` | 严重 | 所有没暂停的账号同时异常（至少 2 个账号） |
-| `failure_spike` | 警告 | 最近几轮调用失败率过高（404 和“没有这项服务”不算） |
+| `failure_spike` | 警告 | 最近几轮调用失败率过高（限流、403、404 和“没有这项服务”不算） |
 | `stale` | 警告 | 超过 `notify.stale_after`（默认 72 小时）没有成功调用，之后每 24 小时最多再提醒一次 |
 | `secret_expiring` | 警告 | Client Secret 到期前 30、7、1 天和到期当天各一次 |
 | `subscription_expiring` | 警告 / 严重 | 关注的订阅离到期（`nextLifecycleDateTime`）30 天提醒一次（警告），7 天和 1 天各一次（严重），到期当天还会再提醒；续期后重新计 |
 | `subscription_status` | 严重 / 提示 | 订阅状态从 `Enabled` 变成 `Warning`、`Suspended`、`LockedOut` 或 `Deleted`（严重），或恢复为 `Enabled`（提示） |
 | `subscription_renewed` | 提示 | 订阅的到期时间向后移动了，写明从哪天移到哪天 |
+| `daily_summary` | 提示 | 默认关闭；设了 `notify.daily_summary_at` 才每天发一条各账号的调用摘要 |
 | `recovered` | 提示 | 之后恢复正常 |
 | `period_ended` | 提示 | 运行期限结束 |
 

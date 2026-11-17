@@ -2,7 +2,8 @@
 {{define "body"}}{{if .Digest}}<b>{{.EventLabel | html}} · 共 {{len .Digest}} 条</b>{{range .Digest}}
 [{{.LevelLabel}}] <b>{{.EventLabel | html}}</b>{{if .Account}} · {{.Account | html}}{{end}} — {{.Message | html}}{{end}}
 {{.Time | html}} · {{.Host | html}}{{else}}<b>[{{.LevelLabel}}] {{.EventLabel | html}}</b>{{if .Account}} · <code>{{.Account | html}}</code>{{end}}
-{{.Message | html}}{{if .Rounds}}
+{{.Message | html}}{{range .Summary}}
+{{.Line | html}}{{end}}{{if .Rounds}}
 失败率 {{.FailRate}}，近 {{.Rounds}} 轮共失败 {{.Failures}} 次{{end}}{{if .Origin}}
 已恢复：{{.OriginLabel | html}}{{end}}{{if .Hint}}
 建议：{{.Hint | html}}{{end}}
