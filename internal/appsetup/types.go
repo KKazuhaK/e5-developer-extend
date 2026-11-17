@@ -65,8 +65,11 @@ type AppRef struct {
 
 // Action is one thing Apply will do (or, in a Result, has done).
 type Action struct {
-	// Code is stable and meant for interfaces: create_app, adopt_app, rename_app,
-	// update_app, create_service_principal, grant_consent, assign_roles, create_secret.
+	// Code is stable and meant for interfaces: create_app, adopt_or_create,
+	// add_tags, set_public_client, add_redirect_uri, add_permissions, update_app
+	// (generic), create_service_principal, grant_consent, assign_roles,
+	// create_secret. Every change Apply makes to the app registration, the
+	// service principal, the consent or the secrets has an action.
 	Code string `json:"code"`
 	// Text is an English description.
 	Text string `json:"text"`
@@ -131,6 +134,11 @@ type Result struct {
 	// created for KindApp; the secret itself went to the SecretSink.
 	SecretName    string `json:"secretName,omitempty"`
 	SecretExpires string `json:"secretExpires,omitempty"`
+	// SecretKeyID identifies the new client secret in Entra (not the secret).
+	SecretKeyID string `json:"secretKeyId,omitempty"`
+	// RemovedSecrets are the key IDs of this computer's earlier secrets that
+	// were deleted from the app after the new one was stored.
+	RemovedSecrets []string `json:"removedSecrets,omitempty"`
 }
 
 // AdminConsentURL is the link an administrator opens to grant consent.
@@ -166,9 +174,28 @@ func (e *RoleError) Error() string {
 func (e *RoleError) Unwrap() error { return ErrInsufficientRole }
 
 var (
-	rolesApp   = []string{"Application Administrator", "Cloud Application Administrator", "Global Administrator"}
-	rolesGrant = []string{"Privileged Role Administrator", "Global Administrator"}
+	rolesApp = []string{"Application Administrator", "Cloud Application Administrator", "Global Administrator"}
+	// Delegated permissions can be consented to by an application administrator;
+	// application permissions of Microsoft Graph need a privileged role.
+	rolesGrantDelegated = []string{"Cloud Application Administrator", "Application Administrator", "Privileged Role Administrator", "Global Administrator"}
+	rolesGrantApp       = []string{"Privileged Role Administrator", "Global Administrator"}
 )
+
+// MultipleAppsError means more than one app registration carries the tag of
+// the kind; setup will not guess which one is meant.
+type MultipleAppsError struct {
+	Kind Kind
+	Apps []AppRef
+}
+
+func (e *MultipleAppsError) Error() string {
+	var ids []string
+	for _, a := range e.Apps {
+		ids = append(ids, fmt.Sprintf("%s (client ID %s)", a.DisplayName, a.ClientID))
+	}
+	return fmt.Sprintf("more than one app registration carries the tag %s: %s; remove the tag from all but one in the Entra admin center and run setup again",
+		e.Kind.KindTag(), strings.Join(ids, ", "))
+}
 
 // UnknownPermissionError lists permission names Microsoft Graph does not know.
 type UnknownPermissionError struct {

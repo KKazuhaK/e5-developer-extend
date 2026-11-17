@@ -320,3 +320,73 @@ func TestInitCreatesTheAppAutomatically(t *testing.T) {
 		t.Errorf("signed in %d times, want the one from account add --auto", fa.logins)
 	}
 }
+
+func TestAppSetupAdoptWhenATaggedAppExists(t *testing.T) {
+	e, g, _ := setupEnv(t)
+	e.mustRun("", "app", "setup", "--yes")
+	own := g.Apps[0]["appId"].(string)
+	hand := g.AddApp(map[string]any{"displayName": "e5renew"})
+	handClient := g.App(hand)["appId"].(string)
+	g.ResetRequests()
+
+	_, _, err := e.run("", "app", "setup", "--yes", "--adopt", handClient)
+	if err == nil || !strings.Contains(err.Error(), own) || !strings.Contains(err.Error(), "drop --adopt") || len(g.Writes()) != 0 {
+		t.Fatalf("err = %v, writes %v", err, g.Writes())
+	}
+	// Naming the tagged app itself is only a reuse.
+	if _, _, err := e.run("", "app", "setup", "--yes", "--adopt", own); err != nil {
+		t.Fatalf("adopting the tagged app: %v", err)
+	}
+}
+
+func TestAppSetupAdoptAndNewAlwaysExcludeEachOther(t *testing.T) {
+	e, g, _ := setupEnv(t) // no candidates at all
+	_, _, err := e.run("", "app", "setup", "--yes", "--adopt", testGUID, "--new")
+	if err == nil || !strings.Contains(err.Error(), "exclude each other") || len(g.Writes()) != 0 {
+		t.Fatalf("err = %v, writes %v", err, g.Writes())
+	}
+}
+
+func TestAccountAddAutoRevokesTheSecretWhenAddingTheAccountFails(t *testing.T) {
+	e, g, _ := setupEnv(t)
+	fa := &fakeAuth{tok: goodToken()}
+	useAuth(e, fa)
+	e.mustRun("", "config", "init") // the hook below opens the vault through it
+	// An earlier secret of this computer: removing it comes right after the new
+	// secret was stored, and there the vault entry vanishes, so adding the account fails.
+	id := g.AddApp(map[string]any{"displayName": "x", "tags": []string{"e5extend", "e5extend:app"}})
+	g.Do(func() {
+		g.Passwords[id] = []map[string]any{{"keyId": "k-old", "displayName": "e5extend dev-box 2026-01-01", "endDateTime": "2027-01-01T00:00:00Z"}}
+	})
+	once := false
+	g.OnRequest = func(method, path string) {
+		if once || !strings.HasSuffix(path, "/removePassword") {
+			return
+		}
+		once = true
+		cfg := e.loadCfg()
+		v, err := vault.Open(cfg.Vault.Backend)
+		if err != nil {
+			t.Error(err)
+			return
+		}
+		_ = v.Delete(vault.SecretKey("app1"))
+	}
+	out, errOut, err := e.run("", "account", "add", "app1", "--auto", "--auth", "client_secret", "--username", "u@contoso.test", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "adding the account failed") {
+		t.Fatalf("err = %v\n%s\n%s", err, out, errOut)
+	}
+	if !strings.Contains(err.Error(), "deleted again") {
+		t.Errorf("err = %v", err)
+	}
+	if names := g.PasswordNames(id); len(names) != 0 {
+		// k-old was removed by the first removePassword, the new secret by the revoke.
+		t.Errorf("a secret is still in Entra: %v", names)
+	}
+	if strings.Contains(err.Error()+out+errOut, g.Secrets[0]) {
+		t.Error("the secret was printed")
+	}
+	if _, ok := e.loadCfg().Find("app1"); ok {
+		t.Error("the account was added")
+	}
+}

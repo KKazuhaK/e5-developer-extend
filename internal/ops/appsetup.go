@@ -59,11 +59,11 @@ func (s *AppSetupSession) Close() {
 
 // Scopes returns the Graph permissions the bootstrap sign-in asks for.
 func AppSetupScopes(appOnly bool) []string {
-	scopes := []string{"Application.ReadWrite.All", "DelegatedPermissionGrant.ReadWrite.All"}
+	// Each identity asks only for the grant permission it needs.
 	if appOnly {
-		scopes = append(scopes, "AppRoleAssignment.ReadWrite.All")
+		return []string{"Application.ReadWrite.All", "AppRoleAssignment.ReadWrite.All"}
 	}
-	return scopes
+	return []string{"Application.ReadWrite.All", "DelegatedPermissionGrant.ReadWrite.All"}
 }
 
 func (o *Ops) bootstrap(ctx context.Context, method, tenant string, scopes []string, ui auth.LoginUI, c *http.Client) (auth.Token, error) {
@@ -115,6 +115,7 @@ func (o *Ops) BeginAppSetup(ctx context.Context, opts AppSetupOptions, ui auth.L
 	}
 	if opts.AppOnly {
 		s.setup.StoreSecret = s.storeSecret
+		s.setup.BeforeSecret = s.checkSecretTarget
 	}
 	return s, nil
 }
@@ -129,10 +130,38 @@ func explainBootstrap(err error) error {
 	code := auth.ErrorCode(err)
 	switch code {
 	case "AADSTS53003", "AADSTS65001", "AADSTS90094", "AADSTS650056", "AADSTS650057", "AADSTS65002",
-		"AADSTS500200", "AADSTS50105", "AADSTS900144":
+		"AADSTS500200", "AADSTS50105", "AADSTS7000112", "AADSTS700016":
 		return fmt.Errorf("%w (%s)\nUse the manual setup instead: %s", ErrBootstrapBlocked, code, appsetup.Manual)
 	}
 	return fmt.Errorf("administrator sign-in failed: %w", err)
+}
+
+// checkSecretTarget refuses to write secret/<account> over a vault entry that
+// belongs to something else: the account must not exist yet, or be a
+// client_secret account for this very tenant and app. Otherwise the new secret
+// would replace a password or the secret of another app.
+func (s *AppSetupSession) checkSecretTarget(app appsetup.AppRef) error {
+	cfg, _, err := s.o.LoadConfigOrDefault()
+	if err != nil {
+		return err
+	}
+	acct, exists := cfg.Find(s.opts.Account)
+	if !exists {
+		return nil
+	}
+	name := s.opts.Account
+	switch {
+	case acct.Auth != config.AuthClientSecret:
+		return fmt.Errorf("account %q already exists and signs in with %s, so its vault entry is not a client secret; "+
+			"choose another --account name (nothing was changed)", name, acct.Auth)
+	case !strings.EqualFold(acct.Tenant, s.tenant):
+		return fmt.Errorf("account %q is for tenant %s but you signed in to tenant %s; choose another --account name (nothing was changed)",
+			name, acct.Tenant, s.tenant)
+	case !strings.EqualFold(acct.ClientID, app.ClientID):
+		return fmt.Errorf("account %q uses the app with client ID %s, not %s (%s); a new secret would replace its secret. "+
+			"Choose another --account name (nothing was changed)", name, acct.ClientID, app.ClientID, app.DisplayName)
+	}
+	return nil
 }
 
 // storeSecret is the sink for the client secret: straight into the vault.
@@ -151,9 +180,54 @@ func (s *AppSetupSession) storeSecret(secret string) error {
 	return nil
 }
 
-// Plan shows what Apply will do, changing nothing.
+// Plan shows what Apply will do, changing nothing. For the application
+// identity it also fails early when the account's vault entry must not be
+// overwritten (see checkSecretTarget).
 func (s *AppSetupSession) Plan(ctx context.Context) (*appsetup.Plan, error) {
-	return s.setup.Plan(ctx)
+	p, err := s.setup.Plan(ctx)
+	if err != nil || !s.opts.AppOnly {
+		return p, err
+	}
+	if err := s.checkPlanTarget(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func (s *AppSetupSession) checkPlanTarget(p *appsetup.Plan) error {
+	if p.Existing != nil {
+		return s.checkSecretTarget(*p.Existing)
+	}
+	cfg, _, err := s.o.LoadConfigOrDefault()
+	if err != nil {
+		return err
+	}
+	acct, exists := cfg.Find(s.opts.Account)
+	if !exists {
+		return nil
+	}
+	// A new app is coming (or one of the candidates is adopted): the account
+	// only fits if it already uses one of the candidates.
+	for _, c := range p.Candidates {
+		if s.checkSecretTarget(c) == nil {
+			return nil
+		}
+	}
+	if acct.Auth != config.AuthClientSecret {
+		return s.checkSecretTarget(appsetup.AppRef{})
+	}
+	return fmt.Errorf("account %q already exists with another app (client ID %s); a new app's secret would replace its secret. "+
+		"Choose another --account name (nothing was changed)", s.opts.Account, acct.ClientID)
+}
+
+// RevokeSecret deletes the client secret a finished Apply created, for the
+// caller that could not use it (e.g. adding the account failed). If Entra
+// cannot be reached the error says which secret is still live there.
+func (s *AppSetupSession) RevokeSecret(ctx context.Context, res *appsetup.Result) error {
+	if res == nil || res.SecretKeyID == "" {
+		return nil
+	}
+	return s.setup.RevokeSecret(ctx, res.ObjectID, res.SecretKeyID, res.SecretName)
 }
 
 // Apply carries the plan out. choice is only used when the plan has

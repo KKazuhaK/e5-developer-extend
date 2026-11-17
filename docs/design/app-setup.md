@@ -18,7 +18,7 @@
 | 权限 | 用途 |
 |---|---|
 | `Application.ReadWrite.All` | 创建 / 更新应用注册、创建服务主体、为应用身份创建 Client Secret |
-| `DelegatedPermissionGrant.ReadWrite.All` | 授予委托权限的管理员同意（`oauth2PermissionGrants`） |
+| `DelegatedPermissionGrant.ReadWrite.All` | 只有委托身份才申请：授予委托权限的管理员同意（`oauth2PermissionGrants`） |
 | `AppRoleAssignment.ReadWrite.All` | 只有应用身份（Client Secret）才申请：授予应用权限 |
 
 这次登录的令牌**只存在内存里**，流程结束就丢弃，不写 vault、不写配置。
@@ -35,11 +35,20 @@
 - 一个租户每种身份只有一个应用，多台机器共用，名字里不带机器名。
 
 **可重复执行**：先按标签查（`GET /applications?$filter=tags/any(t:t eq 'e5extend:delegated')`）。
+标签查询跑在可能滞后的副本上（刚写入的标签可能查不到），所以**同时**扫描完整的应用列表，在本地按标签识别，两处结果按对象 ID 合并，
+列表里带标签的应用不会被丢掉。同一种身份如果有**多于一个**应用带这个标签，直接报错并列出它们的客户端 ID，不替用户挑一个。
 
-- 找到 → **复用**：补齐缺的权限和设置，补齐同意，不新建。
+- 找到 → **复用**：补齐缺的权限和设置，补齐同意，不新建。更新前先用 `GET /applications/{id}`（不带 `ConsistencyLevel`）
+  读一次最新的应用，把缺的内容合并进这份最新数据再 PATCH，不用列表里可能过期的副本，避免把已有的重定向 URI 或其他 API 的权限覆盖掉。
 - 没找到，但有显示名是 `e5extend` 或 `E5 Developer Extend` 的应用（手工建的）→ 列出来让用户选“采用它”或“新建”；
   采用时加上标签，并（默认勾选、可取消）改名为规范名称。
 - 都没有 → 新建。
+- `--adopt X`：已有带标签的应用时，X 必须就是那个应用，否则报错 “an E5 Developer Extend app already exists: <客户端 ID>; drop --adopt”；
+  `--adopt` 和 `--new` 同时出现永远报错。
+
+**计划列出每一处改动**：`Plan` 里的动作覆盖 `Apply` 会做的每一次写入——缺的标签（`add_tags`）、改名（`rename_app`）、
+`isFallbackPublicClient`（`set_public_client`）、补重定向 URI（`add_redirect_uri`）、备注（`set_notes`）、补权限（`add_permissions`）、
+服务主体、同意、Secret。所以“没有动作”就等于 `Apply` 什么都不写，命令行据此跳过确认。测试逐场景对比假服务收到的写入和计划里的动作。
 
 ## 3. 流程（委托身份）
 
@@ -53,20 +62,28 @@
    - `requiredResourceAccess` = 推荐的委托权限（见第 5 节），已有的不删，只补缺的。
 4. 创建服务主体（已存在就跳过）。
 5. 管理员同意：查 `oauth2PermissionGrants`（`clientId = 本应用服务主体`、`resourceId = Graph 服务主体`、`consentType = AllPrincipals`），
-   有就把 `scope` 补成并集（PATCH），没有就新建（POST）。
+   有就把 `scope` 补成并集（PATCH），没有就新建（POST）。POST 回 409，或 400 “Permission entry already exists” 时说明列表落后了：
+   视为已存在，重新读取后补并集。
 6. 把租户 ID 和客户端 ID 填进账号，进入正常登录（用新应用、`.default`）。浏览器里通常已经登录，点一下即可。
 
 **新对象的同步延迟**：刚创建的应用 / 服务主体在几秒到一两分钟内可能查不到。第 4、5 步遇到 404 时退避重试（最多约 2 分钟）；
+只有请求针对的是**本次运行刚创建**的对象（服务主体、同意、角色分配、Secret）才把 404 当作同步延迟，其他 404 立即报错；
 第 6 步遇到 `AADSTS700016`（找不到应用）同样重试，并在界面上显示“等待微软同步…”。
 
 ## 4. 流程（应用身份，Client Secret）
 
 第 1～4 步同上（显示名、标签不同；不设置公共客户端；`requiredResourceAccess` 用应用权限 `appRoles`），然后：
 
-5. 授予应用权限：对每个权限 `POST /servicePrincipals/{Graph}/appRoleAssignedTo`（已存在就跳过）。
+5. 授予应用权限：对每个权限 `POST /servicePrincipals/{Graph}/appRoleAssignedTo`（已存在就跳过；POST 回 409 或 400 “already exists” 也算成功）。
 6. 创建 Client Secret：`POST /applications/{id}/addPassword`，`displayName = "e5extend <机器名> <日期>"`，有效期 12 个月；
    返回的密钥**直接存进 vault**，不显示、不打印；`secret_expires` 写进配置（到期前会提醒）。
    每台机器各建一个 Secret，所以 Secret 的名字里带机器名，便于以后在后台识别、吊销。
+   `secret_expires` 取实际发送的 UTC `endDateTime` 的日期。
+   **重复执行**：新 Secret 存进 vault 成功**之后**，删除应用上本机以前建的 Secret（`displayName` 恰为 `e5extend <机器名> <YYYY-MM-DD>`，别的机器和手工建的不动），
+   结果里列出被删的 key ID。存储失败则不删旧的，并吊销刚建的新 Secret；吊销也失败时，错误信息写明名为 X、key ID 为 Y 的 Secret 仍然有效、需要到 Entra 里手工删除（不含密钥内容）。
+   注意：同一台机器上用不同账号名指向同一个应用时，重新执行会删掉另一个账号的 Secret（它们的名字相同格式），那个账号要重新生成。
+   **写入前检查**：vault 里的 `secret/<账号>` 只在账号还不存在，或账号是 client_secret 且租户 ID、客户端 ID 都和被设置的应用相同时才会被写入；
+   否则（例如密码账号、别的应用的账号）在创建 Secret 之前就报错，不留孤立的 Secret。`account add --auto` 在加账号失败时同样会吊销刚建的 Secret 并删除 vault 条目。
 7. 需要 `--username`（读取哪个用户的数据）时照常询问。
 
 ## 5. 推荐权限的唯一来源
@@ -78,9 +95,9 @@
 
 | 情况 | 处理 |
 |---|---|
-| 登录的账号不是管理员 / 角色不够（403） | 说明需要的角色：创建应用要“应用程序管理员”或“云应用程序管理员”；授予 Microsoft Graph 应用权限要“特权角色管理员”或“全局管理员”。给出两个选择：换管理员账号重试，或者转到手动模式 |
+| 登录的账号不是管理员 / 角色不够（403） | 说明需要的角色：创建应用要“应用程序管理员”或“云应用程序管理员”；授予 Microsoft Graph **委托**权限的同意，“云应用程序管理员”或“应用程序管理员”就够（“特权角色管理员”“全局管理员”也行）；授予**应用**权限要“特权角色管理员”或“全局管理员”。给出两个选择：换管理员账号重试，或者转到手动模式 |
 | 应用已建好，但授予同意失败 | 保留应用，给出管理员同意链接 `https://login.microsoftonline.com/{tenant}/adminconsent?client_id={id}`，让有权限的人点一下；账号照常保存 |
-| 租户禁止使用 Graph Command Line Tools（条件访问 / 用户同意被关） | 提示转手动模式，附 `docs/user/app-registration.md` |
+| 租户禁止使用 Graph Command Line Tools（条件访问 / 用户同意被关；`AADSTS53003`、`65001`、`90094`、`650056/7`、`65002`、`500200`、`50105`、`7000112`、`700016`） | 提示转手动模式，附 `docs/user/app-registration.md` |
 | 中途取消 | 已经建好的应用保留（下次自动复用），不留半个账号 |
 
 所有错误信息里不出现令牌和 Secret。

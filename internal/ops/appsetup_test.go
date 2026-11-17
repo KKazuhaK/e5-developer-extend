@@ -90,9 +90,26 @@ func TestAppSetupDelegatedEndToEnd(t *testing.T) {
 	}
 }
 
+// vaultSecret reads secret/<account> from the vault ("" when absent).
+func vaultSecret(t *testing.T, e *setupEnv, account string) string {
+	t.Helper()
+	cfg, _, _ := e.LoadConfigOrDefault()
+	v, err := e.OpenVault(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := v.Get(vault.SecretKey(account))
+	if err != nil {
+		return ""
+	}
+	return string(got)
+}
+
 func TestAppSetupApplicationIdentityStoresTheSecretInTheVault(t *testing.T) {
 	e := newSetupEnv(t)
 	ctx := context.Background()
+	// The tenant already has the app, and the account uses exactly that app.
+	e.g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "appId": testGUID, "tags": []string{"e5extend", "e5extend:app"}})
 	if err := e.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD"}); err != nil {
 		t.Fatal(err)
 	}
@@ -100,25 +117,160 @@ func TestAppSetupApplicationIdentityStoresTheSecretInTheVault(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(strings.Join(e.scopes, " "), "AppRoleAssignment.ReadWrite.All") || e.method != config.AuthBrowser {
+	if strings.Join(e.scopes, " ") != "Application.ReadWrite.All AppRoleAssignment.ReadWrite.All" || e.method != config.AuthBrowser {
 		t.Errorf("scopes %v method %s", e.scopes, e.method)
+	}
+	if _, err := s.Plan(ctx); err != nil {
+		t.Fatalf("plan: %v", err)
 	}
 	res, err := s.Apply(ctx, appsetup.Choice{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfg, _, _ := e.LoadConfig()
-	v, _ := e.OpenVault(cfg)
-	got, err := v.Get(vault.SecretKey("app1"))
-	if err != nil || string(got) != e.g.Secrets[0] {
-		t.Fatalf("vault secret: %q %v", got, err)
+	if got := vaultSecret(t, e, "app1"); got != e.g.Secrets[0] {
+		t.Fatalf("vault secret: %q", got)
 	}
+	cfg, _, _ := e.LoadConfig()
 	acct, _ := cfg.Find("app1")
 	if acct.SecretExpires != res.SecretExpires || res.SecretExpires == "" {
 		t.Errorf("secret_expires = %q, result %q", acct.SecretExpires, res.SecretExpires)
 	}
 	if strings.Contains(string(mustRead(t, filepath.Join(e.cfgDir, "config.toml"))), e.g.Secrets[0]) {
 		t.Error("secret in the config file")
+	}
+}
+
+func TestAppSetupDelegatedAsksOnlyForTheDelegatedGrantScope(t *testing.T) {
+	if got := strings.Join(AppSetupScopes(false), " "); got != "Application.ReadWrite.All DelegatedPermissionGrant.ReadWrite.All" {
+		t.Errorf("delegated: %s", got)
+	}
+	if got := strings.Join(AppSetupScopes(true), " "); got != "Application.ReadWrite.All AppRoleAssignment.ReadWrite.All" {
+		t.Errorf("app-only: %s", got)
+	}
+}
+
+func TestAppSetupApplicationIdentityForANewAccountName(t *testing.T) {
+	e := newSetupEnv(t)
+	ctx := context.Background()
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{AppOnly: true, Account: "fresh"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Plan(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Apply(ctx, appsetup.Choice{}); err != nil {
+		t.Fatal(err)
+	}
+	if got := vaultSecret(t, e, "fresh"); got != e.g.Secrets[0] {
+		t.Errorf("vault secret: %q", got)
+	}
+}
+
+// refused runs app-only setup for an account that must not be overwritten and
+// checks that neither Plan nor Apply created a secret or touched the vault.
+func refused(t *testing.T, e *setupEnv, account, vaultBefore string, want ...string) {
+	t.Helper()
+	ctx := context.Background()
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{AppOnly: true, Account: account}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, perr := s.Plan(ctx)
+	_, aerr := s.Apply(ctx, appsetup.Choice{})
+	for _, err := range []error{perr, aerr} {
+		if err == nil {
+			t.Fatalf("expected a refusal (plan %v, apply %v)", perr, aerr)
+		}
+		for _, w := range want {
+			if !strings.Contains(err.Error(), w) {
+				t.Errorf("error lacks %q: %v", w, err)
+			}
+		}
+	}
+	if len(e.g.Secrets) != 0 {
+		t.Error("a client secret was created before the refusal")
+	}
+	if got := vaultSecret(t, e, account); got != vaultBefore {
+		t.Errorf("vault entry changed: %q", got)
+	}
+}
+
+func TestAppSetupRefusesToOverwriteAPasswordAccountsSecret(t *testing.T) {
+	e := newSetupEnv(t)
+	if err := e.AddAccount(context.Background(), AccountInput{Name: "pw", Auth: config.AuthPassword, Tenant: "tid-123",
+		ClientID: testGUID, Username: "u@contoso.test", Secret: "HUMAN-PASSWORD"}); err != nil {
+		t.Fatal(err)
+	}
+	refused(t, e, "pw", "HUMAN-PASSWORD", `"pw"`, config.AuthPassword)
+}
+
+func TestAppSetupRefusesAnAccountOfAnotherApp(t *testing.T) {
+	e := newSetupEnv(t)
+	const other = "99999999-8888-7777-6666-555555555555"
+	e.g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "tags": []string{"e5extend", "e5extend:app"}})
+	if err := e.AddAccount(context.Background(), AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: other, Secret: "OTHER-APPS-SECRET"}); err != nil {
+		t.Fatal(err)
+	}
+	refused(t, e, "app1", "OTHER-APPS-SECRET", other, "app1")
+}
+
+func TestAppSetupRefusesAnAccountOfAnotherTenant(t *testing.T) {
+	e := newSetupEnv(t)
+	e.g.AddApp(map[string]any{"displayName": "x", "appId": testGUID, "tags": []string{"e5extend:app"}})
+	if err := e.AddAccount(context.Background(), AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "other-tenant", ClientID: testGUID, Secret: "S"}); err != nil {
+		t.Fatal(err)
+	}
+	refused(t, e, "app1", "S", "other-tenant", "tid-123")
+}
+
+func TestAppSetupExistingAccountWhenAHandMadeAppWouldBeAdopted(t *testing.T) {
+	e := newSetupEnv(t)
+	ctx := context.Background()
+	e.g.AddApp(map[string]any{"displayName": "e5renew", "appId": testGUID})
+	if err := e.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{AppOnly: true, Account: "app1"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The account already uses the candidate, so adopting it is fine.
+	if _, err := s.Plan(ctx); err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := s.Apply(ctx, appsetup.Choice{Adopt: testGUID}); err != nil {
+		t.Fatal(err)
+	}
+	if got := vaultSecret(t, e, "app1"); got != e.g.Secrets[0] {
+		t.Errorf("vault secret: %q", got)
+	}
+}
+
+func TestAppSetupRevokeSecret(t *testing.T) {
+	e := newSetupEnv(t)
+	ctx := context.Background()
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{AppOnly: true, Account: "fresh"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := s.Apply(ctx, appsetup.Choice{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.SecretKeyID == "" || len(e.g.PasswordNames(res.ObjectID)) != 1 {
+		t.Fatalf("result %+v", res)
+	}
+	if err := s.RevokeSecret(ctx, res); err != nil {
+		t.Fatal(err)
+	}
+	if len(e.g.PasswordNames(res.ObjectID)) != 0 {
+		t.Error("the secret is still in Entra")
+	}
+	e.g.Forbidden["POST /applications/"+res.ObjectID+"/removePassword"] = true
+	res.SecretKeyID = "k-live"
+	if err := s.RevokeSecret(ctx, res); err == nil || !strings.Contains(err.Error(), "still live in Entra") || !strings.Contains(err.Error(), "k-live") {
+		t.Errorf("err = %v", err)
 	}
 }
 
@@ -134,12 +286,16 @@ func TestAppSetupApplicationIdentityNeedsAnAccountName(t *testing.T) {
 
 func TestAppSetupExplainsABlockedTenant(t *testing.T) {
 	e := newSetupEnv(t)
-	for _, code := range []string{"AADSTS65001", "AADSTS53003", "AADSTS90094"} {
+	for _, code := range []string{"AADSTS65001", "AADSTS53003", "AADSTS90094", "AADSTS7000112", "AADSTS700016"} {
 		e.fail = errors.New(code + ": the user or administrator has not consented to use the application")
 		_, err := e.BeginAppSetup(context.Background(), AppSetupOptions{}, &recUI{}, nil)
 		if !errors.Is(err, ErrBootstrapBlocked) || !strings.Contains(err.Error(), "docs/user/app-registration.md") {
 			t.Errorf("%s: err = %v", code, err)
 		}
+	}
+	e.fail = errors.New("AADSTS900144: The request body must contain the following parameter")
+	if _, err := e.BeginAppSetup(context.Background(), AppSetupOptions{}, &recUI{}, nil); errors.Is(err, ErrBootstrapBlocked) {
+		t.Errorf("AADSTS900144 is a request bug, not a blocked tenant: %v", err)
 	}
 	e.fail = context.Canceled
 	if _, err := e.BeginAppSetup(context.Background(), AppSetupOptions{}, &recUI{}, nil); !errors.Is(err, context.Canceled) {

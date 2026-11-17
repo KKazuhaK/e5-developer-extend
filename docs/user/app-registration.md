@@ -35,7 +35,7 @@ e5extend app setup --app-only --account app1   # 应用身份，Secret 存进 va
 
 - 登录页上显示的是 **Microsoft Graph Command Line Tools**，这是微软的官方工具，只在这一次用来创建应用。
   这次登录的令牌只放在内存里，流程结束就丢弃，不写入 vault 和配置。
-- 需要的角色：创建应用要“应用程序管理员”或“云应用程序管理员”；授予 Microsoft Graph 的权限要“特权角色管理员”或“全局管理员”（E5 开发者租户里你自己就是全局管理员）。
+- 需要的角色：创建应用要“应用程序管理员”或“云应用程序管理员”；授予 Microsoft Graph 的**委托**权限，“云应用程序管理员”或“应用程序管理员”就够；授予**应用**权限要“特权角色管理员”或“全局管理员”（E5 开发者租户里你自己就是全局管理员）。
 - 可以重复执行：已有的应用（按标签 `e5extend` 识别）会被复用，只补齐缺的权限和同意，不会删除任何东西，也不会新建第二个。
   租户里已有手工建的 `e5extend`、`e5renew` 之类同名应用时，会让你选择“采用”（加上标签，默认顺便改成规范名称）或“新建”。
   非交互运行时用 `--adopt <客户端 ID>` 或 `--new` 指定，`--no-rename` 保持原名。
@@ -43,7 +43,11 @@ e5extend app setup --app-only --account app1   # 应用身份，Secret 存进 va
 - 应用已建好但授予同意失败时，应用会保留，程序给出管理员同意链接
   `https://login.microsoftonline.com/<租户 ID>/adminconsent?client_id=<客户端 ID>`，让有权限的人点一下即可；账号照常保存。
 - 如果你的租户禁止使用 Graph Command Line Tools（条件访问或用户同意被关），请用下面的手动步骤。
-- 应用身份的 Secret 每台机器各建一个，名字是 `e5extend <机器名> <日期>`，有效期 12 个月，在 Entra 后台的“证书和密码”里可以识别和吊销；重复执行 `--app-only` 会再建一个新的。
+- 应用身份的 Secret 每台机器各建一个，名字是 `e5extend <机器名> <日期>`，有效期 12 个月，在 Entra 后台的“证书和密码”里可以识别和吊销。
+  重复执行 `--app-only` 会建一个新的，新的存好之后自动删除本机以前建的（只删名字恰好是本机的，别的机器和手工建的不动）。
+  `--account` 指向已有账号时，只有它是 client_secret 账号、并且租户和客户端 ID 都就是被设置的这个应用才会更新它的 Secret；密码账号或别的应用的账号会直接报错，不会被覆盖。
+- 管理员登录用的是微软的 Graph Command Line Tools：你在登录页上同意之后，这个同意会一直留在你的租户里（本程序不会删它，令牌本身不留）。
+  不想留的话，到 Entra 管理中心 → 企业应用程序 → Microsoft Graph Command Line Tools，在“权限”里撤销，或直接删除这个企业应用；下次自动设置时会重新请求同意。
 
 规范名称和标签：委托身份 `E5 Developer Extend`（标签 `e5extend`、`e5extend:delegated`），应用身份 `E5 Developer Extend (app-only)`（标签 `e5extend`、`e5extend:app`）。
 

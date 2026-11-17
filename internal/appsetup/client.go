@@ -57,12 +57,30 @@ func (e *APIError) Error() string {
 // "The appId '…' of the service principal does not reference a valid
 // application object" while the app is still replicating (seen on a real
 // tenant), so that message counts too.
-func (e *APIError) notYetThere() bool {
+//
+// The 400 about the appId is always lag. A 404 or "does not exist" only is when
+// the request targets an object this run just created (justCreated); otherwise
+// the object really is missing and waiting would only hide the problem.
+func (e *APIError) notYetThere(justCreated bool) bool {
 	msg := strings.ToLower(e.Message)
+	if strings.Contains(msg, "does not reference a valid application object") {
+		return true
+	}
+	if !justCreated {
+		return false
+	}
 	return e.Status == http.StatusNotFound ||
 		strings.Contains(msg, "does not exist") ||
-		strings.Contains(msg, "does not reference a valid application object") ||
 		strings.EqualFold(e.Code, "Request_ResourceNotFound")
+}
+
+// alreadyExists reports whether a create failed because the object is there
+// already (409, or Graph's 400 "... already exists").
+func (e *APIError) alreadyExists() bool {
+	if e.Status == http.StatusConflict {
+		return true
+	}
+	return e.Status == http.StatusBadRequest && strings.Contains(strings.ToLower(e.Message), "already exist")
 }
 
 // client is a minimal Graph client for the calls app setup needs.
@@ -81,6 +99,16 @@ func (c *client) url(path string) string {
 
 // do sends a request and decodes a JSON answer into out (when not nil).
 func (c *client) do(ctx context.Context, op, method, path string, in, out any) error {
+	return c.send(ctx, op, method, path, in, out, true)
+}
+
+// get reads one object without the eventual-consistency header, so the answer
+// is the object as it is now, not a replica's older copy.
+func (c *client) get(ctx context.Context, op, path string, out any) error {
+	return c.send(ctx, op, http.MethodGet, path, nil, out, false)
+}
+
+func (c *client) send(ctx context.Context, op, method, path string, in, out any, eventual bool) error {
 	var body io.Reader
 	if in != nil {
 		b, err := json.Marshal(in)
@@ -95,8 +123,10 @@ func (c *client) do(ctx context.Context, op, method, path string, in, out any) e
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
-	// Needed for filters on collections such as tags; harmless elsewhere.
-	req.Header.Set("ConsistencyLevel", "eventual")
+	if eventual {
+		// Needed for filters on collections such as tags; harmless elsewhere.
+		req.Header.Set("ConsistencyLevel", "eventual")
+	}
 	if in != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -169,14 +199,17 @@ func filterQuery(filter string, extra ...string) string {
 
 // retryReplication runs fn, and while it fails because Graph does not see a
 // just-created object yet, waits and tries again for about two minutes.
-func (s *Setup) retryReplication(ctx context.Context, what string, fn func() error) error {
+//
+// justCreated says the request targets an object this run created; only then
+// is a 404 treated as lag (see APIError.notYetThere).
+func (s *Setup) retryReplication(ctx context.Context, what string, justCreated bool, fn func() error) error {
 	var err error
 	for attempt := 0; ; attempt++ {
 		if err = fn(); err == nil {
 			return nil
 		}
 		var ae *APIError
-		if !errors.As(err, &ae) || !ae.notYetThere() || attempt >= len(s.backoff()) {
+		if !errors.As(err, &ae) || !ae.notYetThere(justCreated) || attempt >= len(s.backoff()) {
 			return err
 		}
 		wait := s.backoff()[attempt]

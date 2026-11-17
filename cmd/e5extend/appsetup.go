@@ -66,6 +66,12 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 			sess.Close()
 			out := cmd.OutOrStdout()
 			if appOnly {
+				// An existing account now has a new secret: tell a running engine.
+				if cfg, _, err := a.ops().LoadConfigOrDefault(); err == nil {
+					if acct, ok := cfg.Find(account); ok && acct.Auth == config.AuthClientSecret {
+						a.ops().ReloadEngine()
+					}
+				}
 				fmt.Fprintf(out, "\nnext: e5extend account add %s --auth client_secret --tenant %s --client-id %s --stored-secret --username <user>\n",
 					account, res.TenantID, res.ClientID)
 			} else {
@@ -159,11 +165,14 @@ func printPlan(cmd *cobra.Command, p *appsetup.Plan) {
 // chooseExisting settles adopt-or-create when hand-made candidates exist.
 func (a *app) chooseExisting(cmd *cobra.Command, p *appsetup.Plan, f setupFlags) (appsetup.Choice, error) {
 	choice := appsetup.Choice{Rename: !f.noRename, CreateNew: f.newApp, Adopt: f.adopt}
-	if !p.NeedsChoice() {
-		return choice, nil
-	}
 	if f.adopt != "" && f.newApp {
 		return choice, errors.New("--adopt and --new exclude each other")
+	}
+	if f.adopt != "" && p.Existing != nil && !strings.EqualFold(f.adopt, p.Existing.ClientID) && !strings.EqualFold(f.adopt, p.Existing.ObjectID) {
+		return choice, fmt.Errorf("an E5 Developer Extend app already exists: %s; drop --adopt", p.Existing.ClientID)
+	}
+	if !p.NeedsChoice() {
+		return choice, nil
 	}
 	if choice.Adopt != "" || choice.CreateNew {
 		return choice, nil
@@ -233,6 +242,9 @@ func printSetupResult(cmd *cobra.Command, r *appsetup.Result) {
 	if r.SecretName != "" {
 		fmt.Fprintf(out, "client secret %q stored in the vault; expires %s\n", r.SecretName, r.SecretExpires)
 	}
+	if len(r.RemovedSecrets) > 0 {
+		fmt.Fprintf(out, "removed %d earlier client secret(s) of this computer (key ID %s)\n", len(r.RemovedSecrets), strings.Join(r.RemovedSecrets, ", "))
+	}
 	if r.ConsentGranted {
 		fmt.Fprintln(out, "administrator consent is granted")
 	} else {
@@ -275,10 +287,17 @@ func (a *app) accountAddAuto(cmd *cobra.Command, acct config.Account, f setupFla
 	in := ops.InputOf(acct)
 	in.UseStoredSecret = opts.AppOnly
 	if err := o.AddAccount(ctx, in); err != nil {
+		extra := ""
 		if opts.AppOnly {
+			// The secret was made for this account; nobody will hold it now.
 			a.dropStoredSecret(acct.Name)
+			if rerr := sess.RevokeSecret(ctx, res); rerr != nil {
+				extra = "\n" + rerr.Error()
+			} else if res.SecretKeyID != "" {
+				extra = "\nThe client secret made for it was deleted again."
+			}
 		}
-		return fmt.Errorf("the app registration is ready (client ID %s) but adding the account failed: %w", res.ClientID, err)
+		return fmt.Errorf("the app registration is ready (client ID %s) but adding the account failed: %w%s", res.ClientID, err, extra)
 	}
 	o.ReloadEngine()
 	fmt.Fprintf(out, "\nadded account %q (%s)\n", acct.Name, acct.Auth)
@@ -289,6 +308,7 @@ func (a *app) accountAddAuto(cmd *cobra.Command, acct config.Account, f setupFla
 	}
 	progress := func(m string) { fmt.Fprintln(errOut, "  "+m) }
 	lr, err := o.LoginAfterSetup(ctx, acct.Name, cliUI{cmd}, progress)
+	o.ReloadEngine() // the token cache may have changed, even when a later step failed
 	if err != nil {
 		return fmt.Errorf("the account is saved, but signing in failed: %w", ops.WithHint(err, acct.Name))
 	}

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -37,6 +38,10 @@ type Setup struct {
 	// StoreSecret receives the client secret of KindApp. It is the only place
 	// the secret ever goes; if it fails the secret is revoked again.
 	StoreSecret func(secret string) error
+	// BeforeSecret, when set, is called with the app a client secret is about
+	// to be created for; returning an error stops Apply before the secret
+	// exists, so nothing is left behind.
+	BeforeSecret func(app AppRef) error
 
 	// Progress reports what is going on, e.g. "waiting for Microsoft to replicate".
 	Progress func(msg string)
@@ -126,6 +131,12 @@ type application struct {
 	IsFallbackPublicClient *bool            `json:"isFallbackPublicClient"`
 	PublicClient           *publicClient    `json:"publicClient"`
 	RequiredResourceAccess []requiredAccess `json:"requiredResourceAccess"`
+	PasswordCredentials    []passwordCred   `json:"passwordCredentials"`
+}
+
+type passwordCred struct {
+	KeyID       string `json:"keyId"`
+	DisplayName string `json:"displayName"`
 }
 
 type publicClient struct {
@@ -136,7 +147,7 @@ func (a *application) ref() AppRef {
 	return AppRef{ObjectID: a.ID, ClientID: a.AppID, DisplayName: a.DisplayName}
 }
 
-const appSelect = "id,appId,displayName,tags,notes,signInAudience,isFallbackPublicClient,publicClient,requiredResourceAccess"
+const appSelect = "id,appId,displayName,tags,notes,signInAudience,isFallbackPublicClient,publicClient,requiredResourceAccess,passwordCredentials"
 
 // ---- reading ----
 
@@ -202,43 +213,63 @@ func (s *Setup) permIDs(g *graphInfo) map[string]string {
 	return out
 }
 
-func (s *Setup) findTagged(ctx context.Context, c *client) (*application, error) {
-	var found []application
-	err := c.list(ctx, "look for an existing app registration", "/applications"+
+// discovery is what the tenant holds already: the app tagged for this kind (at
+// most one) and the hand-made apps that could be adopted instead.
+type discovery struct {
+	tagged *application
+	cands  []application
+}
+
+func hasTag(a *application, tag string) bool {
+	return slices.ContainsFunc(a.Tags, func(t string) bool { return strings.EqualFold(t, tag) })
+}
+
+// discover looks for the tagged app in two ways and merges them by object ID:
+// the tag query (fast, but it runs on a replica that can lag behind a fresh
+// write) and a scan of the whole listing, which candidates need anyway. More
+// than one tagged app is an error, never a guess.
+func (s *Setup) discover(ctx context.Context, c *client) (*discovery, error) {
+	const doing = "look for an existing app registration"
+	byID := map[string]application{}
+	var order []string
+	add := func(a application) {
+		if _, ok := byID[a.ID]; !ok {
+			order = append(order, a.ID)
+			byID[a.ID] = a
+		}
+	}
+	err := c.list(ctx, doing, "/applications"+
 		filterQuery("tags/any(t:t eq '"+s.Kind.KindTag()+"')", "$select", appSelect, "$count", "true"),
 		func(raw json.RawMessage) error {
 			var a application
 			if err := json.Unmarshal(raw, &a); err != nil {
 				return err
 			}
-			found = append(found, a)
+			add(a)
 			return nil
 		})
 	if err != nil {
-		return nil, s.mapErr(err, "look for an existing app registration", rolesApp)
+		return nil, s.mapErr(err, doing, rolesApp)
 	}
-	if len(found) == 0 {
-		return nil, nil
-	}
-	return &found[0], nil
-}
-
-func (s *Setup) findCandidates(ctx context.Context, c *client) ([]application, error) {
-	var out []application
-	err := c.list(ctx, "look for hand-made app registrations", "/applications?$select="+appSelect+"&$top=100",
+	d := &discovery{}
+	err = c.list(ctx, "look for hand-made app registrations", "/applications?$select="+appSelect+"&$top=100",
 		func(raw json.RawMessage) error {
 			var a application
 			if err := json.Unmarshal(raw, &a); err != nil {
 				return err
 			}
+			if hasTag(&a, s.Kind.KindTag()) {
+				add(a)
+				return nil
+			}
 			for _, t := range a.Tags {
 				if strings.HasPrefix(strings.ToLower(t), "e5extend:") {
-					return nil // already one of ours, for either kind
+					return nil // already one of ours, for the other kind
 				}
 			}
 			for _, n := range legacyNames {
 				if strings.EqualFold(a.DisplayName, n) {
-					out = append(out, a)
+					d.cands = append(d.cands, a)
 					break
 				}
 			}
@@ -247,8 +278,39 @@ func (s *Setup) findCandidates(ctx context.Context, c *client) ([]application, e
 	if err != nil {
 		return nil, s.mapErr(err, "look for hand-made app registrations", rolesApp)
 	}
-	sort.SliceStable(out, func(i, j int) bool { return out[i].DisplayName < out[j].DisplayName })
-	return out, nil
+	sort.SliceStable(d.cands, func(i, j int) bool { return d.cands[i].DisplayName < d.cands[j].DisplayName })
+	var tagged []application
+	for _, id := range order {
+		if a := byID[id]; hasTag(&a, s.Kind.KindTag()) {
+			tagged = append(tagged, a)
+		}
+	}
+	switch len(tagged) {
+	case 0:
+	case 1:
+		d.tagged = &tagged[0]
+	default:
+		e := &MultipleAppsError{Kind: s.Kind}
+		for i := range tagged {
+			e.Apps = append(e.Apps, tagged[i].ref())
+		}
+		return nil, e
+	}
+	return d, nil
+}
+
+// fresh reads the app by ID without the eventual-consistency header. Listings
+// and tag queries can be stale; anything merged into a PATCH must come from here.
+func (s *Setup) fresh(ctx context.Context, c *client, a *application) (*application, error) {
+	const doing = "read the app registration"
+	var out application
+	if err := c.get(ctx, doing, "/applications/"+a.ID+"?$select="+appSelect, &out); err != nil {
+		return nil, s.mapErr(err, doing, rolesApp)
+	}
+	if out.ID == "" {
+		return nil, errors.New(doing + ": Graph returned no ID")
+	}
+	return &out, nil
 }
 
 func (s *Setup) servicePrincipalID(ctx context.Context, c *client, appID string) (string, error) {
@@ -338,7 +400,8 @@ func (s *Setup) missingPermissions(a *application, ids map[string]string) []stri
 	return missing
 }
 
-// Plan works out what Apply would do, without changing anything.
+// Plan works out what Apply would do, without changing anything. Every write
+// Apply makes has an action here; no actions means Apply writes nothing.
 func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 	c := s.client()
 	g, err := s.resolveGraph(ctx, c)
@@ -350,40 +413,38 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 		Kind: s.Kind, TenantID: s.TenantID, DisplayName: s.Kind.DisplayName(), Tags: s.Kind.Tags(),
 		Permissions: slices.Clone(s.permissionNames()),
 	}
-	existing, err := s.findTagged(ctx, c)
+	d, err := s.discover(ctx, c)
 	if err != nil {
 		return nil, err
 	}
 	var app *application
-	if existing != nil {
-		r := existing.ref()
-		p.Existing = &r
-		app = existing
-		p.DisplayName = existing.DisplayName
-	} else {
-		cands, err := s.findCandidates(ctx, c)
-		if err != nil {
+	if d.tagged != nil {
+		if app, err = s.fresh(ctx, c, d.tagged); err != nil {
 			return nil, err
 		}
-		for i := range cands {
-			p.Candidates = append(p.Candidates, cands[i].ref())
+		r := app.ref()
+		p.Existing = &r
+		p.DisplayName = app.DisplayName
+	} else {
+		for i := range d.cands {
+			p.Candidates = append(p.Candidates, d.cands[i].ref())
 		}
 	}
 	p.Missing = s.missingPermissions(app, ids)
 	add := func(code, text string) { p.Actions = append(p.Actions, Action{Code: code, Text: text}) }
 
 	switch {
-	case existing == nil && len(p.Candidates) > 0:
-		add("adopt_or_create", fmt.Sprintf("adopt one of the existing app registrations (%d found) or create %q", len(p.Candidates), p.DisplayName))
-	case existing == nil:
+	case app == nil && len(p.Candidates) > 0:
+		add("adopt_or_create", fmt.Sprintf("adopt one of the existing app registrations (%d found; this adds the tags, permissions, settings and note it lacks, and renames it unless you decline) or create %q",
+			len(p.Candidates), p.DisplayName))
+	case app == nil:
 		add("create_app", fmt.Sprintf("create the app registration %q", p.DisplayName))
 	default:
-		if len(p.Missing) > 0 || s.needsAppSettings(existing) {
-			add("update_app", fmt.Sprintf("update the app registration %q (only adds what is missing)", existing.DisplayName))
-		}
+		_, acts, _ := s.appChanges(app, ids, false, false)
+		p.Actions = append(p.Actions, acts...)
 	}
 
-	if existing == nil && len(p.Candidates) > 0 {
+	if app == nil && len(p.Candidates) > 0 {
 		// What is left depends on which app the user picks.
 		if s.Kind == KindApp {
 			add("create_secret", "create a client secret named for this computer and store it in the vault (12 months)")
@@ -406,7 +467,7 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 		if hasSP {
 			have, err := s.assignedRoles(ctx, c, spID, g.spID)
 			if err != nil {
-				return nil, s.mapErr(err, "look for the granted application permissions", rolesGrant)
+				return nil, s.mapErr(err, "look for the granted application permissions", s.rolesGrant())
 			}
 			need = false
 			for _, n := range s.permissionNames() {
@@ -418,13 +479,19 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 		if need {
 			add("assign_roles", "grant the application permissions (administrator consent)")
 		}
-		add("create_secret", "create a client secret named for this computer and store it in the vault (12 months)")
+		text := "create a client secret named for this computer and store it in the vault (12 months)"
+		if app != nil {
+			if old := s.ownSecrets(app, ""); len(old) > 0 {
+				text += fmt.Sprintf("; then delete this computer's %d earlier secret(s) from the app", len(old))
+			}
+		}
+		add("create_secret", text)
 	} else {
 		need := true
 		if hasSP {
 			gr, err := s.findGrant(ctx, c, spID, g.spID)
 			if err != nil {
-				return nil, s.mapErr(err, "look for the administrator consent", rolesGrant)
+				return nil, s.mapErr(err, "look for the administrator consent", s.rolesGrant())
 			}
 			if gr != nil {
 				need = len(missingFrom(strings.Fields(gr.Scope), s.permissionNames())) > 0
@@ -437,12 +504,47 @@ func (s *Setup) Plan(ctx context.Context) (*Plan, error) {
 	return p, nil
 }
 
-// needsAppSettings reports whether the delegated app lacks the redirect URI or the public client flag.
-func (s *Setup) needsAppSettings(a *application) bool {
-	if s.Kind != KindDelegated {
-		return false
+// appChanges works out what an existing app registration lacks: the PATCH body
+// (additive only) and one action per change. Plan and Apply both use it, so
+// the plan cannot miss a write. adopting adds the rename and the note.
+func (s *Setup) appChanges(app *application, ids map[string]string, adopting, rename bool) (map[string]any, []Action, []string) {
+	patch := map[string]any{}
+	var acts []Action
+	add := func(code, text string) { acts = append(acts, Action{Code: code, Text: text}) }
+	if adopting {
+		if rename && app.DisplayName != s.Kind.DisplayName() {
+			patch["displayName"] = s.Kind.DisplayName()
+			add("rename_app", fmt.Sprintf("rename the app registration to %q", s.Kind.DisplayName()))
+		}
+		if app.Notes == "" {
+			patch["notes"] = s.notes()
+			add("set_notes", "add a note saying the app registration is managed by E5 Developer Extend")
+		}
 	}
-	return !hasRedirect(a) || a.IsFallbackPublicClient == nil || !*a.IsFallbackPublicClient
+	if tags := unionStrings(app.Tags, s.Kind.Tags()); len(tags) != len(app.Tags) {
+		patch["tags"] = tags
+		add("add_tags", fmt.Sprintf("add the tags %s", strings.Join(missingFrom(app.Tags, s.Kind.Tags()), ", ")))
+	}
+	if s.Kind == KindDelegated {
+		if !hasRedirect(app) {
+			var uris []string
+			if app.PublicClient != nil {
+				uris = slices.Clone(app.PublicClient.RedirectURIs)
+			}
+			patch["publicClient"] = map[string]any{"redirectUris": append(uris, Redirect)}
+			add("add_redirect_uri", "add the redirect URI "+Redirect)
+		}
+		if app.IsFallbackPublicClient == nil || !*app.IsFallbackPublicClient {
+			patch["isFallbackPublicClient"] = true
+			add("set_public_client", "allow public client flows")
+		}
+	}
+	missing := s.missingPermissions(app, ids)
+	if len(missing) > 0 {
+		patch["requiredResourceAccess"] = mergeAccess(app.RequiredResourceAccess, s.permissionNames(), ids, s.permType())
+		add("add_permissions", fmt.Sprintf("add %d permission(s) to the app registration: %s", len(missing), strings.Join(missing, ", ")))
+	}
+	return patch, acts, missing
 }
 
 func hasRedirect(a *application) bool {
@@ -458,6 +560,29 @@ func missingFrom(have, want []string) []string {
 	for _, w := range want {
 		if !set[strings.ToLower(w)] {
 			out = append(out, w)
+		}
+	}
+	return out
+}
+
+func (s *Setup) host() string {
+	if s.Hostname == "" {
+		return "unknown-host"
+	}
+	return s.Hostname
+}
+
+var dateSuffix = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
+
+// ownSecrets returns the key IDs of the secrets this computer created earlier:
+// named exactly "e5extend <hostname> <date>". Nobody else's secret matches.
+func (s *Setup) ownSecrets(app *application, except string) []string {
+	prefix := "e5extend " + s.host() + " "
+	var out []string
+	for _, pc := range app.PasswordCredentials {
+		if pc.KeyID != "" && pc.KeyID != except && strings.HasPrefix(pc.DisplayName, prefix) &&
+			dateSuffix.MatchString(strings.TrimPrefix(pc.DisplayName, prefix)) {
+			out = append(out, pc.KeyID)
 		}
 	}
 	return out
@@ -482,6 +607,9 @@ func (s *Setup) Apply(ctx context.Context, choice Choice) (*Result, error) {
 	if s.Kind == KindApp && s.StoreSecret == nil {
 		return nil, errors.New("appsetup: StoreSecret is required for the application identity")
 	}
+	if choice.Adopt != "" && choice.CreateNew {
+		return nil, errors.New("adopting an existing app registration and creating a new one exclude each other")
+	}
 	c := s.client()
 	g, err := s.resolveGraph(ctx, c)
 	if err != nil {
@@ -496,6 +624,13 @@ func (s *Setup) Apply(ctx context.Context, choice Choice) (*Result, error) {
 		return nil, err
 	}
 	res.ClientID, res.ObjectID, res.DisplayName = app.AppID, app.ID, app.DisplayName
+
+	// Refuse before anything else is done for a secret that could not be kept.
+	if s.Kind == KindApp && s.BeforeSecret != nil {
+		if err := s.BeforeSecret(app.ref()); err != nil {
+			return nil, err
+		}
+	}
 
 	// 2. The service principal.
 	spID, err := s.ensureServicePrincipal(ctx, c, app, res)
@@ -530,31 +665,35 @@ func (s *Setup) Apply(ctx context.Context, choice Choice) (*Result, error) {
 	return res, nil
 }
 
+func matchesApp(a *application, id string) bool {
+	return strings.EqualFold(a.ID, id) || strings.EqualFold(a.AppID, id)
+}
+
 func (s *Setup) ensureApp(ctx context.Context, c *client, ids map[string]string, choice Choice, res *Result) (*application, error) {
-	app, err := s.findTagged(ctx, c)
+	d, err := s.discover(ctx, c)
 	if err != nil {
 		return nil, err
 	}
+	var app *application
 	adopting := false
-	if app == nil {
-		cands, err := s.findCandidates(ctx, c)
-		if err != nil {
-			return nil, err
+	switch {
+	case d.tagged != nil:
+		if choice.Adopt != "" && !matchesApp(d.tagged, choice.Adopt) {
+			return nil, fmt.Errorf("an E5 Developer Extend app already exists: %s; drop --adopt", d.tagged.AppID)
 		}
-		switch {
-		case choice.Adopt != "":
-			for i := range cands {
-				if strings.EqualFold(cands[i].ID, choice.Adopt) || strings.EqualFold(cands[i].AppID, choice.Adopt) {
-					app, adopting = &cands[i], true
-				}
+		app = d.tagged
+	case choice.Adopt != "":
+		for i := range d.cands {
+			if matchesApp(&d.cands[i], choice.Adopt) {
+				app, adopting = &d.cands[i], true
 			}
-			if app == nil {
-				return nil, fmt.Errorf("no existing app registration %q to adopt (it must be named like one of: %s)",
-					choice.Adopt, strings.Join(legacyNames, ", "))
-			}
-		case len(cands) > 0 && !choice.CreateNew:
-			return nil, ErrChoiceRequired
 		}
+		if app == nil {
+			return nil, fmt.Errorf("no existing app registration %q to adopt (it must be named like one of: %s)",
+				choice.Adopt, strings.Join(legacyNames, ", "))
+		}
+	case len(d.cands) > 0 && !choice.CreateNew:
+		return nil, ErrChoiceRequired
 	}
 
 	if app == nil { // create
@@ -582,36 +721,16 @@ func (s *Setup) ensureApp(ctx context.Context, c *client, ids map[string]string,
 		return &created, nil
 	}
 
-	// reuse or adopt: add what is missing, never remove.
-	patch := map[string]any{}
+	// Reuse or adopt: add what is missing, never remove. Merge into the app as
+	// it is now, not into the listing's possibly stale copy.
+	if app, err = s.fresh(ctx, c, app); err != nil {
+		return nil, err
+	}
 	if adopting {
 		res.AdoptedApp = true
-		if choice.Rename && app.DisplayName != s.Kind.DisplayName() {
-			patch["displayName"] = s.Kind.DisplayName()
-			res.Renamed = true
-		}
-		if app.Notes == "" {
-			patch["notes"] = s.notes()
-		}
 	}
-	if tags := unionStrings(app.Tags, s.Kind.Tags()); len(tags) != len(app.Tags) {
-		patch["tags"] = tags
-	}
-	if s.Kind == KindDelegated {
-		if !hasRedirect(app) {
-			var uris []string
-			if app.PublicClient != nil {
-				uris = slices.Clone(app.PublicClient.RedirectURIs)
-			}
-			patch["publicClient"] = map[string]any{"redirectUris": append(uris, Redirect)}
-		}
-		if app.IsFallbackPublicClient == nil || !*app.IsFallbackPublicClient {
-			patch["isFallbackPublicClient"] = true
-		}
-	}
-	missing := s.missingPermissions(app, ids)
+	patch, _, missing := s.appChanges(app, ids, adopting, choice.Rename)
 	if len(missing) > 0 {
-		patch["requiredResourceAccess"] = mergeAccess(app.RequiredResourceAccess, s.permissionNames(), ids, s.permType())
 		res.AddedPermissions = missing
 	}
 	if len(patch) > 0 {
@@ -622,6 +741,7 @@ func (s *Setup) ensureApp(ctx context.Context, c *client, ids map[string]string,
 		res.UpdatedApp = true
 		if name, ok := patch["displayName"].(string); ok {
 			app.DisplayName = name
+			res.Renamed = true
 		}
 	}
 	return app, nil
@@ -674,7 +794,7 @@ func (s *Setup) ensureServicePrincipal(ctx context.Context, c *client, app *appl
 		return id, err
 	}
 	s.progress("creating the service principal...")
-	err = s.retryReplication(ctx, "service principal", func() error {
+	err = s.retryReplication(ctx, "service principal", res.CreatedApp, func() error {
 		var sp struct {
 			ID string `json:"id"`
 		}
@@ -686,7 +806,7 @@ func (s *Setup) ensureServicePrincipal(ctx context.Context, c *client, app *appl
 			return nil
 		}
 		var ae *APIError
-		if errors.As(err, &ae) && strings.Contains(strings.ToLower(ae.Message), "already exist") {
+		if errors.As(err, &ae) && ae.alreadyExists() {
 			// Another run created it a moment ago.
 			id, err = s.servicePrincipalID(ctx, c, app.AppID)
 			if err == nil && id != "" {
@@ -703,10 +823,11 @@ func (s *Setup) ensureServicePrincipal(ctx context.Context, c *client, app *appl
 
 func (s *Setup) ensureGrant(ctx context.Context, c *client, g *graphInfo, spID string, res *Result) error {
 	want := s.permissionNames()
-	return s.retryReplication(ctx, "administrator consent", func() error {
+	roles := s.rolesGrant()
+	return s.retryReplication(ctx, "administrator consent", res.CreatedServicePrincipal, func() error {
 		cur, err := s.findGrant(ctx, c, spID, g.spID)
 		if err != nil {
-			return s.mapErr(err, "grant administrator consent", rolesGrant)
+			return s.mapErr(err, "grant administrator consent", roles)
 		}
 		if cur == nil {
 			s.progress("granting administrator consent...")
@@ -715,8 +836,19 @@ func (s *Setup) ensureGrant(ctx context.Context, c *client, g *graphInfo, spID s
 			}, nil)
 			if err == nil {
 				res.ConsentAdded = slices.Clone(want)
+				return nil
 			}
-			return s.mapErr(err, "grant administrator consent", rolesGrant)
+			var ae *APIError
+			if !errors.As(err, &ae) || !ae.alreadyExists() {
+				return s.mapErr(err, "grant administrator consent", roles)
+			}
+			// The listing was behind: the consent exists. Read it and top it up.
+			if cur, err = s.findGrant(ctx, c, spID, g.spID); err != nil {
+				return s.mapErr(err, "grant administrator consent", roles)
+			}
+			if cur == nil {
+				return fmt.Errorf("grant administrator consent: Graph says it exists but does not list it yet: %w", ae)
+			}
 		}
 		have := strings.Fields(cur.Scope)
 		add := missingFrom(have, want)
@@ -729,15 +861,16 @@ func (s *Setup) ensureGrant(ctx context.Context, c *client, g *graphInfo, spID s
 		if err == nil {
 			res.ConsentAdded = add
 		}
-		return s.mapErr(err, "grant administrator consent", rolesGrant)
+		return s.mapErr(err, "grant administrator consent", roles)
 	})
 }
 
 func (s *Setup) ensureRoles(ctx context.Context, c *client, g *graphInfo, ids map[string]string, spID string, res *Result) error {
-	return s.retryReplication(ctx, "application permissions", func() error {
+	roles := s.rolesGrant()
+	return s.retryReplication(ctx, "application permissions", res.CreatedServicePrincipal, func() error {
 		have, err := s.assignedRoles(ctx, c, spID, g.spID)
 		if err != nil {
-			return s.mapErr(err, "grant the application permissions", rolesGrant)
+			return s.mapErr(err, "grant the application permissions", roles)
 		}
 		for _, n := range s.permissionNames() {
 			if have[ids[n]] {
@@ -747,8 +880,13 @@ func (s *Setup) ensureRoles(ctx context.Context, c *client, g *graphInfo, ids ma
 			err := c.do(ctx, "grant the application permissions", http.MethodPost,
 				"/servicePrincipals/"+g.spID+"/appRoleAssignedTo",
 				map[string]any{"principalId": spID, "resourceId": g.spID, "appRoleId": ids[n]}, nil)
+			var ae *APIError
+			if errors.As(err, &ae) && ae.alreadyExists() {
+				have[ids[n]] = true // assigned meanwhile (or the listing was behind)
+				continue
+			}
 			if err != nil {
-				return s.mapErr(err, "grant the application permissions", rolesGrant)
+				return s.mapErr(err, "grant the application permissions", roles)
 			}
 			have[ids[n]] = true
 			res.ConsentAdded = append(res.ConsentAdded, n)
@@ -757,42 +895,79 @@ func (s *Setup) ensureRoles(ctx context.Context, c *client, g *graphInfo, ids ma
 	})
 }
 
-func (s *Setup) createSecret(ctx context.Context, c *client, app *application, res *Result) error {
-	host := s.Hostname
-	if host == "" {
-		host = "unknown-host"
+// RevokeSecret deletes one client secret from the app. If that fails, the
+// error says plainly that the secret is still live in Entra (it never holds
+// the secret's value).
+func (s *Setup) RevokeSecret(ctx context.Context, objectID, keyID, name string) error {
+	// Revoking must still work after the caller was cancelled.
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
+	err := s.client().do(ctx, "revoke the client secret", http.MethodPost, "/applications/"+objectID+"/removePassword",
+		map[string]any{"keyId": keyID}, nil)
+	if err != nil {
+		return fmt.Errorf("a client secret named %q with key ID %s is still live in Entra and must be deleted "+
+			"(Entra admin center, App registrations, Certificates & secrets): %w", name, keyID, err)
 	}
+	return nil
+}
+
+func (s *Setup) createSecret(ctx context.Context, c *client, app *application, res *Result) error {
 	now := s.now()
-	name := fmt.Sprintf("e5extend %s %s", host, now.Format("2006-01-02"))
-	end := now.AddDate(0, 12, 0)
+	name := fmt.Sprintf("e5extend %s %s", s.host(), now.Format("2006-01-02"))
+	end := now.AddDate(0, 12, 0).UTC()
 	s.progress("creating a client secret %q...", name)
 	var out struct {
 		KeyID      string `json:"keyId"`
 		SecretText string `json:"secretText"`
 	}
-	err := s.retryReplication(ctx, "client secret", func() error {
+	err := s.retryReplication(ctx, "client secret", res.CreatedApp, func() error {
 		return c.do(ctx, "create the client secret", http.MethodPost, "/applications/"+app.ID+"/addPassword",
 			map[string]any{"passwordCredential": map[string]any{
-				"displayName": name, "endDateTime": end.UTC().Format(time.RFC3339),
+				"displayName": name, "endDateTime": end.Format(time.RFC3339),
 			}}, &out)
 	})
 	if err != nil {
 		return s.mapErr(err, "create the client secret", rolesApp)
 	}
 	if out.SecretText == "" {
+		if out.KeyID != "" {
+			if rerr := s.RevokeSecret(ctx, app.ID, out.KeyID, name); rerr != nil {
+				return fmt.Errorf("create the client secret: Graph returned no secret; %w", rerr)
+			}
+		}
 		return errors.New("create the client secret: Graph returned no secret")
 	}
 	secret := out.SecretText
 	out.SecretText = ""
 	if err := s.StoreSecret(secret); err != nil {
 		// Do not leave a secret nobody holds.
-		_ = c.do(ctx, "revoke the client secret", http.MethodPost, "/applications/"+app.ID+"/removePassword",
-			map[string]any{"keyId": out.KeyID}, nil)
+		if rerr := s.RevokeSecret(ctx, app.ID, out.KeyID, name); rerr != nil {
+			return fmt.Errorf("store the client secret: %w; %w", err, rerr)
+		}
 		return fmt.Errorf("store the client secret: %w", err)
 	}
 	res.SecretName = name
+	res.SecretKeyID = out.KeyID
 	res.SecretExpires = end.Format("2006-01-02")
+
+	// The new secret is safe in the vault: drop this computer's earlier ones.
+	for _, k := range s.ownSecrets(app, out.KeyID) {
+		err := c.do(ctx, "remove an earlier client secret", http.MethodPost, "/applications/"+app.ID+"/removePassword",
+			map[string]any{"keyId": k}, nil)
+		if err != nil {
+			s.progress("could not remove the earlier client secret with key ID %s: %v", k, err)
+			continue
+		}
+		res.RemovedSecrets = append(res.RemovedSecrets, k)
+	}
 	return nil
+}
+
+func (s *Setup) rolesGrant() []string {
+	if s.Kind == KindApp {
+		return rolesGrantApp
+	}
+	return rolesGrantDelegated
 }
 
 // mapErr turns a 403 into a RoleError naming the roles that would allow it.
