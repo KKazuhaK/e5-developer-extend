@@ -1,6 +1,6 @@
 # 代码签名（macOS 与 Windows）
 
-本文比较 E5 Renew 的 macOS 和 Windows 发布包可以用的签名方案，给出建议和仓库所有者要亲自做的事。
+本文比较 E5 Developer Extend 的 macOS 和 Windows 发布包可以用的签名方案，给出建议和仓库所有者要亲自做的事。
 它接着 [release.md](release.md) 第 7 节“以后再做”里的代码签名一项。
 
 - 资料核对日期：**2026-11-16**。价格、资格和流程都会变，每条结论后面都标了来源；实际注册或付款前请再看一遍原页面。
@@ -27,10 +27,10 @@ CI 要装 SimplySign 虚拟令牌、处理手机动态码，证书每 15 个月�
 
 | 发布物 | 现在怎么做 | 签名情况 |
 |---|---|---|
-| `E5-Renew_<v>_macos_universal.dmg` | `macos` 任务（`macos-latest`），`scripts/release/macos.sh`：`lipo` 合成通用二进制 → 拼 `.app` → `codesign` → `hdiutil create` | **ad-hoc**（`codesign -s -`）：先签 `Contents/MacOS/e5renew`，再签整个 `.app`；dmg 本身不签 |
-| `e5renew_<v>_darwin_universal.tar.gz` | `cli` 任务（Linux），`wails3 tool lipo` | 不签（只有 Go 链接器给 arm64 加的 ad-hoc 签名，合成后是否保留没核实过） |
-| `E5-Renew_<v>_windows_{amd64,arm64}_setup.exe` | `windows` 任务（`windows-latest`），`scripts/release/windows.sh`：`go build`（带 `wails3 generate syso` 的资源）→ `makensis` | 不签；NSIS 运行时生成的 `uninstall.exe` 也不签 |
-| `e5renew_<v>_windows_{amd64,arm64}.zip` | `cli` 任务（**Linux**）里交叉编译 | 不签 |
+| `E5-Developer-Extend_<v>_macos_universal.dmg` | `macos` 任务（`macos-latest`），`scripts/release/macos.sh`：`lipo` 合成通用二进制 → 拼 `.app` → `codesign` → `hdiutil create` | **ad-hoc**（`codesign -s -`）：先签 `Contents/MacOS/e5extend`，再签整个 `.app`；dmg 本身不签 |
+| `e5extend_<v>_darwin_universal.tar.gz` | `cli` 任务（Linux），`wails3 tool lipo` | 不签（只有 Go 链接器给 arm64 加的 ad-hoc 签名，合成后是否保留没核实过） |
+| `E5-Developer-Extend_<v>_windows_{amd64,arm64}_setup.exe` | `windows` 任务（`windows-latest`），`scripts/release/windows.sh`：`go build`（带 `wails3 generate syso` 的资源）→ `makensis` | 不签；NSIS 运行时生成的 `uninstall.exe` 也不签 |
+| `e5extend_<v>_windows_{amd64,arm64}.zip` | `cli` 任务（**Linux**）里交叉编译 | 不签 |
 
 已经留好的位置：
 
@@ -142,7 +142,7 @@ SignPath Foundation 用**它自己的证书**替开源项目签名，项目本�
 - **在 GitHub Actions 里怎么跑**：
   - 用 `azure/login` 走 **OIDC 联合凭据**（工作流需要 `id-token: write`），不需要在 GitHub 里存客户端密钥；
     Entra 应用只给 “Artifact Signing Certificate Profile Signer” 角色。普通联合凭据的 subject 必须完全匹配，不能写 `v*` 这样的通配符，
-    所以把 subject 设成 `repo:KKazuhaK/e5-renew:environment:release`，再在 GitHub 上把 `release` environment 限制为只允许 `v*` 标签。
+    所以把 subject 设成 `repo:KKazuhaK/e5-developer-extend:environment:release`，再在 GitHub 上把 `release` environment 限制为只允许 `v*` 标签。
     （Entra 有支持通配的“灵活联合凭据”，但还在预览阶段，不用。）
   - 签名可以用 `azure/artifact-signing-action`（[仓库][ms-as-action]），也可以直接用 Windows SDK 的 `signtool` + Artifact Signing 的 dlib 和一个 `metadata.json`
     （终结点、账户名、证书配置文件名）。`windows-latest` 上有 `signtool`，但**没有** dlib（`Azure.CodeSigning.Dlib.dll`）：
@@ -157,8 +157,8 @@ SignPath Foundation 用**它自己的证书**替开源项目签名，项目本�
 - 但 Store 收 EXE/MSI 安装包时**不会替你签名**，要求安装包和里面的 PE 文件已经用受信任 CA 的证书签好（[代码签名选项][ms-signing-options]）。
   所以“把现在的 NSIS 安装包上架 Store”不能代替签名，只能在签名之后作为额外渠道。
 - 改成 MSIX 和本项目的长期运行设计冲突：MSIX 装在 `C:\Program Files\WindowsApps\<包名>_<版本>_…`，**每个版本路径都不同**，
-  而后台服务注册的是固定路径的计划任务（`e5renew service install`），开机启动项也写的是程序路径——这和 release.md 第 2 节不做 AppImage 的理由一样。
-  另外 MSIX 有文件系统和注册表虚拟化，`%APPDATA%\e5renew` 等位置的行为要重新验证。
+  而后台服务注册的是固定路径的计划任务（`e5extend service install`），开机启动项也写的是程序路径——这和 release.md 第 2 节不做 AppImage 的理由一样。
+  另外 MSIX 有文件系统和注册表虚拟化，`%APPDATA%\e5extend` 等位置的行为要重新验证。
 - 结论：**现在不做**。如果以后想让 Store 成为主要渠道，要先单独设计 MSIX 下的后台任务（例如改用包内声明的启动任务），工作量远大于签名本身。
 
 ## 3. SmartScreen：签了名也不会马上消失
@@ -168,7 +168,7 @@ SignPath Foundation 用**它自己的证书**替开源项目签名，项目本�
 - 未签名：提示写“未知发布者”，而且**每个新版本都从零开始**积累信誉。
 - 签了名：提示里显示已验证的发布者名字；信誉跟着证书身份走，**之后的版本可以继承**。
 
-E5 Renew 下载量不大，可能要好几个版本才能积累到不再提示。签名后要更新安装说明（`docs/user/install.md`）和 Release 说明里的“未签名”提示：
+E5 Developer Extend 下载量不大，可能要好几个版本才能积累到不再提示。签名后要更新安装说明（`docs/user/install.md`）和 Release 说明里的“未签名”提示：
 macOS 那段可以删掉；Windows 那段改成“可能会显示‘已验证的发布者：……’，点‘仍要运行’”。
 
 ## 4. 签名能解锁什么
@@ -199,7 +199,7 @@ macOS 那段可以删掉；Windows 那段改成“可能会显示‘已验证的
 1. 新步骤（只在有密钥时运行）：把 base64 的 `.p12` 解码，导入一个临时钥匙串
    （`security create-keychain` → `unlock-keychain` → `list-keychains -d user -s <临时钥匙串> …`（加进搜索列表，否则 `codesign` 找不到身份）→ `import` → `set-key-partition-list`），
    导出 `MACOS_SIGN_IDENTITY="Developer ID Application: <姓名> (<Team ID>)"`。
-2. `macos.sh` 现有逻辑：签 `Contents/MacOS/e5renew` → 签 `.app`（已经带 hardened runtime 和时间戳）。
+2. `macos.sh` 现有逻辑：签 `Contents/MacOS/e5extend` → 签 `.app`（已经带 hardened runtime 和时间戳）。
    需要先在 CI 上确认 hardened runtime 下 WebView 正常：Wails 用的是系统 WKWebView，一般不需要额外 entitlements；如果公证或运行报错，再加 `--entitlements`。
 3. 新增：`hdiutil create` 之后 `codesign` 签 dmg 本身。
 4. 新增：`xcrun notarytool submit "$dmg" --key AuthKey.p8 --key-id … --issuer … --wait`，失败时 `notarytool log` 打印原因并让任务失败。
@@ -207,7 +207,7 @@ macOS 那段可以删掉；Windows 那段改成“可能会显示‘已验证的
    只给 dmg 钉票据时，从 dmg 拷出去的 `.app` 本身没有票据，第一次打开要联网让 Gatekeeper 在线查。
    想离线也能打开，就在 `hdiutil create` 之前先把 `.app` 打成 zip 公证一次、`stapler staple` 到 `.app` 上（多一次公证，几分钟）。
 6. 冒烟测试加 `spctl -a -t open --context context:primary-signature -vv "$dmg"` 和对 `.app` 的 `spctl -a -vv`，确认 Gatekeeper 接受。
-7. **命令行 tar 包**：`darwin_universal` 的 `e5renew` 现在在 Linux 的 `cli` 任务里合成，没法签。建议改到 `macos` 任务里打这个 tar 包：
+7. **命令行 tar 包**：`darwin_universal` 的 `e5extend` 现在在 Linux 的 `cli` 任务里合成，没法签。建议改到 `macos` 任务里打这个 tar 包：
    和 `.app` 里那份是同一个文件，签名 + 公证一次即可（裸二进制和 tar 包不能 staple，Gatekeeper 会在线查公证票据）。
 
 | 密钥 / 变量 | 内容 |
@@ -222,12 +222,12 @@ macOS 那段可以删掉；Windows 那段改成“可能会显示‘已验证的
 
 1. 任务加 `permissions: id-token: write`，`azure/login` 用 OIDC 登录。
 2. `windows.sh` 在 `go build` 之后、`makensis` 之前，用 `signtool sign /fd SHA256 /tr http://timestamp.acs.microsoft.com /td SHA256 /dlib … /dmdf metadata.json`
-   签 `e5renew.exe`、`e5renew-bg.exe`、`e5renew-gui.exe`（不签 `MicrosoftEdgeWebview2Setup.exe`）。
+   签 `e5extend.exe`、`e5extend-bg.exe`、`e5extend-gui.exe`（不签 `MicrosoftEdgeWebview2Setup.exe`）。
 3. `windows.sh` 在有凭据时写一个 `sign.cmd` 包装脚本（里面是完整的 `signtool … %1` 命令），只把它的路径用 `/DSIGN_CMD=…` 传给 `makensis`，
    避免 signtool、dlib、metadata 路径经过 bash → `cygpath` → NSIS 多层引号。`installer.nsi` 里用 `!ifdef SIGN_CMD` 包住两行
    （没传时什么都不做）：`!uninstfinalize '"${SIGN_CMD}" "%1"' = 0`（签卸载程序）和 `!finalize '"${SIGN_CMD}" "%1"' = 0`（签安装包）。
    这两个命令要 NSIS 3.08 以上，CI 里要检查 `makensis -VERSION`。
-4. **命令行 zip**：现在在 Linux 的 `cli` 任务里交叉编译，没有签名。建议改成在 `windows` 任务里，用第 2 步已经签好的 `e5renew.exe`、`e5renew-bg.exe` 打 zip，
+4. **命令行 zip**：现在在 Linux 的 `cli` 任务里交叉编译，没有签名。建议改成在 `windows` 任务里，用第 2 步已经签好的 `e5extend.exe`、`e5extend-bg.exe` 打 zip，
    和安装包里的文件完全相同，只签一次。要改的地方：Git Bash 没有 `zip`，改用 `7z`（runner 自带）或 `Compress-Archive`；
    `cli.sh` 里 `touch -d @SOURCE_DATE_EPOCH` + `zip -X` 的可复现写法要移植过去（签名带时间戳，签过的文件本来就不可逐字节复现，只能保证未签名部分一致）；
    同时从 `cli.sh` 和 `cli` 任务的冒烟测试里去掉 Windows zip，否则 `publish` 用 `merge-multiple` 汇总时会撞名。
