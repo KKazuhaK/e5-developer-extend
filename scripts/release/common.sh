@@ -32,7 +32,7 @@ COMMIT=$(git rev-parse --short=12 HEAD)
 DATE=$(git log -1 --format=%cI)
 SOURCE_DATE_EPOCH=$(git log -1 --format=%ct)
 export VERSION NUM_VERSION PKG_VERSION SOURCE_DATE_EPOCH
-VPKG=github.com/KKazuhaK/e5-renew/internal/version
+VPKG=github.com/KKazuhaK/e5-developer-extend/internal/version
 LDFLAGS="-s -w -X $VPKG.Version=$VERSION -X $VPKG.Commit=$COMMIT -X $VPKG.Date=$DATE"
 
 WAILS3=${WAILS3:-wails3}
@@ -47,7 +47,7 @@ make_syso() {
 {
 	"fixed": {"file_version": "$NUM_VERSION.0", "product_version": "$NUM_VERSION.0"},
 	"info": {"0409": {
-		"ProductName": "E5 Renew",
+		"ProductName": "E5 Developer Extend",
 		"FileDescription": "$desc",
 		"CompanyName": "KKazuhaK",
 		"LegalCopyright": "MIT License",
@@ -61,20 +61,20 @@ JSON
 		-out "$dir/rsrc_windows_$arch.syso" >/dev/null
 	rm -f "$info"
 }
-clean_syso() { rm -f cmd/e5renew/rsrc_windows_*.syso gui/rsrc_windows_*.syso; }
+clean_syso() { rm -f cmd/e5extend/rsrc_windows_*.syso gui/rsrc_windows_*.syso; }
 
 # build_cli <goos> <goarch> <out dir>: the command-line program, plus the
-# console-less e5renew-bg.exe on Windows.
+# console-less e5extend-bg.exe on Windows.
 build_cli() {
 	local goos=$1 goarch=$2 out=$3
 	mkdir -p "$out"
 	if [ "$goos" = windows ]; then
-		make_syso "$goarch" cmd/e5renew "E5 Renew command line"
-		GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$out/e5renew.exe" ./cmd/e5renew
-		GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS -H=windowsgui" -o "$out/e5renew-bg.exe" ./cmd/e5renew
+		make_syso "$goarch" cmd/e5extend "E5 Developer Extend command line"
+		GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$out/e5extend.exe" ./cmd/e5extend
+		GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS -H=windowsgui" -o "$out/e5extend-bg.exe" ./cmd/e5extend
 		clean_syso
 	else
-		GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$out/e5renew" ./cmd/e5renew
+		GOOS=$goos GOARCH=$goarch CGO_ENABLED=0 go build -trimpath -ldflags "$LDFLAGS" -o "$out/e5extend" ./cmd/e5extend
 	fi
 }
 
@@ -88,12 +88,12 @@ build_frontend() {
 # build_gui <goos> <goarch> <out dir>: the desktop app with the real frontend.
 # Linux and macOS need CGO for the target, so build them on that system.
 build_gui() {
-	local goos=$1 goarch=$2 out=$3 ldflags=$LDFLAGS exe=e5renew-gui
+	local goos=$1 goarch=$2 out=$3 ldflags=$LDFLAGS exe=e5extend-gui
 	mkdir -p "$out"
 	if [ "$goos" = windows ]; then
-		make_syso "$goarch" gui "E5 Renew"
+		make_syso "$goarch" gui "E5 Developer Extend"
 		ldflags="$ldflags -H=windowsgui"
-		exe=e5renew-gui.exe
+		exe=e5extend-gui.exe
 	fi
 	GOOS=$goos GOARCH=$goarch CGO_ENABLED=$([ "$goos" = windows ] && echo 0 || echo 1) \
 		go build -trimpath -tags frontend -ldflags "$ldflags" -o "$out/$exe" ./gui
@@ -101,7 +101,7 @@ build_gui() {
 }
 
 # plain_names <dir>: replaces "~" in package file names (a pre-release such as
-# e5renew_1.2.0~rc.1-1_amd64.deb) with "-". GitHub renames release assets with
+# e5extend_1.2.0~rc.1-1_amd64.deb) with "-". GitHub renames release assets with
 # unusual characters, which would break SHA256SUMS. Only the file name changes;
 # the version inside the package keeps the "~" so it sorts before the release.
 plain_names() {

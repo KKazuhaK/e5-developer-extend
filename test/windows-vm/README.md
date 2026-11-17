@@ -20,7 +20,7 @@ CI 测不到的 Windows 行为（登录时启动、有没有控制台窗口、�
 ## 创建虚拟机
 
 ```bash
-virt-install --connect qemu:///system --name test-win11-e5renew --memory 8192 --vcpus 4 \
+virt-install --connect qemu:///system --name test-win11-e5extend --memory 8192 --vcpus 4 \
   --cpu host-passthrough --os-variant win11 --boot hd,cdrom --tpm none \
   --disk pool=default,size=64,format=qcow2,bus=sata,sparse=yes \
   --disk vol=default/<windows>.iso,device=cdrom,bus=sata \
@@ -50,9 +50,9 @@ virt-install --connect qemu:///system --name test-win11-e5renew --memory 8192 --
 
 | 项目 | 结果 |
 |---|---|
-| `vault init` 把主密钥存进凭据管理器（`cmdkey` 能看到 `e5renew:master-key`） | ✓ |
+| `vault init` 把主密钥存进凭据管理器（`cmdkey` 能看到 `e5extend:master-key`） | ✓ |
 | Client Secret 不以明文出现在磁盘上 | ✓ |
-| `service install`：任务设置为 `PT0S`、电池下不停止、`IgnoreNew`、登录触发器加 `PT5M` 重复、受限权限运行 `e5renew-bg.exe` | ✓ |
+| `service install`：任务设置为 `PT0S`、电池下不停止、`IgnoreNew`、登录触发器加 `PT5M` 重复、受限权限运行 `e5extend-bg.exe` | ✓ |
 | 引擎在桌面会话里运行，**没有控制台窗口**（截图确认，`MainWindowHandle=0`） | ✓ |
 | 结束引擎进程后，计划任务自动重新拉起（这次 35 秒） | ✓ |
 | 重启虚拟机：自动登录 1 秒后引擎由登录触发器启动，没有窗口 | ✓ |

@@ -14,10 +14,10 @@ build_frontend
 build_gui linux "$arch" "$DIST/gui/linux_$arch"
 
 rm -rf "$DIST/stage" && mkdir -p "$DIST/stage"
-cp "$DIST/gui/linux_$arch/e5renew-gui" "$DIST/stage/"
+cp "$DIST/gui/linux_$arch/e5extend-gui" "$DIST/stage/"
 for fmt in deb rpm; do
 	GOARCH=$arch nfpm package -f packaging/linux/nfpm-desktop.yaml -p "$fmt" -t "$OUT/" >/dev/null
 done
 rm -rf "$DIST/stage"
 plain_names "$OUT"
-ls -l "$OUT"/e5renew-desktop*
+ls -l "$OUT"/e5extend-desktop*

@@ -37,7 +37,7 @@ jobs:
       - uses: docker/metadata-action@v6
         id: meta
         with:
-          images: ghcr.io/kkazuhak/e5-renew
+          images: ghcr.io/kkazuhak/e5-developer-extend
           tags: |
             type=semver,pattern={{version}},value=${{ github.event.release.tag_name }}
             type=semver,pattern={{major}}.{{minor}},value=${{ github.event.release.tag_name }},enable=${{ !github.event.release.prerelease }}

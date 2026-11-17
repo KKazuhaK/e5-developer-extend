@@ -6,19 +6,19 @@
 set -euo pipefail
 
 case "$(uname -s)" in
-  Linux*) os=linux; exe=e5renew ;;
-  Darwin*) os=darwin; exe=e5renew ;;
-  MINGW* | MSYS* | CYGWIN*) os=windows; exe=e5renew.exe ;;
+  Linux*) os=linux; exe=e5extend ;;
+  Darwin*) os=darwin; exe=e5extend ;;
+  MINGW* | MSYS* | CYGWIN*) os=windows; exe=e5extend.exe ;;
   *) echo "unsupported OS"; exit 1 ;;
 esac
 
 bin="$PWD/bin"
 E="$bin/$exe"
 mkdir -p "$bin"
-CGO_ENABLED=0 go build -o "$E" ./cmd/e5renew
+CGO_ENABLED=0 go build -o "$E" ./cmd/e5extend
 if [ "$os" = windows ]; then
-  # The task runs the console-less build when it sits next to e5renew.exe.
-  CGO_ENABLED=0 go build -ldflags=-H=windowsgui -o "$bin/e5renew-bg.exe" ./cmd/e5renew
+  # The task runs the console-less build when it sits next to e5extend.exe.
+  CGO_ENABLED=0 go build -ldflags=-H=windowsgui -o "$bin/e5extend-bg.exe" ./cmd/e5extend
 fi
 
 log() { echo "== $(date -u +%H:%M:%S) $*"; }
@@ -51,7 +51,7 @@ wait_engine() { # wait_engine <want ok|fail> <seconds>
 
 engine_pids() {
   if [ "$os" = windows ]; then
-    tasklist //FI "IMAGENAME eq e5renew-bg.exe" //FO CSV //NH | grep -i e5renew-bg | cut -d, -f2 | tr -d '"' || true
+    tasklist //FI "IMAGENAME eq e5extend-bg.exe" //FO CSV //NH | grep -i e5extend-bg | cut -d, -f2 | tr -d '"' || true
   else
     pgrep -f "$E run" || true
   fi
@@ -59,7 +59,7 @@ engine_pids() {
 
 crash_engine() {
   if [ "$os" = windows ]; then
-    taskkill //F //IM e5renew-bg.exe
+    taskkill //F //IM e5extend-bg.exe
   else
     pkill -9 -f "$E run"
   fi
