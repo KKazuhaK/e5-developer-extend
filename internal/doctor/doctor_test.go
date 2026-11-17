@@ -288,7 +288,7 @@ func TestScopes(t *testing.T) {
 	r := newRig(t)
 	r.au.tok.Scopes = []string{"Unrelated.Thing"}
 	expect(t, r.run(false), "account.main.scopes", Fail, "no API")
-	r.au.tok.Scopes = []string{"User.Read"}
+	r.au.tok.Scopes = []string{"Contacts.Read"}
 	expect(t, r.run(false), "account.main.scopes", Warn, "usable")
 	r.au.tok.Scopes = manyScopes
 	expect(t, r.run(false), "account.main.scopes", OK, "usable")
