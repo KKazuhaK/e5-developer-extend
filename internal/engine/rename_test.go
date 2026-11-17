@@ -102,15 +102,21 @@ func TestRenameArrivingAfterTheConfigStillFindsTheState(t *testing.T) {
 	f.start()
 	f.round("main")
 
+	// Like ops: the note comes first, then the config; the rename file follows.
+	intent, err := store.SaveRenameIntent(f.dir, store.Rename{From: "main", To: "renamed", ID: "r1"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	f.renameConfig(path, "renamed")
 	_ = TriggerReload(f.dir)
 	f.tickWait()
 	if got := f.acct("renamed"); got.Totals.Rounds != 0 {
 		t.Fatalf("setup: the new name should start empty: %+v", got)
 	}
-	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed"}}); err != nil {
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed", ID: "r1"}}); err != nil {
 		t.Fatal(err)
 	}
+	_ = os.Remove(intent)
 	_ = TriggerReload(f.dir)
 	f.tickWait()
 	if got := f.acct("renamed"); got.Totals.Rounds != 1 {
@@ -276,5 +282,72 @@ func TestUncommittedRenameIsIgnoredUntilTheConfigHasIt(t *testing.T) {
 	}
 	if store.HasPendingRename(f.dir) {
 		t.Error("the file was left")
+	}
+}
+
+// Remove main (its state is dropped, not kept for a rename), add an unrelated
+// new main, and rename it before its first round: the new account moves with
+// nothing of the removed one.
+func TestRenameOfANewAccountDoesNotInheritARemovedOneOfTheSameName(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"), delegatedAcct("other"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) {
+		as.PasswordBlocked = &store.PasswordBlock{Code: "AADSTS50126", At: f.clock.Now()}
+	})
+
+	f.renameConfig(path, "other") // main removed
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	f.renameConfig(path, "main", "other") // an unrelated account of that name
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("main"); got.Totals.Rounds != 0 {
+		t.Fatalf("setup: the new main should be empty: %+v", got)
+	}
+
+	f.renameConfig(path, "fresh", "other")
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "fresh", ID: "r9"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("fresh"); got.PasswordBlocked != nil || got.Totals.Rounds != 0 {
+		t.Errorf("fresh inherited the removed account: %+v", got)
+	}
+}
+
+// The same rename applied twice (its file could not be deleted, or the engine
+// died between the save and the cleanup) leaves the state where it is.
+func TestApplyingTheSameRenameTwiceChangesNothing(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+	f.renameConfig(path, "renamed")
+	r := []store.Rename{{From: "main", To: "renamed", ID: "same"}}
+	for i := 0; i < 2; i++ {
+		if err := store.SavePendingRenames(f.dir, time.Time{}, r); err != nil {
+			t.Fatal(err)
+		}
+		_ = TriggerReload(f.dir)
+		f.tickWait()
+		if got := f.acct("renamed"); got.Totals.Rounds != 1 {
+			t.Fatalf("after apply %d: %+v", i+1, got)
+		}
+	}
+	// A second run of the command that was killed before it saved: another ID, same names.
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed", ID: "rerun"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("renamed"); got.Totals.Rounds != 1 {
+		t.Errorf("a rerun wiped the state: %+v", got)
 	}
 }

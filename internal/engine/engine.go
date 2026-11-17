@@ -585,7 +585,9 @@ func (e *Engine) init() {
 		e.tidyRenamesLocked()
 		e.pruneTenantsLocked()
 		fixed = e.fixFarFutureLocked(now)
-		e.saveLocked()
+		if e.saveLocked() {
+			claimed.finish() // only now: a file that outlives a failed save is applied again, which changes nothing
+		}
 	})
 	e.reportRenames(renamed)
 	e.reportClockFix(fixed)
@@ -630,9 +632,16 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 		// state over by name, so a name that is removed and added again starts empty.
 		delete(e.renamedTo, a.Name)
 	}
+	var froms map[string]bool // old names of renames in progress, read when an account vanishes
 	for n, as := range e.state.Accounts {
 		if !names[n] {
-			e.detachLocked(n, as, now)
+			if froms == nil {
+				froms = store.RenameFroms(e.o.DataDir)
+			}
+			// Set the state aside only for an account a rename is taking away; a removal drops it.
+			if _, target := e.renamedTo[n]; froms[n] || target {
+				e.detachLocked(n, as, now)
+			}
 			delete(e.state.Accounts, n)
 			delete(e.rt, n)
 		}
@@ -893,7 +902,9 @@ func (e *Engine) reloadConfig() {
 		e.syncAccountsLocked(e.clock.Now(), false)
 		e.tidyRenamesLocked()
 		e.pruneTenantsLocked()
-		e.saveLocked()
+		if e.saveLocked() {
+			claimed.finish()
+		}
 	})
 	e.reportRenames(renamed)
 	e.adoptPending()

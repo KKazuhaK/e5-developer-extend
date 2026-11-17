@@ -125,6 +125,10 @@ type State struct {
 	// The call log keeps the name an entry was written under, so reading the
 	// log of an account also reads the entries of these names.
 	RenamedFrom map[string][]string `json:"renamed_from,omitempty"`
+	// RenameIDs are the IDs of the latest renames applied to this state, so
+	// applying one a second time (a claimed file that could not be deleted, a
+	// crash between the write and the cleanup) changes nothing.
+	RenameIDs []string `json:"rename_ids,omitempty"`
 }
 
 // NewState returns an empty state.

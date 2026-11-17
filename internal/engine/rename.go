@@ -57,7 +57,7 @@ func (e *Engine) claimRenames() *claimedRenames {
 	return &claimedRenames{rs: rs, written: written, files: files}
 }
 
-// finishClaim deletes the claimed files once their renames are used.
+// finish deletes the claimed files once their renames are applied and saved.
 func (c *claimedRenames) finish() {
 	if c == nil {
 		return
@@ -99,7 +99,6 @@ func (e *Engine) applyRenamesLocked(c *claimedRenames) []store.Rename {
 		if !r.Valid(e.cfgHas) {
 			continue
 		}
-		applied = append(applied, r)
 		// The configuration may have run ahead of this rename: an account that has
 		// not been renamed yet (a to tmp, while b to a already saved) then has an
 		// empty state made for its name, and the real one was set aside.
@@ -107,7 +106,11 @@ func (e *Engine) applyRenamesLocked(c *claimedRenames) []store.Rename {
 			delete(e.state.Accounts, r.From)
 		}
 		delete(e.made, r.From)
-		e.state.ApplyRename(r.From, r.To, detached)
+		if !e.state.ApplyRenameOnce(r, detached) {
+			continue // applied before (its file could not be deleted, or the state was saved before a crash)
+		}
+		applied = append(applied, r)
+		delete(e.made, r.To)
 		if rt := e.rt[r.From]; rt != nil {
 			rt.name = r.To
 			e.rt[r.To] = rt
@@ -120,7 +123,6 @@ func (e *Engine) applyRenamesLocked(c *claimedRenames) []store.Rename {
 		}
 		e.renamedTo[r.To] = e.clock.Now()
 	}
-	c.finish()
 	for n := range e.detached {
 		if _, still := detached[n]; !still {
 			delete(e.detached, n)

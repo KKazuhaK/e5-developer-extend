@@ -22,6 +22,8 @@ const maxRenamedFrom = 8
 type Rename struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+	// ID is unique to the rename; a state remembers the IDs it applied.
+	ID string `json:"id,omitempty"`
 	// Uncommitted marks a rename written before its config.toml was saved (by a
 	// process that holds the engine lock and applies it itself). Whoever finds
 	// it later, after a crash, applies it only if the config has the new name
@@ -40,6 +42,33 @@ func (r Rename) Valid(has func(string) bool) bool {
 // accountTenantKey is the tenant key of an account that names no tenant of its
 // own (config.Account.TenantKey).
 func accountTenantKey(name string) string { return "account:" + name }
+
+// maxRenameIDs is how many applied rename IDs a state remembers.
+const maxRenameIDs = 64
+
+// ApplyRenameOnce applies r unless this state has applied it already: by its
+// ID, or, for a rename without one, because the account is already where r puts
+// it (nothing under From, and To remembers From). It reports whether it applied it.
+func (s *State) ApplyRenameOnce(r Rename, detached map[string]*AccountState) bool {
+	if r.From == r.To {
+		return false
+	}
+	if r.ID != "" && slices.Contains(s.RenameIDs, r.ID) {
+		return false
+	}
+	_, live := s.Accounts[r.From]
+	if !live && detached[r.From] == nil && slices.Contains(s.RenamedFrom[r.To], r.From) {
+		return false
+	}
+	s.ApplyRename(r.From, r.To, detached)
+	if r.ID != "" {
+		s.RenameIDs = append(s.RenameIDs, r.ID)
+		if len(s.RenameIDs) > maxRenameIDs {
+			s.RenameIDs = s.RenameIDs[len(s.RenameIDs)-maxRenameIDs:]
+		}
+	}
+	return true
+}
 
 // ApplyRename moves everything the state keeps under the account name from to
 // the name to: the account's state, the tenant keys derived from the name and
@@ -136,11 +165,9 @@ func (s *State) TidyRenames(configured func(string) bool) {
 func (s *State) ApplyRenames(rs []Rename, detached map[string]*AccountState) []Rename {
 	var applied []Rename
 	for _, r := range rs {
-		if r.From == r.To {
-			continue
+		if s.ApplyRenameOnce(r, detached) {
+			applied = append(applied, r)
 		}
-		s.ApplyRename(r.From, r.To, detached)
-		applied = append(applied, r)
 	}
 	return applied
 }
@@ -311,24 +338,6 @@ func ReadClaimedRenames(files []string) (rs []Rename, written time.Time, errs []
 	return rs, written, errs
 }
 
-// RemovePendingRename deletes every pending-rename file, claimed or not.
-func RemovePendingRename(dir string) error {
-	ents, err := os.ReadDir(dir)
-	if err != nil {
-		return nil
-	}
-	var errs []error
-	for _, de := range ents {
-		n := de.Name()
-		if !de.IsDir() && strings.HasPrefix(n, pendingRenamePrefix) && strings.HasSuffix(n, pendingRenameSuffix) {
-			if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				errs = append(errs, err)
-			}
-		}
-	}
-	return errors.Join(errs...)
-}
-
 // HasPendingRename reports whether a pending-rename file is waiting.
 func HasPendingRename(dir string) bool {
 	ents, err := os.ReadDir(dir)
@@ -341,4 +350,45 @@ func HasPendingRename(dir string) bool {
 		}
 	}
 	return false
+}
+
+const renameIntentPrefix = "state.rename-intent."
+
+// SaveRenameIntent writes a note, before config.toml is saved, that r is about
+// to be made. An engine that sees an account vanish from the configuration
+// sets its state aside only when a note (or a pending rename) names it as the
+// old name of a rename; any other removal drops it. The caller deletes the note
+// once the rename is handed over, or abandoned.
+func SaveRenameIntent(dir string, r Rename) (string, error) {
+	b, err := json.MarshalIndent(&PendingRename{Written: time.Now(), Renames: []Rename{r}}, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(dir, renameIntentPrefix+nextRenameSeq()+pendingRenameSuffix)
+	return path, paths.WriteFileAtomic(path, append(b, '\n'))
+}
+
+// RenameFroms returns the old names of the renames that are in progress or
+// waiting: the intent notes, the pending files and the claimed ones.
+func RenameFroms(dir string) map[string]bool {
+	out := map[string]bool{}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return out
+	}
+	for _, de := range ents {
+		n := de.Name()
+		if de.IsDir() || !strings.HasSuffix(n, pendingRenameSuffix) {
+			continue
+		}
+		if !strings.HasPrefix(n, pendingRenamePrefix) && !strings.HasPrefix(n, renameIntentPrefix) {
+			continue
+		}
+		if p, err := ReadPendingRenameFile(filepath.Join(dir, n)); err == nil && p != nil {
+			for _, r := range p.Renames {
+				out[r.From] = true
+			}
+		}
+	}
+	return out
 }

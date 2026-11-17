@@ -1,6 +1,7 @@
 package store
 
 import (
+	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -76,6 +77,47 @@ func TestApplyRenameTakesFromDetachedAndReplacesAFreshState(t *testing.T) {
 	}
 }
 
+func TestApplyingARenameTwiceIsANoOp(t *testing.T) {
+	st := NewState()
+	st.Accounts["a"] = &AccountState{Totals: Totals{Rounds: 4}}
+	r := Rename{From: "a", To: "b", ID: "x"}
+	if applied := st.ApplyRenames([]Rename{r}, nil); len(applied) != 1 {
+		t.Fatalf("first: %v", applied)
+	}
+	if applied := st.ApplyRenames([]Rename{r}, nil); len(applied) != 0 || st.Accounts["b"].Totals.Rounds != 4 {
+		t.Errorf("same ID again: %v %+v", applied, st.Accounts)
+	}
+	// Another run of the same command (another ID): the account is already there.
+	if applied := st.ApplyRenames([]Rename{{From: "a", To: "b", ID: "y"}}, nil); len(applied) != 0 || st.Accounts["b"].Totals.Rounds != 4 {
+		t.Errorf("rerun: %v %+v", applied, st.Accounts)
+	}
+	// Without an ID the structure still tells.
+	if applied := st.ApplyRenames([]Rename{{From: "a", To: "b"}}, nil); len(applied) != 0 || st.Accounts["b"] == nil {
+		t.Errorf("no ID: %v %+v", applied, st.Accounts)
+	}
+}
+
+func TestRenameFromsSeesNotesAndPendingFiles(t *testing.T) {
+	dir := t.TempDir()
+	if _, err := SaveRenameIntent(dir, Rename{From: "a", To: "b"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SavePendingRenames(dir, time.Time{}, []Rename{{From: "c", To: "d"}}); err != nil {
+		t.Fatal(err)
+	}
+	got := RenameFroms(dir)
+	if !got["a"] || !got["c"] || got["b"] || got["d"] || len(got) != 2 {
+		t.Errorf("froms: %v", got)
+	}
+	// A note is not a waiting rename.
+	_ = os.RemoveAll(dir)
+	_ = os.MkdirAll(dir, 0o700)
+	_, _ = SaveRenameIntent(dir, Rename{From: "a", To: "b"})
+	if HasPendingRename(dir) {
+		t.Error("an intent note counted as a pending rename")
+	}
+}
+
 func TestTidyRenames(t *testing.T) {
 	st := NewState()
 	st.RenamedFrom = map[string][]string{"b": {"a", "old"}, "gone": {"g"}, "d": {"c"}}
@@ -128,8 +170,8 @@ func TestPendingRenameFilesAreClaimedInOrderAndNeverAppendedTo(t *testing.T) {
 	if len(again) != 3 {
 		t.Errorf("claimed files not found again: %v", again)
 	}
-	if err := RemovePendingRename(dir); err != nil {
-		t.Fatal(err)
+	for _, f := range again {
+		_ = os.Remove(f)
 	}
 	if left, _ := ClaimPendingRenames(dir); len(left) != 0 || HasPendingRename(dir) {
 		t.Errorf("left: %v", left)

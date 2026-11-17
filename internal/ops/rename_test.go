@@ -360,7 +360,7 @@ func TestRenameAccountWhileEngineHoldsTheLockHandsTheRenameOver(t *testing.T) {
 	}
 	files, err := store.ClaimPendingRenames(m.dataDir)
 	rs, _, _ := store.ReadClaimedRenames(files)
-	if err != nil || len(rs) != 1 || rs[0] != (store.Rename{From: "old", To: "fresh"}) {
+	if err != nil || len(rs) != 1 || rs[0].From != "old" || rs[0].To != "fresh" || rs[0].ID == "" {
 		t.Errorf("hand-over: %+v %v", rs, err)
 	}
 }
@@ -519,4 +519,24 @@ func containsEvent(es []store.Entry, name string) bool {
 		}
 	}
 	return false
+}
+
+// `rename old fresh` was killed after it wrote its file but before it saved the
+// config; the rerun finds two files for the same rename and must not wipe the state.
+func TestRenameAccountRerunAfterAKilledRun(t *testing.T) {
+	m := renameFixture(t)
+	m.use()
+	if err := store.SavePendingRenames(m.dataDir, time.Time{}, []store.Rename{{From: "old", To: "fresh", ID: "killed", Uncommitted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.rename("old", "fresh"); err != nil {
+		t.Fatal(err)
+	}
+	st := m.state()
+	if st.Accounts["fresh"] == nil || st.Accounts["fresh"].Totals.Rounds != 5 || st.Accounts["old"] != nil {
+		t.Errorf("state after the rerun: %+v", st.Accounts)
+	}
+	if store.HasPendingRename(m.dataDir) {
+		t.Error("a rename file was left")
+	}
 }

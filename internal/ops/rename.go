@@ -2,6 +2,8 @@ package ops
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -160,7 +162,7 @@ func (o *Ops) RenameAccount(ctx context.Context, from, to string) (warnings []st
 	// With no engine the engine lock is held from here until the state is written.
 	// The rename is written before the save, marked as uncommitted, so a crash
 	// after the save still finds it; it counts only if the config got that far.
-	h, err := prepareRename(dataDir, store.Rename{From: from, To: to})
+	h, err := prepareRename(dataDir, store.Rename{From: from, To: to, ID: newRenameID()})
 	if err != nil {
 		return nil, abort(err)
 	}
@@ -202,6 +204,13 @@ type renameHandover struct {
 	handed  bool   // an engine is running and gets the rename in a file
 	release func() // the engine lock, when held
 	file    string // the uncommitted rename file written before the save, without an engine
+	intent  string // the note an engine reads to tell a rename from a removal, with an engine
+}
+
+func newRenameID() string {
+	b := make([]byte, 8)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
 
 // prepareRename takes the engine lock if no engine runs, and then writes the
@@ -212,6 +221,11 @@ func prepareRename(dataDir string, r store.Rename) (*renameHandover, error) {
 	switch {
 	case errors.Is(err, engine.ErrRunning):
 		h.handed = true
+		// Before the save: an engine that loads the new config while the rename is
+		// still on its way must know the old name is being renamed, not removed.
+		if h.intent, err = store.SaveRenameIntent(dataDir, h.r); err != nil {
+			return nil, fmt.Errorf("write the rename: %w", err)
+		}
 		return h, nil
 	case err != nil:
 		return nil, err
@@ -234,8 +248,10 @@ func (h *renameHandover) close() {
 
 // discard takes back the rename after the config could not be saved.
 func (h *renameHandover) discard() {
-	if h.file != "" {
-		_ = os.Remove(h.file)
+	for _, f := range []string{h.file, h.intent} {
+		if f != "" {
+			_ = os.Remove(f)
+		}
 	}
 }
 
@@ -246,7 +262,11 @@ func (h *renameHandover) discard() {
 func (h *renameHandover) apply(cfg *config.Config) error {
 	defer h.close()
 	if h.handed {
-		return store.SavePendingRenames(h.dataDir, time.Time{}, []store.Rename{h.r})
+		err := store.SavePendingRenames(h.dataDir, time.Time{}, []store.Rename{h.r})
+		if err == nil && h.intent != "" {
+			_ = os.Remove(h.intent) // the pending file says it now
+		}
+		return err
 	}
 	files, err := store.ClaimPendingRenames(h.dataDir)
 	if err != nil {

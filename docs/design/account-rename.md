@@ -21,7 +21,12 @@ Only the engine writes `state.json`. Without an engine, `ops` holds the engine l
 far as having the new name (a crash after the save still finds it). With an engine, the rename is written after the
 config was saved as a file of its own, `state.rename.<seq>.json`; the engine claims files in sequence order, loads
 the config after the claim, and applies the renames in order, so chains and swaps come out right. A state the
-loaded config did not have is kept in memory for an hour so a rename that arrives a moment late still finds it.
+loaded config did not have is kept in memory for an hour so a rename that arrives a moment late still finds it, but
+only when a rename names the account as its old name: before the config is saved with an engine running, `ops`
+writes a note (`state.rename-intent.<seq>.json`) that the engine reads when an account vanishes, so a plain removal
+drops the state at once. Every rename has an ID and a state remembers the IDs it applied (`rename_ids`), so applying
+one twice (a claimed file that could not be deleted, a crash before the cleanup, a rerun of a killed command)
+changes nothing.
 A round in flight keeps its runtime record and books its result under the new name.
 
 The call log is not rewritten. `state.json` records `renamed_from`, and reading the log of the new name includes
@@ -36,3 +41,7 @@ A token refresh that is in flight under the old name when the rename is applied 
 the old name, which is then not used. The shortcut that skips the one-and-a-half second engine-lock probe when the
 heartbeat is fresh can, rarely, take a lock held by a status probe for a running engine and hand the rename over
 in a file that waits for the next start.
+
+The set-aside states live in memory only, so an engine restart between a config that ran ahead and its rename loses
+them. Renames that wait longer than seven days are discarded. The sequence numbers of the rename files come from the
+wall clock (kept increasing within a process), so a clock set back between two renames can reorder them.
