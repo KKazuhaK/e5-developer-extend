@@ -26,6 +26,7 @@ type setupEnv struct {
 	method string
 	ui     auth.LoginUI
 	fail   error
+	testT  *testing.T
 }
 
 func newSetupEnv(t *testing.T) *setupEnv {
@@ -399,5 +400,141 @@ func TestAppSetupLegacySecretsAreOnlyRemovedForTheSoleAccountOfTheApp(t *testing
 	add("app2")
 	if res := run(); len(res.RemovedSecrets) != 0 || fmt.Sprint(res.NotRemovedSecrets) != "[k-legacy]" {
 		t.Errorf("two accounts: removed %v, not removed %v", res.RemovedSecrets, res.NotRemovedSecrets)
+	}
+}
+
+// repairEnv signs the administrator in to the tenant of the account being repaired.
+func (e *setupEnv) repairBootstrap(tenant string) {
+	e.Bootstrap = func(_ context.Context, _, got, _ string, _ []string, _ auth.LoginUI, _ *http.Client) (auth.Token, error) {
+		if got != tenant {
+			e.t().Errorf("administrator signed in to %q, want the account's tenant %q", got, tenant)
+		}
+		return auth.Token{AccessToken: fakegraph.Token, Account: "admin@contoso.test", TenantID: tenant}, nil
+	}
+}
+
+func (e *setupEnv) t() *testing.T { return e.testT }
+
+func TestRepairAppOnlyAddsPermissionsWithoutANewSecret(t *testing.T) {
+	e := newSetupEnv(t)
+	e.testT = t
+	e.repairBootstrap("tid-123")
+	ctx := context.Background()
+	objID := e.g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "appId": testGUID, "tags": []string{"e5extend", "e5extend:app"}})
+	if err := e.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{Repair: true, Account: "app1"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	plan, err := s.Plan(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, a := range plan.Actions {
+		if a.Code == "create_secret" {
+			t.Errorf("a repair plans a secret: %+v", plan.Actions)
+		}
+	}
+	if len(plan.Missing) == 0 {
+		t.Errorf("nothing missing in %+v", plan)
+	}
+	res, err := s.Apply(ctx, appsetup.Choice{CreateNew: true}) // the caller's choice does not matter
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.ClientID != testGUID || res.CreatedApp || res.SecretKeyID != "" || len(res.AddedPermissions) == 0 || !res.ConsentGranted {
+		t.Errorf("result %+v", res)
+	}
+	if got := vaultSecret(t, e, "app1"); got != "OLD" {
+		t.Errorf("the stored secret changed to %q", got)
+	}
+	if n := e.g.PasswordNames(objID); len(n) != 0 {
+		t.Errorf("a client secret was created: %v", n)
+	}
+	for _, w := range e.g.Writes() {
+		if strings.Contains(w, "addPassword") || strings.Contains(w, "removePassword") || w == "POST /v1.0/applications" {
+			t.Errorf("unexpected write %s", w)
+		}
+	}
+	cfg, _, _ := e.LoadConfig()
+	if len(cfg.Accounts) != 1 || cfg.Accounts[0].SecretExpires != "" {
+		t.Errorf("the account was changed: %+v", cfg.Accounts)
+	}
+}
+
+func TestRepairRefusesAnotherAppRegistration(t *testing.T) {
+	e := newSetupEnv(t)
+	e.testT = t
+	e.repairBootstrap("tid-123")
+	ctx := context.Background()
+	e.g.AddApp(map[string]any{"displayName": "E5 Developer Extend (app-only)", "appId": "99999999-0000-4000-8000-000000000000", "tags": []string{"e5extend", "e5extend:app"}})
+	if err := e.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD"}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{Repair: true, Account: "app1"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	if _, err := s.Plan(ctx); !errors.Is(err, ErrRepairTarget) {
+		t.Fatalf("plan: %v", err)
+	}
+	if _, err := s.Apply(ctx, appsetup.Choice{}); !errors.Is(err, ErrRepairTarget) {
+		t.Fatalf("apply: %v", err)
+	}
+	if w := e.g.Writes(); len(w) != 0 {
+		t.Errorf("a refused repair wrote: %v", w)
+	}
+	// An app that is not there at all is refused too, and nothing is created.
+	e2 := newSetupEnv(t)
+	e2.testT = t
+	e2.repairBootstrap("tid-123")
+	if err := e2.AddAccount(ctx, AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: "tid-123", ClientID: testGUID, Secret: "OLD"}); err != nil {
+		t.Fatal(err)
+	}
+	s2, err := e2.BeginAppSetup(ctx, AppSetupOptions{Repair: true, Account: "app1"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s2.Close()
+	if _, err := s2.Apply(ctx, appsetup.Choice{}); !errors.Is(err, ErrRepairTarget) || len(e2.g.Writes()) != 0 {
+		t.Errorf("missing app: %v %v", err, e2.g.Writes())
+	}
+	if _, err := e2.BeginAppSetup(ctx, AppSetupOptions{Repair: true, Account: "nobody"}, &recUI{}, nil); err == nil {
+		t.Error("an unknown account must be refused")
+	}
+}
+
+func TestRepairDelegatedAdoptsTheAccountsOwnApp(t *testing.T) {
+	e := newSetupEnv(t)
+	e.testT = t
+	e.repairBootstrap("tid-123")
+	ctx := context.Background()
+	objID := e.g.AddApp(map[string]any{"displayName": "e5extend", "appId": testGUID})
+	e.g.AddApp(map[string]any{"displayName": "E5 Renew", "appId": "88888888-0000-4000-8000-000000000000"})
+	if err := e.AddAccount(ctx, AccountInput{Name: "dev", Auth: config.AuthDeviceCode, Tenant: "tid-123", ClientID: testGUID}); err != nil {
+		t.Fatal(err)
+	}
+	s, err := e.BeginAppSetup(ctx, AppSetupOptions{Repair: true, Account: "dev"}, &recUI{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+	plan, err := s.Plan(ctx)
+	if err != nil || plan.NeedsChoice() || plan.Existing == nil || plan.Existing.ClientID != testGUID {
+		t.Fatalf("plan %+v %v", plan, err)
+	}
+	res, err := s.Apply(ctx, appsetup.Choice{})
+	if err != nil || res.ClientID != testGUID || res.CreatedApp || res.Renamed || len(res.AddedPermissions) == 0 {
+		t.Fatalf("result %+v %v", res, err)
+	}
+	if got := e.g.App(objID)["displayName"]; got != "e5extend" {
+		t.Errorf("the app was renamed to %v", got)
+	}
+	if e.g.Count("POST /v1.0/applications") != 0 {
+		t.Error("a repair created an app")
 	}
 }

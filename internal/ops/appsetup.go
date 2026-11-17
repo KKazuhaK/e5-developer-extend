@@ -32,6 +32,12 @@ type AppSetupOptions struct {
 	// Account names the account whose vault entry receives the client secret
 	// (AppOnly). The account does not have to exist yet.
 	Account string `json:"account"`
+	// Repair adds the missing permissions (and consent) to the app registration
+	// the existing account Account signs in with, and nothing else: the
+	// tenant, the kind of identity and the app come from that account, no
+	// account is added and no client secret is created, stored or deleted.
+	// Setup refuses to touch any other app registration.
+	Repair bool `json:"repair"`
 }
 
 // AppSetupSession is a signed-in bootstrap session. The administrator's token
@@ -43,6 +49,8 @@ type AppSetupSession struct {
 	setup  *appsetup.Setup
 	admin  string
 	tenant string
+	// repair is the account being repaired, nil outside repair.
+	repair *config.Account
 
 	// mu guards the administrator's token: operations hold it shared while
 	// they use it, Close takes it exclusively before dropping the token.
@@ -105,10 +113,24 @@ func (o *Ops) BeginAppSetup(ctx context.Context, opts AppSetupOptions, ui auth.L
 	if opts.Method != config.AuthDeviceCode && opts.Method != config.AuthBrowser {
 		return nil, fmt.Errorf("automatic setup signs in with %s or %s, not %q", config.AuthDeviceCode, config.AuthBrowser, opts.Method)
 	}
+	var repair *config.Account
+	if opts.Repair {
+		cfg, _, err := o.LoadConfig()
+		if err != nil {
+			return nil, err
+		}
+		acct, err := o.FindAccount(cfg, opts.Account)
+		if err != nil {
+			return nil, err
+		}
+		cp := *acct
+		repair = &cp
+		opts.Tenant, opts.AppOnly = acct.Tenant, acct.Auth == config.AuthClientSecret
+	}
 	if opts.Tenant == "" {
 		opts.Tenant = "organizations"
 	}
-	if opts.AppOnly {
+	if opts.AppOnly && !opts.Repair {
 		if err := ValidateAccount(config.Account{Name: opts.Account, Auth: config.AuthClientSecret, Tenant: "x", ClientID: testClientID}); err != nil {
 			return nil, fmt.Errorf("--account: %w", err)
 		}
@@ -131,12 +153,14 @@ func (o *Ops) BeginAppSetup(ctx context.Context, opts AppSetupOptions, ui auth.L
 	if opts.AppOnly {
 		kind = appsetup.KindApp
 	}
-	s := &AppSetupSession{o: o, opts: opts, admin: tok.Account, tenant: tok.TenantID}
+	s := &AppSetupSession{o: o, opts: opts, admin: tok.Account, tenant: tok.TenantID, repair: repair}
 	s.setup = &appsetup.Setup{
 		Kind: kind, Token: tok.AccessToken, TenantID: tok.TenantID, Base: o.GraphBase, HTTP: httpClient,
 		Version: version.Version, Hostname: host, Account: opts.Account, Progress: progress, Backoff: o.SetupBackoff,
 	}
-	if opts.AppOnly {
+	if opts.Repair {
+		s.setup.NoSecret = true
+	} else if opts.AppOnly {
 		s.setup.StoreSecret = s.storeSecret
 		s.setup.BeforeSecret = s.checkSecretTarget
 		s.setup.LegacyOwner = s.soleAccountOf
@@ -229,6 +253,10 @@ func (s *AppSetupSession) Plan(ctx context.Context) (*appsetup.Plan, error) {
 		return nil, err
 	}
 	defer done()
+	if s.repair != nil {
+		p, _, err := s.repairPlan(ctx)
+		return p, err
+	}
 	p, err := s.setup.Plan(ctx)
 	if err != nil || !s.opts.AppOnly {
 		return p, err
@@ -247,7 +275,52 @@ func (s *AppSetupSession) PlanFor(ctx context.Context, choice appsetup.Choice) (
 		return nil, err
 	}
 	defer done()
+	if s.repair != nil {
+		p, _, err := s.repairPlan(ctx)
+		return p, err
+	}
 	return s.setup.PlanFor(ctx, &choice)
+}
+
+// ErrRepairTarget means the app registration setup found is not the one the
+// account signs in with, so a repair must not touch it.
+var ErrRepairTarget = errors.New("not the app registration of this account")
+
+// repairPlan plans the repair of the account's own app registration and returns
+// the choice that adopts it when it is not tagged. It refuses when the tenant
+// has another tagged app or the account's app cannot be found among the
+// familiar ones, because repairing must never create or change a different app.
+func (s *AppSetupSession) repairPlan(ctx context.Context) (*appsetup.Plan, appsetup.Choice, error) {
+	want := s.repair.ClientID
+	p, err := s.setup.Plan(ctx)
+	if err != nil {
+		return nil, appsetup.Choice{}, err
+	}
+	switch {
+	case p.Existing != nil:
+		if !strings.EqualFold(p.Existing.ClientID, want) {
+			return nil, appsetup.Choice{}, fmt.Errorf("%w: setup found the app %q (client ID %s) in this tenant but account %q signs in with client ID %s; "+
+				"add the permissions to that app in the Entra admin center instead (nothing was changed)",
+				ErrRepairTarget, p.Existing.DisplayName, p.Existing.ClientID, s.repair.Name, want)
+		}
+		return p, appsetup.Choice{}, nil
+	default:
+		for _, c := range p.Candidates {
+			if strings.EqualFold(c.ClientID, want) {
+				choice := appsetup.Choice{Adopt: c.ClientID}
+				q, err := s.setup.PlanFor(ctx, &choice)
+				if err != nil {
+					return nil, appsetup.Choice{}, err
+				}
+				ref := c
+				q.Existing, q.Candidates = &ref, nil
+				return q, choice, nil
+			}
+		}
+	}
+	return nil, appsetup.Choice{}, fmt.Errorf("%w: its client ID %s was not found among the app registrations setup recognises in this tenant "+
+		"(nothing was changed). Add the missing permissions to that app in the Entra admin center instead (%s)",
+		ErrRepairTarget, want, appsetup.Manual)
 }
 
 func (s *AppSetupSession) checkPlanTarget(p *appsetup.Plan) error {
@@ -347,11 +420,22 @@ func (s *AppSetupSession) Apply(ctx context.Context, choice appsetup.Choice) (*a
 		return nil, err
 	}
 	defer done()
+	if s.repair != nil {
+		// The choice is not the user's here: the account's own app, nothing else.
+		_, forced, err := s.repairPlan(ctx)
+		if err != nil {
+			return nil, err
+		}
+		choice = forced
+	}
 	res, err := s.setup.Apply(ctx, choice)
 	if err != nil {
 		return nil, err
 	}
-	if s.opts.AppOnly && res.SecretExpires != "" {
+	if s.repair != nil && !strings.EqualFold(res.ClientID, s.repair.ClientID) {
+		return res, fmt.Errorf("%w: setup changed %s, not %s", ErrRepairTarget, res.ClientID, s.repair.ClientID)
+	}
+	if s.opts.AppOnly && !s.opts.Repair && res.SecretExpires != "" {
 		if cfg, _, err := s.o.LoadConfig(); err == nil {
 			if acct, ok := cfg.Find(s.opts.Account); ok && acct.Auth == config.AuthClientSecret {
 				if err := s.o.updateAccount(ctx, s.opts.Account, func(ac *config.Account) { ac.SecretExpires = res.SecretExpires }); err != nil {

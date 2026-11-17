@@ -41,6 +41,7 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 	var f setupFlags
 	var appOnly bool
 	var account string
+	var noNewSecret bool
 	cmd := &cobra.Command{
 		Use:   "setup",
 		Short: "Create or update the app registration automatically",
@@ -49,7 +50,10 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 			"and grant administrator consent. Running it again only adds what is missing.\n\n" +
 			"With --app-only it sets up the client-secret identity instead and stores a new client secret in the\n" +
 			"vault under --account NAME; the secret is never shown. Add the account afterwards with\n" +
-			"  e5extend account add NAME --auth client_secret --tenant ... --client-id ... --stored-secret\n\n" +
+			"  e5extend account add NAME --auth client_secret --tenant ... --client-id ... --stored-secret\n" +
+			"With --no-new-secret (needs --app-only and an existing client_secret account) it only adds the missing\n" +
+			"permissions and role assignments to that account's own app registration: no secret is created, stored or\n" +
+			"deleted, and no other app is touched. Use it when a newer version needs a permission the app lacks.\n\n" +
 			"The administrator's token is kept in memory only. Manual setup: " + appsetup.Manual,
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
@@ -58,6 +62,29 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 			}
 			if !appOnly && account != "" {
 				return errors.New("--account only applies with --app-only")
+			}
+			if noNewSecret && (!appOnly || account == "") {
+				return errors.New("--no-new-secret needs --app-only and --account NAME of an existing client_secret account")
+			}
+			if noNewSecret {
+				cfg, _, err := a.loadConfig()
+				if err != nil {
+					return err
+				}
+				acct, err := a.ops().FindAccount(cfg, account)
+				if err != nil {
+					return err
+				}
+				if acct.Auth != config.AuthClientSecret {
+					return fmt.Errorf("account %q signs in with %s, not a client secret; repair its app with: e5extend app setup --tenant %s", account, acct.Auth, acct.Tenant)
+				}
+				sess, _, err := a.runAppSetup(cmd, ops.AppSetupOptions{Repair: true, Method: f.method, Account: account}, f)
+				if err != nil {
+					return err
+				}
+				sess.Close()
+				fmt.Fprintf(cmd.OutOrStdout(), "\nthe app of account %q has its permissions; check with: e5extend subscription\n", account)
+				return nil
 			}
 			sess, res, err := a.runAppSetup(cmd, ops.AppSetupOptions{AppOnly: appOnly, Method: f.method, Tenant: f.tenant, Account: account}, f)
 			if err != nil {
@@ -82,6 +109,7 @@ func (a *app) newAppSetupCmd() *cobra.Command {
 	}
 	cmd.Flags().BoolVar(&appOnly, "app-only", false, "set up the client-secret identity (application permissions) instead of the delegated one")
 	cmd.Flags().StringVar(&account, "account", "", "with --app-only: account name whose vault entry receives the client secret")
+	cmd.Flags().BoolVar(&noNewSecret, "no-new-secret", false, "with --app-only: only add the missing permissions to the existing account's app; create no client secret")
 	cmd.Flags().StringVar(&f.method, "auth", "", "administrator sign-in: device_code (default) or browser")
 	cmd.Flags().StringVar(&f.tenant, "tenant", "", "tenant ID or domain of the administrator (default: organizations)")
 	f.register(cmd)
