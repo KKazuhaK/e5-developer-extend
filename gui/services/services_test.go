@@ -297,6 +297,14 @@ func TestNothingSecretLeavesTheServices(t *testing.T) {
 	if err != nil || len(checks) == 0 {
 		t.Fatalf("doctor: %v %v", checks, err)
 	}
+	for _, c := range checks {
+		if len(c.Parts) == 0 || c.Parts[0].Code == "" || c.Parts[0].Params == nil {
+			t.Errorf("check %s has no detail codes: %+v", c.ID, c)
+		}
+		if c.Fix != "" && len(c.FixParts) == 0 {
+			t.Errorf("check %s has a fix without codes: %+v", c.ID, c)
+		}
+	}
 	r.keep(checks)
 	info, err := health.ServiceInfo()
 	if err != nil {

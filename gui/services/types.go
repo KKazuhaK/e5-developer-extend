@@ -188,13 +188,25 @@ type Settings struct {
 	UI       UISettings       `json:"ui"`
 }
 
-// DoctorCheck is one health check result.
+// DoctorMsg is one message of a health check: a stable code and the values
+// for its placeholders. The interface translates it; for a code it does not
+// know it shows the English text of the check instead.
+type DoctorMsg struct {
+	Code   string            `json:"code"`
+	Params map[string]string `json:"params"`
+}
+
+// DoctorCheck is one health check result. Detail and Fix are English text.
+// Parts is the same detail as messages to translate (shown one after another)
+// and FixParts the same for Fix; each is empty when there is nothing to say.
 type DoctorCheck struct {
-	ID     string `json:"id"`
-	Title  string `json:"title"`
-	Level  string `json:"level"` // "ok", "warn" or "fail"
-	Detail string `json:"detail"`
-	Fix    string `json:"fix"`
+	ID       string      `json:"id"`
+	Title    string      `json:"title"`
+	Level    string      `json:"level"` // "ok", "warn" or "fail"
+	Detail   string      `json:"detail"`
+	Fix      string      `json:"fix"`
+	Parts    []DoctorMsg `json:"parts"`
+	FixParts []DoctorMsg `json:"fixParts"`
 }
 
 // ServiceInfo describes the background job.
