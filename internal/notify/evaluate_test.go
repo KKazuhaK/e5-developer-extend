@@ -361,7 +361,7 @@ func TestSeveralPendingAlertsEachRetriedOnce(t *testing.T) {
 	}
 }
 
-func TestUndeliveredRecoveredIsRetriedAndDropsOnNewProblem(t *testing.T) {
+func TestUndeliveredRecoveredIsRetriedAndSurvivesANewProblem(t *testing.T) {
 	r := newRig()
 	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "x"
 	r.eval()
@@ -373,18 +373,28 @@ func TestUndeliveredRecoveredIsRetriedAndDropsOnNewProblem(t *testing.T) {
 	if k := kinds(r.evalNoAck()); k != "recovered" {
 		t.Fatalf("retry: %q", k)
 	}
-	// A new problem makes the old "recovered" obsolete.
+	// A new problem does not cancel the earlier episode's recovery: that one was announced.
 	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "again"
-	if k := kinds(r.evalNoAck()); k != "needs_attention" {
-		t.Fatalf("new problem: %q", k)
-	}
-	if _, ok := r.as.Notified[Recovered]; ok {
-		t.Error("obsolete recovered still pending")
+	r.evalNoAck()
+	if !r.as.Notified[Recovered].Pending {
+		t.Fatal("the earlier recovery was dropped")
 	}
 	r.as.Status = store.StatusOK
-	r.evalNoAck()
-	if !MarkDelivered(r.st, "main", Recovered, r.now) {
-		t.Fatal("recovered not pending")
+	r.now = r.now.Add(2 * time.Hour)
+	evs := r.evalNoAck()
+	n := 0
+	for _, e := range evs {
+		if e.Event == Recovered {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("recovered sent %d times: %v", n, kinds(evs))
+	}
+	for _, e := range evs {
+		if e.Event == Recovered {
+			MarkEvent(r.st, e)
+		}
 	}
 	if _, ok := r.as.Notified[Recovered]; ok {
 		t.Error("delivered recovered not forgotten")

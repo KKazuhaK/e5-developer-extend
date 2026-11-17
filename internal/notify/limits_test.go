@@ -162,3 +162,34 @@ func TestUntrustedTextIsEscapedPerFormat(t *testing.T) {
 		mustContain(t, typ, r.Body, `\*bold\*`, `\<url\|x\>`, `\&amp;`)
 	}
 }
+
+func TestMdSafeKeepsUnderscoresInsideWords(t *testing.T) {
+	if got := mdSafe("e5extend account resume my_acct"); got != "e5extend account resume my_acct" {
+		t.Errorf("%q", got)
+	}
+	if got := mdSafe("a_b_c 2_x"); got != "a_b_c 2_x" {
+		t.Errorf("%q", got)
+	}
+	for _, in := range []string{"_em_", "x_ y", "_x"} {
+		if strings.Contains(mdSafe(in), "_") && in != "x_ y" {
+			t.Errorf("%q kept an emphasis underscore: %q", in, mdSafe(in))
+		}
+	}
+	if got := mdSafe("x_ y"); strings.Contains(got, "_") {
+		t.Errorf("trailing underscore kept: %q", got)
+	}
+	d := NewData(SampleEvent(AutoPaused, fixedNow), "en", "h", nil)
+	d.Account = "my_acct"
+	d.Hint = Hint(AutoPaused, "my_acct", "en")
+	r, err := Render("wecom", "en", "", d)
+	if err != nil || !strings.Contains(r.Body, "account resume my_acct") {
+		t.Errorf("hint not copy-pasteable: %v\n%s", err, r.Body)
+	}
+}
+
+func TestUserinfoPasswordIsAlwaysRedacted(t *testing.T) {
+	got := redactSecrets("boom: dial failed for pw", []string{"https://user:pw@hooks.example/a"})
+	if strings.Contains(got, "pw") {
+		t.Errorf("%q", got)
+	}
+}

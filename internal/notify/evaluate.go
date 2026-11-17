@@ -175,7 +175,16 @@ func (s scope) beginEpisode(kind string, held bool) {
 		u.Held = false
 		s.put(recordUnhealthy, u)
 	}
-	s.del(Recovered)
+	s.dropObsoleteRecovery()
+}
+
+// dropObsoleteRecovery forgets a recovery that was already delivered or is a
+// leftover; one that is still waiting (held for the quiet hours, or sent and not
+// yet confirmed) belongs to an earlier episode that was announced, and stays.
+func (s scope) dropObsoleteRecovery() {
+	if n, ok := (*s.notified)[Recovered]; ok && !n.Pending {
+		s.del(Recovered)
+	}
 }
 
 // retry hands out again what was not confirmed, releases what the cooldown
@@ -262,7 +271,7 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		s := scope{ev: ev, account: acct.Name, tenant: acct.Tenant, notified: &as.Notified, sent: &as.LastSent}
 		get, del := s.get, s.del
 		raise := func(kind, key, msg string) { // an announced problem starts or continues an episode
-			del(Recovered)
+			s.dropObsoleteRecovery()
 			cooled, held := s.announce(kind, key, msg)
 			if !cooled {
 				s.beginEpisode(kind, held)
@@ -339,7 +348,10 @@ func Evaluate(in Input) (events []Event, changed bool) {
 		if as.Status == store.StatusOK && !stale && !acct.Paused && !spiking {
 			if n, ok := get(recordUnhealthy); ok {
 				del(recordUnhealthy)
-				_, _ = s.announce(Recovered, n.Key, "is working again")
+				// An earlier recovery still waiting to go out already says it.
+				if r, pending := get(Recovered); !pending || !r.Pending {
+					_, _ = s.announce(Recovered, n.Key, "is working again")
+				}
 			}
 		}
 

@@ -12,6 +12,7 @@ import (
 	"sync"
 	"text/template"
 	"time"
+	"unicode"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 )
@@ -180,9 +181,24 @@ var mdEscaper = strings.NewReplacer(
 // backslash escapes reliably: instead of escaping, whatever could start a
 // link, formatting, a heading or a mention is replaced by a look-alike.
 var mdSafeReplacer = strings.NewReplacer(
-	"<", "\u2039", ">", "\u203a", "[", "\uff3b", "]", "\uff3d", "*", "\uff0a", "_", "\uff3f", "`", "'",
+	"<", "\u2039", ">", "\u203a", "[", "\uff3b", "]", "\uff3d", "*", "\uff0a", "`", "'",
 	"#", "\uff03", "~", "\uff5e", "|", "\u00a6", "@", "\uff20",
 )
+
+// mdSafe applies mdSafeReplacer and also neutralises underscores, except the
+// ones inside a word (my_acct stays copy-pasteable); only leading, trailing
+// or standalone ones can make emphasis.
+func mdSafe(s string) string {
+	s = mdSafeReplacer.Replace(s)
+	r := []rune(s)
+	word := func(i int) bool { return i >= 0 && i < len(r) && (unicode.IsLetter(r[i]) || unicode.IsDigit(r[i])) }
+	for i, c := range r {
+		if c == '_' && !(word(i-1) && word(i+1)) {
+			r[i] = '\uff3f'
+		}
+	}
+	return string(r)
+}
 
 // slackEscaper is what Slack asks for in text: & < > only (they start links and mentions).
 var slackEscaper = strings.NewReplacer("&", "&amp;", "<", "&lt;", ">", "&gt;")
@@ -192,7 +208,7 @@ var funcs = template.FuncMap{
 	"md":    func(s string) string { return mdEscaper.Replace(s) },
 	"slack": func(s string) string { return slackEscaper.Replace(s) },
 	// mdsafe neutralises Markdown by look-alike substitution (WeCom, DingTalk).
-	"mdsafe": func(s string) string { return mdSafeReplacer.Replace(s) },
+	"mdsafe": mdSafe,
 	// json encodes a value as a JSON literal, for bodies written by hand.
 	"json": func(v any) (string, error) { b, err := json.Marshal(v); return string(b), err },
 	// trunc cuts s to at most n characters.

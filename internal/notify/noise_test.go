@@ -364,3 +364,52 @@ func TestTwoHeldProblemsOneClearsTheOtherIsReleasedAndRecovers(t *testing.T) {
 		t.Fatalf("recovery of B: %+v", evs)
 	}
 }
+
+func TestHeldRecoveryOfAnAnnouncedProblemSurvivesAHeldProblemThatClears(t *testing.T) {
+	r := newRig()
+	r.cfg.QuietHours = "23:00-08:00"
+	at := func(day, h, m int) time.Time { return time.Date(2026, 11, day, h, m, 0, 0, time.UTC) }
+	// 23:30 (quiet): needs_attention is critical and goes out.
+	r.now = at(17, 23, 30)
+	r.as.LastSuccess = r.now
+	r.as.Status, r.as.Reason = store.StatusNeedsAttention, "login required"
+	if k := kinds(r.eval()); k != "needs_attention" {
+		t.Fatalf("23:30: %q", k)
+	}
+	// 00:30: it clears; its recovery (info) is held.
+	r.now = at(18, 0, 30)
+	r.as.Status, r.as.Reason, r.as.LastSuccess = store.StatusOK, "", r.now
+	if evs := r.eval(); len(evs) != 0 {
+		t.Fatalf("00:30: %v", kinds(evs))
+	}
+	if !r.as.Notified[Recovered].Held {
+		t.Fatalf("recovery not held: %+v", r.as.Notified[Recovered])
+	}
+	// 01:30: a new problem (stale, a warning) is raised and held.
+	r.now = at(18, 1, 30)
+	r.as.LastSuccess = r.now.Add(-100 * time.Hour)
+	if evs := r.eval(); len(evs) != 0 {
+		t.Fatalf("01:30: %v", kinds(evs))
+	}
+	if !r.as.Notified[Stale].Held || !r.as.Notified[Recovered].Pending {
+		t.Fatalf("stale %+v recovered %+v", r.as.Notified[Stale], r.as.Notified[Recovered])
+	}
+	// 02:30: stale clears.
+	r.now = at(18, 2, 30)
+	r.as.LastSuccess = r.now
+	if evs := r.eval(); len(evs) != 0 {
+		t.Fatalf("02:30: %v", kinds(evs))
+	}
+	// 08:00: exactly one recovered, for needs_attention; nothing for stale.
+	r.now = at(18, 8, 0)
+	r.as.LastSuccess = r.now
+	evs := r.evalNoAck()
+	if len(evs) != 1 || evs[0].Event != Recovered || evs[0].Origin != NeedsAttention {
+		t.Fatalf("08:00: %+v", evs)
+	}
+	MarkEvent(r.st, evs[0])
+	r.now = r.now.Add(2 * RetryAfter)
+	if evs := r.eval(); len(evs) != 0 {
+		t.Errorf("afterwards: %v", kinds(evs))
+	}
+}

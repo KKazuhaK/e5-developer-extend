@@ -250,7 +250,7 @@ func redactSecrets(s string, secrets []string) string {
 				}
 			}
 		}
-		if pw, ok := u.User.Password(); ok && len(pw) >= minURLPart {
+		if pw, ok := u.User.Password(); ok { // always, whatever its length
 			parts = append(parts, pw)
 		}
 	}
