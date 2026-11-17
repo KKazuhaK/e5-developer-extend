@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
@@ -44,21 +45,29 @@ type EngineInfo struct {
 
 // AccountSummary is the state of one account, for display.
 type AccountSummary struct {
-	Name          string  `json:"name"`
-	Auth          string  `json:"auth"`
-	Tenant        string  `json:"tenant"`
-	Status        string  `json:"status"`
-	Reason        string  `json:"reason"`
-	Fix           string  `json:"fix"`
-	NextRun       *string `json:"nextRun"`
-	LastRun       *string `json:"lastRun"`
-	LastSuccess   *string `json:"lastSuccess"`
-	TodayOK       int     `json:"todayOk"`
-	TodayFailed   int     `json:"todayFailed"`
-	UsableAPIs    int     `json:"usableApis"`
-	TotalAPIs     int     `json:"totalApis"`
-	SecretExpires *string `json:"secretExpires"`
-	Paused        bool    `json:"paused"`
+	Name        string  `json:"name"`
+	Auth        string  `json:"auth"`
+	Tenant      string  `json:"tenant"`
+	Status      string  `json:"status"`
+	Reason      string  `json:"reason"`
+	Fix         string  `json:"fix"`
+	NextRun     *string `json:"nextRun"`
+	LastRun     *string `json:"lastRun"`
+	LastSuccess *string `json:"lastSuccess"`
+	TodayOK     int     `json:"todayOk"`
+	TodayFailed int     `json:"todayFailed"`
+	// TodayThrottled counts today's calls that were throttled (no failure).
+	TodayThrottled int `json:"todayThrottled"`
+	// PausedAPIs is how many APIs are left out for 24 hours after a 403 or 404.
+	PausedAPIs int `json:"pausedApis"`
+	// AutoResumeAt is when the engine next tries an automatically paused
+	// account with one call; AutoResumeTries counts the tries so far.
+	AutoResumeAt    *string `json:"autoResumeAt"`
+	AutoResumeTries int     `json:"autoResumeTries"`
+	UsableAPIs      int     `json:"usableApis"`
+	TotalAPIs       int     `json:"totalApis"`
+	SecretExpires   *string `json:"secretExpires"`
+	Paused          bool    `json:"paused"`
 
 	// Account and State are for the command line, which formats them itself.
 	Account config.Account      `json:"-"`
@@ -126,7 +135,7 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 	y, m, d := now.Date()
 	midnight := time.Date(y, m, d, 0, 0, 0, 0, now.Location())
 	today, _ := st.Read(store.Filter{Since: midnight})
-	type counts struct{ ok, failed int }
+	type counts struct{ ok, failed, throttled int }
 	byAcct := map[string]*counts{}
 	for _, en := range today {
 		if en.API == "" || en.API == "users.pick" {
@@ -140,7 +149,9 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 		switch en.Class {
 		case "ok":
 			c.ok++
-		case "throttled", "network", "canceled":
+		case "throttled":
+			c.throttled++
+		case "network", "canceled", "forbidden", "not_found":
 		default:
 			c.failed++
 		}
@@ -162,7 +173,7 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 			TotalAPIs: len(apis), Paused: acct.Paused,
 		}
 		if c := byAcct[acct.Name]; c != nil {
-			sum.TodayOK, sum.TodayFailed = c.ok, c.failed
+			sum.TodayOK, sum.TodayFailed, sum.TodayThrottled = c.ok, c.failed, c.throttled
 		}
 		if acct.SecretExpires != "" {
 			s := acct.SecretExpires
@@ -175,6 +186,10 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 				sum.NextRun = rfc3339(as.NextRun)
 			}
 			granted = as.GrantedScopes
+			sum.PausedAPIs = callstat.PausedAPIs(as.APISkipUntil, now)
+			if as.Status == store.StatusPaused && !acct.Paused {
+				sum.AutoResumeAt, sum.AutoResumeTries = rfc3339(as.NextProbe), as.Probes
+			}
 			sum.Paused = acct.Paused || as.Status == store.StatusPaused
 		}
 		kind := catalog.Delegated

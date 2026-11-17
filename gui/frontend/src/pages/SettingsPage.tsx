@@ -23,7 +23,7 @@ const ADVANCED_FIELDS: [string, string][] = [
   ["schedule.intervalMin", "s-imin"], ["schedule.intervalMax", "s-imax"], ["schedule.apisPerRoundMin", "s-amin"],
   ["schedule.apisPerRoundMax", "s-amax"], ["schedule.workDays", "s-days-l"], ["schedule.workStart", "s-ws"],
   ["schedule.workEnd", "s-we"], ["schedule.periodStart", "s-ps"], ["schedule.periodEnd", "s-pe"],
-  ["network.proxy", "n-proxy"], ["notify.staleAfter", "n-stale"], ["notify.cooldown", "n-cooldown"], ["notify.quietHours", "n-quiet"],
+  ["network.proxy", "n-proxy"], ["notify.staleAfter", "n-stale"], ["notify.cooldown", "n-cooldown"], ["notify.quietHours", "n-quiet"], ["notify.dailySummaryAt", "n-daily"],
   ["notify.spikeRounds", "n-spike-rounds"], ["notify.spikeRate", "n-spike-rate"], ["notify.spikeMinFailures", "n-spike-min"],
   ["notify.events", "n-ev-l"],
 ];
