@@ -1,7 +1,7 @@
 # Screenshots for the docs
 
 `docs/images/<lang>/<name>.webp` are taken from the real frontend running on its mock backend with the
-`?demo=1` data set: a made-up Contoso tenant, two healthy accounts, an E5 subscription card, a Telegram alert
+`?demo=1` data set: a made-up Contoso tenant (plus a second, Fabrikam, on the subscription cards), two healthy accounts, E5 subscription cards for two tenants, a Telegram alert
 channel and the background service running. No real tenant data is involved.
 
 ## Regenerate
