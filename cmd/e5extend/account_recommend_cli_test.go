@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"slices"
@@ -11,6 +12,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 // recommendEnv signs an account "main" in with the recommended permissions
@@ -136,5 +138,64 @@ func TestAccountTestRecommendNotLoggedIn(t *testing.T) {
 	_, _, err := e.run("", "account", "test", "main", "--recommend")
 	if err == nil || !strings.Contains(err.Error(), "e5extend account login main") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+// Probes that fail temporarily must not cost the account any category.
+func TestAccountTestApplyAfterFailedProbe(t *testing.T) {
+	e := recommendEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/me/mailboxSettings":
+			w.WriteHeader(404)
+		case "/me/joinedTeams":
+			w.WriteHeader(503)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	e.graphBase = srv.URL
+	if err := ops.New().SetCategories(context.Background(), "main", []string{"user", "mail", "teams"}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, _, err := e.run("", "account", "test", "main", "--recommend", "--apply", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "some probes failed temporarily; try again later") {
+		t.Fatalf("err = %v", err)
+	}
+	if got := e.loadCfg().Accounts[0].Categories; !slices.Equal(got, []string{"user", "mail", "teams"}) {
+		t.Fatalf("changed despite the refusal: %v", got)
+	}
+
+	// The suggestion line already keeps teams, which could not be checked.
+	out := e.mustRun("", "account", "test", "main", "--recommend")
+	line := out[strings.Index(out, "suggested:"):]
+	line = strings.SplitN(line, "\n", 2)[0]
+	if !strings.Contains(line, `"teams"`) || strings.Contains(line, `"mail"`) {
+		t.Errorf("suggested: %s", line)
+	}
+
+	e.mustRun("", "account", "test", "main", "--recommend", "--apply", "--yes", "--force")
+	got := e.loadCfg().Accounts[0].Categories
+	if !slices.Contains(got, "teams") || slices.Contains(got, "mail") || !slices.Contains(got, "files") {
+		t.Fatalf("after --force: %v", got)
+	}
+}
+
+// Without a categories setting the catalog defaults run; an uncertain default stays selected.
+func TestAccountTestApplyKeepsUncertainDefault(t *testing.T) {
+	e := recommendEnv(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/me/joinedTeams" {
+			w.WriteHeader(503)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	e.graphBase = srv.URL
+	e.mustRun("", "account", "test", "main", "--recommend", "--apply", "--yes", "--force")
+	if got := e.loadCfg().Accounts[0].Categories; !slices.Contains(got, "teams") || !slices.Contains(got, "mail") {
+		t.Fatalf("%v", got)
+	}
+	if _, _, err := e.run("", "account", "test", "main", "--recommend", "--force"); err == nil {
+		t.Error("--force without --apply accepted")
 	}
 }

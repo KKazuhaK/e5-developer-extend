@@ -199,7 +199,7 @@ func printTokenInfo(cmd *cobra.Command, tok ops.TokenInfo) {
 }
 
 func (a *app) newAccountTestCmd() *cobra.Command {
-	var recommendFlag, apply, yes bool
+	var recommendFlag, apply, yes, force bool
 	cmd := &cobra.Command{
 		Use:   "test <name>",
 		Short: "Get a token silently and show who it is for and what it grants",
@@ -213,8 +213,8 @@ func (a *app) newAccountTestCmd() *cobra.Command {
 			if (apply || yes) && !recommendFlag {
 				return errors.New("--apply and --yes only work together with --recommend")
 			}
-			if yes && !apply {
-				return errors.New("--yes only works together with --apply")
+			if (yes || force) && !apply {
+				return errors.New("--yes and --force only work together with --apply")
 			}
 			tok, err := a.ops().TestAccount(contextOrBackground(cmd), name)
 			if err != nil {
@@ -225,13 +225,14 @@ func (a *app) newAccountTestCmd() *cobra.Command {
 			if !recommendFlag {
 				return nil
 			}
-			return a.accountRecommend(cmd, name, apply, yes)
+			return a.accountRecommend(cmd, name, apply, yes, force)
 		},
 	}
 	f := cmd.Flags()
 	f.BoolVar(&recommendFlag, "recommend", false, "probe which API categories this account can use and suggest the categories setting")
 	f.BoolVar(&apply, "apply", false, "with --recommend: save the recommended categories to the account")
 	f.BoolVar(&yes, "yes", false, "with --apply: do not ask for confirmation")
+	f.BoolVar(&force, "force", false, "with --apply: save even though some probes failed temporarily")
 	return cmd
 }
 
@@ -254,13 +255,15 @@ func reasonText(code string) string {
 		return "needs an administrator role (not probed)"
 	case recommend.ReasonNotSupported:
 		return "not available for this sign-in type"
+	case recommend.ReasonArbitraryUser:
+		return "checked with an arbitrary user; set username for a reliable answer"
 	case recommend.ReasonProbeFailed:
 		return "could not be checked (try again later)"
 	}
 	return code
 }
 
-func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes bool) error {
+func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes, force bool) error {
 	out := cmd.OutOrStdout()
 	ctx := contextOrBackground(cmd)
 	rec, err := a.ops().RecommendCategories(ctx, name)
@@ -276,7 +279,13 @@ func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes bool)
 	if err := tw.Flush(); err != nil {
 		return err
 	}
-	cats := rec.Recommended()
+	cur, err := a.ops().GetAccount(name)
+	if err != nil {
+		return err
+	}
+	// Recommended categories, plus the uncertain ones the account has now: a
+	// category is never dropped just because it could not be checked.
+	cats := rec.Suggested(cur.Categories)
 	quoted := make([]string, len(cats))
 	for i, c := range cats {
 		quoted[i] = strconv.Quote(c)
@@ -289,19 +298,18 @@ func (a *app) accountRecommend(cmd *cobra.Command, name string, apply, yes bool)
 		}
 	}
 	if len(maybe) > 0 {
-		fmt.Fprintf(out, "not included, may still work: %s\n", strings.Join(maybe, ", "))
+		fmt.Fprintf(out, "uncertain (kept only if the account has them already): %s\n", strings.Join(maybe, ", "))
 	}
 	if !apply {
 		fmt.Fprintf(out, "to save it: e5extend account test %s --recommend --apply\n", name)
 		return nil
 	}
 
+	if rec.HasFailedProbes() && !force {
+		return errors.New("some probes failed temporarily; try again later (nothing saved; --force saves anyway, keeping the categories that could not be checked)")
+	}
 	if len(cats) == 0 {
 		return errors.New("no category is recommended; nothing saved (check the granted permissions above)")
-	}
-	cur, err := a.ops().GetAccount(name)
-	if err != nil {
-		return err
 	}
 	if slices.Equal(sortedCopy(cur.Categories), sortedCopy(cats)) {
 		fmt.Fprintln(out, "the account already uses these categories; nothing to change")
