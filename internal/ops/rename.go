@@ -158,7 +158,9 @@ func (o *Ops) RenameAccount(ctx context.Context, from, to string) (warnings []st
 	}
 
 	// With no engine the engine lock is held from here until the state is written.
-	h, err := prepareRename(dataDir)
+	// The rename is written before the save, marked as uncommitted, so a crash
+	// after the save still finds it; it counts only if the config got that far.
+	h, err := prepareRename(dataDir, store.Rename{From: from, To: to})
 	if err != nil {
 		return nil, abort(err)
 	}
@@ -169,9 +171,14 @@ func (o *Ops) RenameAccount(ctx context.Context, from, to string) (warnings []st
 		save = func(c *config.Config, path string) error { return c.Save(path) }
 	}
 	if err := save(cfg, cfgPath); err != nil {
+		h.discard()
 		return nil, abort(fmt.Errorf("save config.toml: %w", err))
 	}
 	// From here on the rename has happened: what fails below is a warning.
+	// The state goes first, before the old vault entries are deleted.
+	if err := h.apply(cfg); err != nil {
+		warnings = append(warnings, fmt.Sprintf("the statistics and alert state of %q were not carried over: %v", from, err))
+	}
 	if dropped {
 		warnings = append(warnings, fmt.Sprintf("the saved sign-in could not be read and was not moved; run `e5extend account login %s`", to))
 	}
@@ -183,9 +190,6 @@ func (o *Ops) RenameAccount(ctx context.Context, from, to string) (warnings []st
 			warnings = append(warnings, err.Error())
 		}
 	}
-	if err := h.apply(store.Rename{From: from, To: to}, cfg); err != nil {
-		warnings = append(warnings, fmt.Sprintf("the statistics and alert state of %q were not carried over: %v", from, err))
-	}
 	return warnings, nil
 }
 
@@ -194,20 +198,29 @@ func (o *Ops) RenameAccount(ctx context.Context, from, to string) (warnings []st
 // lock held, it rewrites state.json).
 type renameHandover struct {
 	dataDir string
+	r       store.Rename
 	handed  bool   // an engine is running and gets the rename in a file
 	release func() // the engine lock, when held
+	file    string // the uncommitted rename file written before the save, without an engine
 }
 
-func prepareRename(dataDir string) (*renameHandover, error) {
-	h := &renameHandover{dataDir: dataDir}
+// prepareRename takes the engine lock if no engine runs, and then writes the
+// rename, uncommitted, before the config is saved.
+func prepareRename(dataDir string, r store.Rename) (*renameHandover, error) {
+	h := &renameHandover{dataDir: dataDir, r: r}
 	release, err := acquireEngineLock(dataDir)
 	switch {
 	case errors.Is(err, engine.ErrRunning):
 		h.handed = true
+		return h, nil
 	case err != nil:
 		return nil, err
-	default:
-		h.release = release
+	}
+	h.release = release
+	h.r.Uncommitted = true
+	if h.file, err = store.SavePendingRenamesFile(dataDir, time.Time{}, []store.Rename{h.r}); err != nil {
+		h.close()
+		return nil, fmt.Errorf("write the rename: %w", err)
 	}
 	return h, nil
 }
@@ -219,37 +232,50 @@ func (h *renameHandover) close() {
 	}
 }
 
+// discard takes back the rename after the config could not be saved.
+func (h *renameHandover) discard() {
+	if h.file != "" {
+		_ = os.Remove(h.file)
+	}
+}
+
 // apply finishes the handover once the config is saved. A running engine gets
-// the rename in a file; without one it is applied to state.json here, after
-// any rename an engine left unapplied before it stopped.
-func (h *renameHandover) apply(r store.Rename, cfg *config.Config) error {
+// the rename in a file, written only now so that it is one the config has;
+// without one it is applied to state.json here, after any rename an engine left
+// unapplied before it stopped.
+func (h *renameHandover) apply(cfg *config.Config) error {
 	defer h.close()
 	if h.handed {
-		return store.SavePendingRenames(h.dataDir, time.Time{}, []store.Rename{r})
+		return store.SavePendingRenames(h.dataDir, time.Time{}, []store.Rename{h.r})
 	}
 	files, err := store.ClaimPendingRenames(h.dataDir)
 	if err != nil {
 		return err
 	}
 	rs, written, _ := store.ReadClaimedRenames(files)
-	rs = append(rs, r)
-	cleanup := func() {
-		for _, f := range files {
-			_ = os.Remove(f)
+	has := func(n string) bool { _, ok := cfg.Find(n); return ok }
+	var valid []store.Rename
+	for _, r := range rs {
+		if r.Valid(has) {
+			r.Uncommitted = false
+			valid = append(valid, r)
 		}
 	}
 	st := store.New(h.dataDir)
 	state, err := st.LoadState()
 	if err == nil {
-		state.ApplyRenames(rs, nil)
-		state.TidyRenames(func(n string) bool { _, ok := cfg.Find(n); return ok })
+		state.ApplyRenames(valid, nil)
+		state.TidyRenames(has)
 		err = st.SaveState(state)
 	}
-	cleanup()
 	if err != nil {
-		// Leave the renames for the engine to apply when it starts.
-		_ = store.SavePendingRenames(h.dataDir, written, rs)
+		// Give the files back for the engine to apply when it starts.
+		_ = store.UnclaimRenames(files)
 		return err
 	}
+	for _, f := range files {
+		_ = os.Remove(f)
+	}
+	_ = written
 	return nil
 }

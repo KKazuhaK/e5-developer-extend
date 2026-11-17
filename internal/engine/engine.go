@@ -161,7 +161,10 @@ type Engine struct {
 	// detached holds the state of accounts the loaded configuration lacks (see rename.go);
 	// renamedTo are the names accounts were renamed to.
 	detached  map[string]*detachedState
-	renamedTo map[string]bool
+	renamedTo map[string]time.Time
+	// made are the empty states syncAccountsLocked created for accounts it had none for;
+	// a rename that arrives later replaces them with the real state.
+	made map[string]*store.AccountState
 	// unsaved is set when the state in memory differs from state.json because a save failed.
 	unsaved bool
 	// roundsDone is set when the first round has finished; the subscription
@@ -611,6 +614,10 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 			} else {
 				as = &store.AccountState{Status: store.StatusOK}
 				e.state.Accounts[a.Name] = as
+				if e.made == nil {
+					e.made = map[string]*store.AccountState{}
+				}
+				e.made[a.Name] = as
 				e.setNextLocked(as, now.Add(e.rnd(time.Minute, 5*time.Minute)))
 			}
 		} else if startup && (as.Status == store.StatusOK || as.Status == store.StatusNeedsAttention) && !as.NextRun.After(now) {
@@ -619,6 +626,9 @@ func (e *Engine) syncAccountsLocked(now time.Time, startup bool) {
 		if e.rt[a.Name] == nil {
 			e.rt[a.Name] = &accountRT{}
 		}
+		// The account is in the configuration now: a rename can no longer hand its
+		// state over by name, so a name that is removed and added again starts empty.
+		delete(e.renamedTo, a.Name)
 	}
 	for n, as := range e.state.Accounts {
 		if !names[n] {

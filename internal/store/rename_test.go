@@ -1,7 +1,6 @@
 package store
 
 import (
-	"os"
 	"reflect"
 	"testing"
 	"time"
@@ -41,7 +40,7 @@ func TestApplyRenamesRunsInOrderSoSwapsAndChainsWork(t *testing.T) {
 	st.Accounts["a"] = &AccountState{Totals: Totals{Rounds: 1}, PasswordBlocked: &PasswordBlock{Code: "AADSTS50126"}}
 	st.Accounts["b"] = &AccountState{Totals: Totals{Rounds: 2}}
 	// A swap through a temporary name.
-	applied := st.ApplyRenames([]Rename{{"a", "tmp"}, {"b", "a"}, {"tmp", "b"}}, nil)
+	applied := st.ApplyRenames([]Rename{{From: "a", To: "tmp"}, {From: "b", To: "a"}, {From: "tmp", To: "b"}}, nil)
 	if len(applied) != 3 {
 		t.Fatalf("applied %v", applied)
 	}
@@ -55,7 +54,7 @@ func TestApplyRenamesRunsInOrderSoSwapsAndChainsWork(t *testing.T) {
 		t.Errorf("renamed_from: %v", st.RenamedFrom)
 	}
 	// A chain, and a rename onto an account that is added afterwards.
-	st.ApplyRenames([]Rename{{"b", "c"}, {"c", "d"}}, nil)
+	st.ApplyRenames([]Rename{{From: "b", To: "c"}, {From: "c", To: "d"}}, nil)
 	if st.Accounts["d"].Totals.Rounds != 1 || st.Accounts["b"] != nil || st.Accounts["c"] != nil {
 		t.Errorf("after the chain: %+v", st.Accounts)
 	}
@@ -88,52 +87,76 @@ func TestTidyRenames(t *testing.T) {
 	}
 }
 
-func TestPendingRenameFile(t *testing.T) {
+func TestPendingRenameFilesAreClaimedInOrderAndNeverAppendedTo(t *testing.T) {
 	dir := t.TempDir()
 	at := time.Now().Add(-time.Hour).Truncate(time.Second)
-	if err := SavePendingRenames(dir, at, []Rename{{"a", "b"}}); err != nil {
+	if err := SavePendingRenames(dir, at, []Rename{{From: "a", To: "tmp"}}); err != nil {
 		t.Fatal(err)
 	}
-	if err := SavePendingRenames(dir, time.Time{}, []Rename{{"b", "c"}, {"c", "a"}}); err != nil {
+	first, err := ClaimPendingRenames(dir) // the engine claims [a to tmp] ...
+	if err != nil || len(first) != 1 || HasPendingRename(dir) {
+		t.Fatalf("claim: %v %v", first, err)
+	}
+	// ... while b to a is saved: a file of its own, not a change to the claimed one.
+	if err := SavePendingRenames(dir, time.Time{}, []Rename{{From: "b", To: "a"}}); err != nil {
 		t.Fatal(err)
 	}
-	files, err := ClaimPendingRenames(dir)
-	if err != nil || len(files) != 1 || HasPendingRename(dir) {
-		t.Fatalf("claim: %v %v", files, err)
+	if !HasPendingRename(dir) {
+		t.Fatal("the rename saved during the claim is not waiting")
 	}
-	rs, written, errs := ReadClaimedRenames(files)
-	if len(errs) != 0 || !reflect.DeepEqual(rs, []Rename{{"a", "b"}, {"b", "c"}, {"c", "a"}}) || !written.Equal(at) {
-		t.Errorf("read: %v %v %v", rs, written, errs)
+	rs, written, errs := ReadClaimedRenames(first)
+	if len(errs) != 0 || !reflect.DeepEqual(rs, []Rename{{From: "a", To: "tmp"}}) || !written.Equal(at) {
+		t.Errorf("first claim: %v %v %v", rs, written, errs)
 	}
-	for _, f := range files {
-		_ = os.Remove(f)
-	}
-	// Claimed renames that could not be used go back in front of newer ones.
-	if err := SavePendingRenames(dir, time.Time{}, []Rename{{"x", "y"}}); err != nil {
+	// The engine could not use the first claim and gives it back: it keeps its place in front of the newer file.
+	if err := UnclaimRenames(first); err != nil {
 		t.Fatal(err)
 	}
-	if err := RestorePendingRenames(dir, written, rs); err != nil {
+	if err := SavePendingRenames(dir, time.Time{}, []Rename{{From: "tmp", To: "b"}}); err != nil {
 		t.Fatal(err)
 	}
-	p, _ := ReadPendingRenameFile(PendingRenamePath(dir))
-	if p == nil || !reflect.DeepEqual(p.Renames, []Rename{{"a", "b"}, {"b", "c"}, {"c", "a"}, {"x", "y"}}) {
-		t.Errorf("restored: %+v", p)
+	all, err := ClaimPendingRenames(dir)
+	if err != nil || len(all) != 3 {
+		t.Fatalf("claim: %v %v", all, err)
 	}
-	// An interrupted claim is found again.
-	if _, err := ClaimPendingRenames(dir); err != nil {
-		t.Fatal(err)
+	rs, _, _ = ReadClaimedRenames(all)
+	if !reflect.DeepEqual(rs, []Rename{{From: "a", To: "tmp"}, {From: "b", To: "a"}, {From: "tmp", To: "b"}}) {
+		t.Errorf("order: %v", rs)
 	}
+	// An interrupted claim is found again, and removing deletes everything.
 	again, _ := ClaimPendingRenames(dir)
-	if len(again) != 1 {
-		t.Errorf("claimed file not found again: %v", again)
+	if len(again) != 3 {
+		t.Errorf("claimed files not found again: %v", again)
 	}
 	if err := RemovePendingRename(dir); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := ClaimPendingRenames(dir); len(again) != 0 {
-		t.Errorf("left: %v", again)
+	if left, _ := ClaimPendingRenames(dir); len(left) != 0 || HasPendingRename(dir) {
+		t.Errorf("left: %v", left)
 	}
-	_ = os.Remove(PendingRenamePath(dir))
+}
+
+func TestUncommittedRenameCountsOnlyWhenTheConfigGotThatFar(t *testing.T) {
+	cfg := func(names ...string) func(string) bool {
+		return func(n string) bool {
+			for _, x := range names {
+				if x == n {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	r := Rename{From: "a", To: "b", Uncommitted: true}
+	if r.Valid(cfg("a")) || r.Valid(cfg("a", "b")) || r.Valid(cfg("c")) {
+		t.Error("applied although the config did not get that far")
+	}
+	if !r.Valid(cfg("b")) {
+		t.Error("not applied although the config has the new name")
+	}
+	if !(Rename{From: "a", To: "b"}).Valid(cfg("a")) {
+		t.Error("a committed rename is always valid")
+	}
 }
 
 func TestReadFollowsRenamedFrom(t *testing.T) {

@@ -358,9 +358,10 @@ func TestRenameAccountWhileEngineHoldsTheLockHandsTheRenameOver(t *testing.T) {
 	if string(mustRead(t, filepath.Join(m.dataDir, "state.json"))) != string(stateBefore) {
 		t.Error("state.json was written under a running engine")
 	}
-	p, err := store.ReadPendingRenameFile(store.PendingRenamePath(m.dataDir))
-	if err != nil || p == nil || len(p.Renames) != 1 || p.Renames[0] != (store.Rename{From: "old", To: "fresh"}) {
-		t.Errorf("hand-over: %+v %v", p, err)
+	files, err := store.ClaimPendingRenames(m.dataDir)
+	rs, _, _ := store.ReadClaimedRenames(files)
+	if err != nil || len(rs) != 1 || rs[0] != (store.Rename{From: "old", To: "fresh"}) {
+		t.Errorf("hand-over: %+v %v", rs, err)
 	}
 }
 
@@ -482,11 +483,13 @@ func TestRenameAccountSwapWithARunningEngine(t *testing.T) {
 		}
 	}
 	m.ReloadEngine()
+	// Wait for the finished swap itself, not for a time: each account has the other's state.
 	waitFor(t, "the engine to apply the renames", func() bool {
 		s, err := store.New(m.dataDir).LoadState()
-		return err == nil && !store.HasPendingRename(m.dataDir) && s.Accounts["b"] != nil && s.Accounts["b"].Totals.Rounds == 1 && s.Accounts["tmp"] == nil
+		return err == nil && !store.HasPendingRename(m.dataDir) && s.Accounts["tmp"] == nil &&
+			s.Accounts["a"] != nil && s.Accounts["a"].Totals.Rounds == 2 &&
+			s.Accounts["b"] != nil && s.Accounts["b"].Totals.Rounds == 1 && s.Accounts["b"].PasswordBlocked != nil
 	})
-	time.Sleep(200 * time.Millisecond)
 	stop()
 	got := m.state()
 	if got.Accounts["b"].PasswordBlocked == nil || got.Accounts["a"].PasswordBlocked != nil || got.Accounts["a"].Totals.Rounds != 2 {

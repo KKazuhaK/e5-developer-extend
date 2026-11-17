@@ -222,3 +222,59 @@ func TestStartAppliesRename(t *testing.T) {
 }
 
 func fileExists(p string) bool { _, err := os.Stat(p); return err == nil }
+
+// A name that was renamed to and later removed starts empty when it is added
+// again: nothing of the removed account, its password block least of all, comes back.
+func TestReAddedNameDoesNotInheritARemovedRenamedAccount(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"), delegatedAcct("other"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+	f.e.updateAccount(context.Background(), "main", func(as *store.AccountState) {
+		as.PasswordBlocked = &store.PasswordBlock{Code: "AADSTS50126", At: f.clock.Now()}
+	})
+
+	f.renameConfig(path, "renamed", "other")
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed"}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if f.acct("renamed").PasswordBlocked == nil {
+		t.Fatal("setup: the block did not follow the account")
+	}
+
+	f.renameConfig(path, "other") // removed
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	f.renameConfig(path, "renamed", "other") // added again
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("renamed"); got.PasswordBlocked != nil || got.Totals.Rounds != 0 {
+		t.Errorf("the new account inherited the removed one: %+v", got)
+	}
+}
+
+// A rename written before its config was saved (and never committed) is not
+// applied while the config still has the old name.
+func TestUncommittedRenameIsIgnoredUntilTheConfigHasIt(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	path := filepath.Join(f.dir, "config.toml")
+	_ = f.cfg.Save(path)
+	f.opts.ConfigPath = path
+	f.start()
+	f.round("main")
+	if err := store.SavePendingRenames(f.dir, time.Time{}, []store.Rename{{From: "main", To: "renamed", Uncommitted: true}}); err != nil {
+		t.Fatal(err)
+	}
+	_ = TriggerReload(f.dir)
+	f.tickWait()
+	if got := f.acct("main"); got.Totals.Rounds != 1 {
+		t.Errorf("a rename the config never got to was applied: %+v", got)
+	}
+	if store.HasPendingRename(f.dir) {
+		t.Error("the file was left")
+	}
+}

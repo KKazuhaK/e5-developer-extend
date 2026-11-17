@@ -23,6 +23,7 @@ type detachedState struct {
 type claimedRenames struct {
 	rs      []store.Rename
 	written time.Time
+	files   []string // the claimed files, already deleted unless the claim is given back
 }
 
 // claimRenames takes the account renames `account rename` handed over. It must
@@ -43,17 +44,27 @@ func (e *Engine) claimRenames() *claimedRenames {
 	for _, err := range errs {
 		e.log.Warn("ignoring the account renames", "err", err)
 	}
-	for _, f := range files {
+	if len(rs) == 0 || e.clock.Now().Sub(written) > importMaxAge {
+		if len(rs) > 0 {
+			e.event("", "rename_expired", "account renames older than 7 days were ignored")
+		}
+		for _, f := range files {
+			_ = os.Remove(f)
+		}
+		return nil
+	}
+	// The files stay claimed until the configuration is loaded: if that fails they are given back.
+	return &claimedRenames{rs: rs, written: written, files: files}
+}
+
+// finishClaim deletes the claimed files once their renames are used.
+func (c *claimedRenames) finish() {
+	if c == nil {
+		return
+	}
+	for _, f := range c.files {
 		_ = os.Remove(f)
 	}
-	if len(rs) == 0 {
-		return nil
-	}
-	if e.clock.Now().Sub(written) > importMaxAge {
-		e.event("", "rename_expired", "account renames older than 7 days were ignored")
-		return nil
-	}
-	return &claimedRenames{rs: rs, written: written}
 }
 
 // unclaimRenames puts claimed renames back, in front of newer ones, when the
@@ -62,7 +73,7 @@ func (e *Engine) unclaimRenames(c *claimedRenames) {
 	if c == nil {
 		return
 	}
-	if err := store.RestorePendingRenames(e.o.DataDir, c.written, c.rs); err != nil {
+	if err := store.UnclaimRenames(c.files); err != nil {
 		e.log.Warn("keep the account renames for later", "err", err)
 	}
 }
@@ -79,10 +90,23 @@ func (e *Engine) applyRenamesLocked(c *claimedRenames) []store.Rename {
 	for n, d := range e.detached {
 		detached[n] = d.as
 	}
+	var applied []store.Rename
 	for _, r := range c.rs {
 		if r.From == r.To {
 			continue
 		}
+		// A rename written before its config was saved counts only if the config got that far.
+		if !r.Valid(e.cfgHas) {
+			continue
+		}
+		applied = append(applied, r)
+		// The configuration may have run ahead of this rename: an account that has
+		// not been renamed yet (a to tmp, while b to a already saved) then has an
+		// empty state made for its name, and the real one was set aside.
+		if live := e.state.Accounts[r.From]; live != nil && e.made[r.From] == live && !hasActivity(live) && detached[r.From] != nil {
+			delete(e.state.Accounts, r.From)
+		}
+		delete(e.made, r.From)
 		e.state.ApplyRename(r.From, r.To, detached)
 		if rt := e.rt[r.From]; rt != nil {
 			rt.name = r.To
@@ -92,17 +116,20 @@ func (e *Engine) applyRenamesLocked(c *claimedRenames) []store.Rename {
 			delete(e.rt, r.To)
 		}
 		if e.renamedTo == nil {
-			e.renamedTo = map[string]bool{}
+			e.renamedTo = map[string]time.Time{}
 		}
-		e.renamedTo[r.To] = true
+		e.renamedTo[r.To] = e.clock.Now()
 	}
+	c.finish()
 	for n := range e.detached {
 		if _, still := detached[n]; !still {
 			delete(e.detached, n)
 		}
 	}
-	return c.rs
+	return applied
 }
+
+func (e *Engine) cfgHas(name string) bool { _, ok := e.cfg.Find(name); return ok }
 
 // detachLocked sets the state of an account the configuration does not have
 // aside instead of dropping it.
@@ -121,7 +148,12 @@ func (e *Engine) recoverLocked(name string, now time.Time) *store.AccountState {
 			delete(e.detached, n)
 		}
 	}
-	if !e.renamedTo[name] {
+	for n, at := range e.renamedTo {
+		if now.Sub(at) > detachedTTL {
+			delete(e.renamedTo, n)
+		}
+	}
+	if _, ok := e.renamedTo[name]; !ok {
 		return nil
 	}
 	d := e.detached[name]

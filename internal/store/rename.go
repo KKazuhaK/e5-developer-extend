@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
@@ -21,6 +22,19 @@ const maxRenamedFrom = 8
 type Rename struct {
 	From string `json:"from"`
 	To   string `json:"to"`
+	// Uncommitted marks a rename written before its config.toml was saved (by a
+	// process that holds the engine lock and applies it itself). Whoever finds
+	// it later, after a crash, applies it only if the config has the new name
+	// and no longer the old one.
+	Uncommitted bool `json:"uncommitted,omitempty"`
+}
+
+// Valid reports whether the rename may be applied against a configuration
+// for which has says whether an account of a name exists: a committed rename
+// always may, an uncommitted one only when the configuration got as far as
+// having the new name and not the old one.
+func (r Rename) Valid(has func(string) bool) bool {
+	return !r.Uncommitted || (has(r.To) && !has(r.From))
 }
 
 // accountTenantKey is the tenant key of an account that names no tenant of its
@@ -131,60 +145,70 @@ func (s *State) ApplyRenames(rs []Rename, detached map[string]*AccountState) []R
 	return applied
 }
 
-// PendingRenameFile is the name of the file a rename leaves in the data
-// directory when an engine is running. Like PendingImportFile it is how a
-// process that must not write state.json hands a change to the engine, which
-// applies it when it loads the configuration that holds the new name.
-const PendingRenameFile = "state.rename.json"
+// Pending renames: a process that must not write state.json hands a rename to
+// the running engine in a file of its own, state.rename.<seq>.json, where seq
+// is a number that grows with every file. Each rename is a separate file that
+// is written once and never changed, so a writer never races the engine's claim
+// (the engine takes files, in seq order, by renaming them); a file written while
+// the engine claims simply waits for the next claim.
+const (
+	pendingRenamePrefix = "state.rename."
+	claimedRenamePrefix = "state.rename.adopting-"
+	pendingRenameSuffix = ".json"
+)
 
-const renamingPrefix = "state.rename.adopting-"
-
-// PendingRename is the content of PendingRenameFile.
+// PendingRename is the content of one pending-rename file.
 type PendingRename struct {
-	// Written is when the first of the renames was written; the engine drops them if they wait too long.
+	// Written is when it was written; the engine drops it if it waits too long.
 	Written time.Time `json:"written"`
 	// Renames are in the order they were made.
 	Renames []Rename `json:"renames"`
 }
 
-// PendingRenamePath returns where the pending renames of the data directory dir are.
-func PendingRenamePath(dir string) string { return filepath.Join(dir, PendingRenameFile) }
+var renameSeq atomic.Int64
 
-// SavePendingRenames appends rs, which are newer, to the pending renames,
-// atomically (mode 0600). written is the time of the first writing; the zero
-// value means now.
+// nextRenameSeq returns a number larger than any this process gave out before
+// and than the wall clock of an earlier moment, as a fixed-width string that sorts as a number.
+func nextRenameSeq() string {
+	now := time.Now().UnixNano()
+	for {
+		last := renameSeq.Load()
+		next := now
+		if next <= last {
+			next = last + 1
+		}
+		if renameSeq.CompareAndSwap(last, next) {
+			return fmt.Sprintf("%020d", next)
+		}
+	}
+}
+
+// isPendingRenameName reports whether a file name is a waiting (not claimed) pending-rename file.
+func isPendingRenameName(n string) bool {
+	return strings.HasPrefix(n, pendingRenamePrefix) && strings.HasSuffix(n, pendingRenameSuffix) && !strings.HasPrefix(n, claimedRenamePrefix)
+}
+
+// SavePendingRenames writes rs, in order, as a new pending-rename file
+// (mode 0600), atomically. written is the time of writing; the zero value means now.
 func SavePendingRenames(dir string, written time.Time, rs []Rename) error {
-	return savePendingRenames(dir, written, rs, false)
+	_, err := SavePendingRenamesFile(dir, written, rs)
+	return err
 }
 
-// RestorePendingRenames puts rs, which are older than whatever is waiting,
-// back in front of it (an engine that claimed them could not use them yet).
-func RestorePendingRenames(dir string, written time.Time, rs []Rename) error {
-	return savePendingRenames(dir, written, rs, true)
-}
-
-func savePendingRenames(dir string, written time.Time, rs []Rename, older bool) error {
-	p := &PendingRename{Written: written}
-	if old, err := ReadPendingRenameFile(PendingRenamePath(dir)); err == nil && old != nil {
-		if older {
-			p.Renames = append(slices.Clone(rs), old.Renames...)
-		} else {
-			p.Renames = append(slices.Clone(old.Renames), rs...)
-		}
-		if !old.Written.IsZero() && (p.Written.IsZero() || old.Written.Before(p.Written)) {
-			p.Written = old.Written
-		}
-	} else {
-		p.Renames = slices.Clone(rs)
+// SavePendingRenamesFile is SavePendingRenames that also returns the file it wrote ("" for nothing to write).
+func SavePendingRenamesFile(dir string, written time.Time, rs []Rename) (string, error) {
+	if len(rs) == 0 {
+		return "", nil
 	}
-	if p.Written.IsZero() {
-		p.Written = time.Now()
+	if written.IsZero() {
+		written = time.Now()
 	}
-	b, err := json.MarshalIndent(p, "", "  ")
+	b, err := json.MarshalIndent(&PendingRename{Written: written, Renames: rs}, "", "  ")
 	if err != nil {
-		return err
+		return "", err
 	}
-	return paths.WriteFileAtomic(PendingRenamePath(dir), append(b, '\n'))
+	path := filepath.Join(dir, pendingRenamePrefix+nextRenameSeq()+pendingRenameSuffix)
+	return path, paths.WriteFileAtomic(path, append(b, '\n'))
 }
 
 // ReadPendingRenameFile reads a pending-rename file (also a claimed one); nil when there is none.
@@ -198,7 +222,7 @@ func ReadPendingRenameFile(path string) (*PendingRename, error) {
 	}
 	var p PendingRename
 	if err := json.Unmarshal(b, &p); err != nil {
-		return nil, fmt.Errorf("%s is damaged", PendingRenameFile)
+		return nil, fmt.Errorf("%s is damaged", filepath.Base(path))
 	}
 	if p.Written.IsZero() {
 		if fi, err := os.Stat(path); err == nil {
@@ -208,11 +232,20 @@ func ReadPendingRenameFile(path string) (*PendingRename, error) {
 	return &p, nil
 }
 
-// ClaimPendingRenames takes the pending renames for the caller by renaming the
-// file to a name of its own, like ClaimPendingImports; it also returns files an
-// interrupted claim left behind. The caller deletes each when it is done.
+// seqOf returns the sequence number part of a pending or claimed file name.
+func seqOf(name string) string {
+	name = strings.TrimSuffix(name, pendingRenameSuffix)
+	name = strings.TrimPrefix(name, claimedRenamePrefix)
+	return strings.TrimPrefix(name, pendingRenamePrefix)
+}
+
+// ClaimPendingRenames takes the waiting pending-rename files for the caller by
+// renaming each to a name of its own, so a file written meanwhile waits for the
+// next claim instead of being lost or applied twice. It also returns files an
+// interrupted claim left behind. The result is in seq order, which is the order
+// the renames were made. The caller deletes the files when done, or gives them
+// back with UnclaimRenames.
 func ClaimPendingRenames(dir string) ([]string, error) {
-	var out []string
 	ents, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -220,24 +253,46 @@ func ClaimPendingRenames(dir string) ([]string, error) {
 		}
 		return nil, err
 	}
+	var out []string
 	for _, de := range ents {
-		if !de.IsDir() && strings.HasPrefix(de.Name(), renamingPrefix) {
-			out = append(out, filepath.Join(dir, de.Name()))
+		n := de.Name()
+		if de.IsDir() {
+			continue
+		}
+		switch {
+		case strings.HasPrefix(n, claimedRenamePrefix) && strings.HasSuffix(n, pendingRenameSuffix):
+			out = append(out, filepath.Join(dir, n))
+		case isPendingRenameName(n):
+			aside := filepath.Join(dir, claimedRenamePrefix+seqOf(n)+pendingRenameSuffix)
+			if err := os.Rename(filepath.Join(dir, n), aside); err != nil {
+				if errors.Is(err, fs.ErrNotExist) {
+					continue
+				}
+				return out, err
+			}
+			out = append(out, aside)
 		}
 	}
-	aside := filepath.Join(dir, fmt.Sprintf("%s%d-%d", renamingPrefix, os.Getpid(), time.Now().UnixNano()))
-	switch err := os.Rename(PendingRenamePath(dir), aside); {
-	case err == nil:
-		out = append(out, aside)
-	case !errors.Is(err, fs.ErrNotExist):
-		return out, err
-	}
+	slices.SortFunc(out, func(a, b string) int { return strings.Compare(seqOf(filepath.Base(a)), seqOf(filepath.Base(b))) })
 	return out, nil
 }
 
+// UnclaimRenames gives claimed files back (the engine could not use them yet),
+// under their original names, so they keep their place in the order.
+func UnclaimRenames(files []string) error {
+	var errs []error
+	for _, f := range files {
+		back := filepath.Join(filepath.Dir(f), pendingRenamePrefix+seqOf(filepath.Base(f))+pendingRenameSuffix)
+		if err := os.Rename(f, back); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}
+
 // ReadClaimedRenames reads the claimed files in order and returns their
-// renames and the oldest time of writing. A damaged file is
-// skipped and its error returned.
+// renames and the oldest time of writing. A damaged file is skipped and its
+// error returned.
 func ReadClaimedRenames(files []string) (rs []Rename, written time.Time, errs []error) {
 	for _, f := range files {
 		p, err := ReadPendingRenameFile(f)
@@ -256,26 +311,34 @@ func ReadClaimedRenames(files []string) (rs []Rename, written time.Time, errs []
 	return rs, written, errs
 }
 
-// RemovePendingRename deletes the pending-rename file and any claimed one.
+// RemovePendingRename deletes every pending-rename file, claimed or not.
 func RemovePendingRename(dir string) error {
-	files := []string{PendingRenamePath(dir)}
-	if ents, err := os.ReadDir(dir); err == nil {
-		for _, de := range ents {
-			if strings.HasPrefix(de.Name(), renamingPrefix) {
-				files = append(files, filepath.Join(dir, de.Name()))
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	var errs []error
+	for _, de := range ents {
+		n := de.Name()
+		if !de.IsDir() && strings.HasPrefix(n, pendingRenamePrefix) && strings.HasSuffix(n, pendingRenameSuffix) {
+			if err := os.Remove(filepath.Join(dir, n)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+				errs = append(errs, err)
 			}
 		}
 	}
-	for _, f := range files {
-		if err := os.Remove(f); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
-	}
-	return nil
+	return errors.Join(errs...)
 }
 
-// HasPendingRename reports whether a pending-rename file exists.
+// HasPendingRename reports whether a pending-rename file is waiting.
 func HasPendingRename(dir string) bool {
-	_, err := os.Stat(PendingRenamePath(dir))
-	return err == nil
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	for _, de := range ents {
+		if !de.IsDir() && isPendingRenameName(de.Name()) {
+			return true
+		}
+	}
+	return false
 }
