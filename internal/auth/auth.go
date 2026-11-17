@@ -22,6 +22,7 @@ type Token struct {
 	ExpiresOn     time.Time
 	Scopes        []string // from the JWT scp (delegated) or roles (application) claim
 	Account       string   // UPN or application ID, for display
+	TenantID      string   // tid claim of the token, when it has one
 	HomeAccountID string   // delegated only; stored back into the config after login
 }
 

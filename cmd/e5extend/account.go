@@ -24,21 +24,36 @@ func (a *app) newAccountCmd() *cobra.Command {
 
 func (a *app) newAccountAddCmd() *cobra.Command {
 	var acct config.Account
+	var auto, storedSecret bool
+	var sf setupFlags
 	cmd := &cobra.Command{
 		Use:   "add <name>",
 		Short: "Add an account to the configuration",
 		Long: "Add an account. For client_secret and password the secret is read without echo\n" +
-			"from the terminal, or one line from stdin when it is not a terminal, and stored in the vault.",
+			"from the terminal, or one line from stdin when it is not a terminal, and stored in the vault.\n\n" +
+			"With --auto the app registration is created in your tenant first (see: e5extend app setup --help),\n" +
+			"then the account is added and signed in. --tenant is then optional and --client-id must be left out.",
 		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			acct.Name = args[0]
+			if auto {
+				if storedSecret {
+					return errors.New("--auto and --stored-secret exclude each other")
+				}
+				return a.accountAddAuto(cmd, acct, sf)
+			}
+			for _, name := range []string{"tenant", "client-id"} {
+				if !cmd.Flags().Changed(name) {
+					return fmt.Errorf("required flag %q not set (or use --auto to create the app registration)", name)
+				}
+			}
 			// Validate the account on its own first, so a bad flag fails before any prompt.
 			if err := ops.ValidateAccount(acct); err != nil {
 				return err
 			}
 
 			var secret string
-			if acct.NeedsSecret() {
+			if acct.NeedsSecret() && !storedSecret {
 				var err error
 				if secret, err = promptNewSecret(cmd, acct); err != nil {
 					return err
@@ -46,10 +61,12 @@ func (a *app) newAccountAddCmd() *cobra.Command {
 			}
 			in := ops.InputOf(acct)
 			in.Secret = secret
+			in.UseStoredSecret = storedSecret
 			in.Categories = acct.Categories
 			if err := a.ops().AddAccount(contextOrBackground(cmd), in); err != nil {
 				return err
 			}
+			a.ops().ReloadEngine()
 			fmt.Fprintf(cmd.OutOrStdout(), "added account %q (%s)\n", acct.Name, acct.Auth)
 			fmt.Fprintf(cmd.OutOrStdout(), "next: e5extend account login %s\n", acct.Name)
 			return nil
@@ -61,9 +78,11 @@ func (a *app) newAccountAddCmd() *cobra.Command {
 	f.StringVar(&acct.ClientID, "client-id", "", "application (client) ID of your app registration")
 	f.StringVar(&acct.Username, "username", "", "sign-in name (password) or target user (client_secret)")
 	f.StringVar(&acct.SecretExpires, "secret-expires", "", "client secret expiry date, YYYY-MM-DD")
-	for _, name := range []string{"auth", "tenant", "client-id"} {
-		_ = cmd.MarkFlagRequired(name)
-	}
+	f.BoolVar(&auto, "auto", false, "create the app registration automatically (administrator sign-in), then add and sign in the account")
+	f.BoolVar(&storedSecret, "stored-secret", false, "use the client secret already in the vault under this name (see: e5extend app setup --app-only)")
+	sf.register(cmd)
+	f.StringVar(&sf.method, "setup-auth", "", "with --auto: administrator sign-in for the setup, device_code (default for client_secret) or browser")
+	_ = cmd.MarkFlagRequired("auth")
 	return cmd
 }
 
@@ -103,6 +122,7 @@ func (a *app) newAccountSetSecretCmd() *cobra.Command {
 			if err := o.SetSecret(contextOrBackground(cmd), name, secret, expires); err != nil {
 				return err
 			}
+			o.ReloadEngine()
 			fmt.Fprintf(cmd.OutOrStdout(), "stored the new secret for account %q\nnext: e5extend account login %s   (verifies it)\n", name, name)
 			return nil
 		},
@@ -156,6 +176,7 @@ func (a *app) newAccountLoginCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			a.ops().ReloadEngine()
 			out := cmd.OutOrStdout()
 			if res.Delegated {
 				fmt.Fprintf(out, "signed in as %s\n", res.Account)
@@ -221,6 +242,7 @@ func (a *app) newAccountRemoveCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			o.ReloadEngine()
 			for _, w := range warnings {
 				fmt.Fprintf(cmd.ErrOrStderr(), "warning: %s\n", w)
 			}

@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, CheckCircle2, Copy, ExternalLink, LogIn, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, CheckCircle2, ExternalLink, LogIn, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { api } from "@/api";
-import type { AccountInput, AuthKind, CatalogEntry, LoginEvent, TestResult } from "@/api";
+import type { AccountInput, AppSetupCancelResult, AppSetupResult, AuthKind, CatalogEntry, LoginEvent, TestResult } from "@/api";
 import { formatWhen } from "@/lib/time";
 import { DOCS_URL } from "@/config";
 import { useI18n, type DictKey } from "@/i18n";
-import { useToast } from "@/components/toast";
 import { useApp } from "@/state/app";
+import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,9 +14,13 @@ import { Input } from "@/components/ui/input";
 import { ErrorBlock, Field, LoadingBlock, PageHeader, Spinner, fieldAria } from "@/components/common";
 import { AUTH_KINDS, isInteractive, needsSecret, needsUsername, secretRequired, summarizeByCategory, validateAccountInput } from "@/lib/account";
 import type { AccountErrorCode } from "@/lib/account";
-import { cn, copyText, errMsg } from "@/lib/utils";
+import { cn, errMsg } from "@/lib/utils";
+import { BrowserPrompt, DevicePrompt } from "@/components/signin";
+import { progressMsg, validateAutoStart } from "@/lib/appsetup";
+import { AppSetupStep, AutoStartForm, ChoiceCard, ConsentNotice, type AdminMethod } from "./AppSetupFlow";
 
 type Mode = "add" | "edit";
+type Route = "auto" | "manual";
 const STEPS: DictKey[] = ["wizard.step1", "wizard.step2", "wizard.step3", "wizard.step4", "wizard.step5", "wizard.step6"];
 
 const EMPTY: AccountInput = { name: "", auth: "device_code", tenant: "", clientId: "", username: "", categories: [], secretExpires: "" };
@@ -42,6 +46,56 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
   const [restart, setRestart] = useState(0);
   // Add: log in straight after saving. Edit: only when asked (or when opened from "re-login").
   const [autoLogin, setAutoLogin] = useState(mode === "add" || startStep === 4);
+  // Add: the app registration is created for the user (default) or the user brings one. Edit is always manual.
+  const [route, setRoute] = useState<Route>(mode === "add" ? "auto" : "manual");
+  const [adminMethod, setAdminMethod] = useState<AdminMethod>("device_code");
+  // What automatic setup made; null until it has run. Changing its inputs throws it away.
+  const [setup, setSetup] = useState<AppSetupResult | null>(null);
+  const [setupRestart, setSetupRestart] = useState(0);
+  const auto = route === "auto";
+  const toast = useToast();
+  // The session of a finished automatic setup, until the account is saved (then it is finished) or the setup is thrown away (then it is cancelled).
+  const setupSid = useRef<string | null>(null);
+  // True while a thrown-away setup is being cleaned up; a new one must not start before that is over.
+  const [cleaning, setCleaning] = useState(false);
+  const discardSetup = (): Promise<void> => {
+    const sid = setupSid.current;
+    setupSid.current = null;
+    if (!sid) return Promise.resolve();
+    setCleaning(true);
+    // An unused client secret is deleted again; say what happened.
+    return api.appSetup
+      .cancel(sid)
+      .then((r: AppSetupCancelResult) => {
+        if (r.secretRemoved) toast.success(t("auto.secretRevoked"));
+        else if (r.error) toast.error(t("auto.secretStillLive", { detail: r.error }));
+      })
+      .catch(() => undefined)
+      .finally(() => setCleaning(false));
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => void discardSetup(), []); // leaving the wizard
+
+  const changeAuto = (patch: Partial<AccountInput>) => {
+    setErrors({});
+    setInput((i) => {
+      const next = { ...i, ...patch };
+      if (patch.auth && patch.auth !== "client_secret") next.username = "";
+      return next;
+    });
+    if (setup) {
+      void discardSetup();
+      setSetup(null);
+      setInput((i) => ({ ...i, tenant: "", clientId: "", secretExpires: "" }));
+    }
+  };
+  const onSetupResult = (r: AppSetupResult, sessionId: string) => {
+    setupSid.current = sessionId;
+    setSetup(r);
+    setInput((i) => ({ ...i, tenant: r.tenantId, clientId: r.clientId, secretExpires: r.secretExpires }));
+    // Without consent the account is saved but cannot sign in yet.
+    setAutoLogin(r.consentGranted);
+  };
 
   const set = <K extends keyof AccountInput>(k: K, v: AccountInput[K]) => setInput((i) => ({ ...i, [k]: v }));
 
@@ -76,7 +130,12 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
 
   const next = async () => {
     setSaveError(null);
-    if (step === 2) {
+    if (step === 1 && auto && mode === "add") {
+      const e = validateAutoStart(input);
+      setErrors(e);
+      if (Object.keys(e).length) return;
+    }
+    if (step === 2 && !auto) {
       const e = validateAccountInput(input, mode, "identity", savedAuth);
       setErrors(e);
       if (Object.keys(e).length) return;
@@ -89,9 +148,16 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
       setSaving(true);
       try {
         const payload: AccountInput = { ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim() };
+        // Automatic setup already put the client secret in the vault.
+        if (auto && setup && payload.auth === "client_secret" && !persisted) payload.useStoredSecret = true;
         if (persisted) await api.accounts.update({ ...payload, secret: payload.secret || undefined });
         else await api.accounts.add(payload);
         setPersisted(true);
+        if (setupSid.current) {
+          // The account owns the setup's result now (and its secret).
+          void api.appSetup.finish(setupSid.current).catch(() => undefined);
+          setupSid.current = null;
+        }
         setSavedAuth(payload.auth);
         setInput((i) => ({ ...i, ...payload, secret: undefined })); // the secret is gone from memory after this
         void snapshot.refresh();
@@ -132,7 +198,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
 
   return (
     <>
-      <PageHeader title={title} description={t("wizard.subtitle")} actions={step < 6 && <Button variant="ghost" onClick={onClose}>{t("common.cancel")}</Button>} />
+      <PageHeader title={title} description={t("wizard.subtitle")} actions={step < 6 && <Button variant="ghost" onClick={onClose} disabled={saving}>{t("common.cancel")}</Button>} />
 
       <ol className="mb-5 flex items-center gap-1" aria-label={t("wizard.progress")}>
         {STEPS.map((k, i) => {
@@ -150,7 +216,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
               >
                 {state === "done" ? <Check className="size-3.5" aria-hidden /> : n}
               </span>
-              <span className={cn("truncate text-xs", state === "current" ? "font-medium" : "text-muted-foreground")}>{t(k)}</span>
+              <span className={cn("truncate text-xs", state === "current" ? "font-medium" : "text-muted-foreground")}>{t(k === "wizard.step2" && auto ? "wizard.step2auto" : k)}</span>
               {n < 6 && <span className="mx-1 h-px min-w-2 flex-1 bg-border" aria-hidden />}
             </li>
           );
@@ -159,39 +225,89 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
 
       <Card className="min-h-[22rem] p-5">
         {step === 1 && (
-          <div role="radiogroup" aria-label={t("wizard.step1")} className="grid gap-2.5">
-            {AUTH_KINDS.map((k) => {
-              const sel = input.auth === k;
-              return (
-                <button
-                  key={k}
-                  type="button"
-                  role="radio"
-                  aria-checked={sel}
-                  onClick={() => set("auth", k)}
-                  className={cn(
-                    "flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 text-left transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-45",
-                    sel && "border-primary bg-accent/60 ring-1 ring-primary",
-                  )}
-                >
-                  <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border", sel ? "border-primary bg-primary text-primary-foreground" : "border-input")} aria-hidden>
-                    {sel && <Check className="size-3" strokeWidth={3} />}
-                  </span>
-                  <span className="min-w-0">
-                    <span className="flex items-center gap-2 font-medium">
-                      {t(`auth.${k}`)}
-                      {k === "device_code" && <span className="rounded bg-info-bg px-1.5 py-px text-[11px] font-medium text-info">{t("wizard.recommended")}</span>}
-                      {k === "password" && <span className="rounded bg-warning-bg px-1.5 py-px text-[11px] font-medium text-warning">{t("wizard.notRecommended")}</span>}
-                    </span>
-                    <span className="mt-0.5 block text-[13px] text-muted-foreground">{t(`auth.${k}.hint`)}</span>
-                  </span>
-                </button>
-              );
-            })}
+          <div>
+            {mode === "add" && (
+              <div role="radiogroup" aria-label={t("wizard.step1")} className="grid gap-2.5">
+                <ChoiceCard
+                  selected={auto}
+                  disabled={persisted}
+                  onSelect={() => {
+                    setErrors({});
+                    setRoute("auto");
+                  }}
+                  title={t("auto.route.auto")}
+                  hint={t("auto.route.autoHint")}
+                  badge={<span className="rounded bg-info-bg px-1.5 py-px text-[11px] font-medium text-info">{t("wizard.recommended")}</span>}
+                />
+                <ChoiceCard
+                  selected={!auto}
+                  disabled={persisted}
+                  onSelect={() => {
+                    setErrors({});
+                    setRoute("manual");
+                  }}
+                  title={t("auto.route.manual")}
+                  hint={t("auto.route.manualHint")}
+                />
+              </div>
+            )}
+            {auto && mode === "add" ? (
+              <AutoStartForm input={input} method={adminMethod} errors={errors} locked={persisted} onChange={changeAuto} onMethod={setAdminMethod} />
+            ) : (
+              <div className={mode === "add" ? "mt-4" : undefined}>
+                <div role="radiogroup" aria-label={t("wizard.step1")} className="grid gap-2.5">
+                {AUTH_KINDS.map((k) => {
+                  const sel = input.auth === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      role="radio"
+                      aria-checked={sel}
+                      onClick={() => set("auth", k)}
+                      className={cn(
+                        "flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 text-left transition-colors hover:bg-accent/50 disabled:cursor-not-allowed disabled:opacity-45",
+                        sel && "border-primary bg-accent/60 ring-1 ring-primary",
+                      )}
+                    >
+                      <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border", sel ? "border-primary bg-primary text-primary-foreground" : "border-input")} aria-hidden>
+                        {sel && <Check className="size-3" strokeWidth={3} />}
+                      </span>
+                      <span className="min-w-0">
+                        <span className="flex items-center gap-2 font-medium">
+                          {t(`auth.${k}`)}
+                          {k === "device_code" && <span className="rounded bg-info-bg px-1.5 py-px text-[11px] font-medium text-info">{t("wizard.recommended")}</span>}
+                          {k === "password" && <span className="rounded bg-warning-bg px-1.5 py-px text-[11px] font-medium text-warning">{t("wizard.notRecommended")}</span>}
+                        </span>
+                        <span className="mt-0.5 block text-[13px] text-muted-foreground">{t(`auth.${k}.hint`)}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              </div>
+            )}
           </div>
         )}
 
-        {step === 2 && (
+        {step === 2 && auto && (
+          <AppSetupStep
+            key={setupRestart}
+            input={input}
+            method={adminMethod}
+            done={setup}
+            onResult={onSetupResult}
+            onRestart={() => setSetupRestart((n) => n + 1)}
+            onAbort={() => setStep(1)}
+            onManual={() => {
+              void discardSetup();
+              setRoute("manual");
+              setSetup(null);
+              setStep(1);
+            }}
+          />
+        )}
+        {step === 2 && !auto && (
           <form
             className="grid gap-4 sm:grid-cols-2"
             onSubmit={(e) => {
@@ -270,6 +386,8 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
             key={restart}
             input={input}
             auto={autoLogin}
+            afterSetup={auto && !!setup}
+            consentUrl={auto && setup && !setup.consentGranted ? setup.adminConsentUrl : ""}
             alreadyDone={loginDone}
             onDone={setLoginDone}
             onIdle={setIdle}
@@ -285,6 +403,11 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         {step === 6 && <DoneStep name={input.name} />}
       </Card>
 
+      {cleaning && (
+        <p role="status" className="mt-3 flex items-center gap-2 text-[13px] text-muted-foreground">
+          <Spinner /> {t("auto.cleaning")}
+        </p>
+      )}
       {saveError && <ErrorBlock className="mt-3" message={saveError} />}
 
       <div className="mt-4 flex items-center justify-between">
@@ -293,7 +416,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         </Button>
         <div className="flex gap-2">
           {step < 6 ? (
-            <Button onClick={() => void next()} disabled={saving || (step === 4 && !canContinue)}>
+            <Button onClick={() => void next()} disabled={saving || cleaning || (step === 4 && !canContinue) || (step === 2 && auto && !setup)}>
               {saving && <Spinner />}
               {step === 3 ? t("wizard.saveAndLogin") : t("wizard.next")} {!saving && <ArrowRight />}
             </Button>
@@ -314,13 +437,12 @@ function CategoryName({ id }: { id: string }) {
 type Phase = "idle" | "starting" | "waiting" | "done" | "error";
 
 function LoginStep({
-  input, auto, alreadyDone, onDone, onIdle, onRestart, onStart,
+  input, auto, afterSetup, consentUrl, alreadyDone, onDone, onIdle, onRestart, onStart,
 }: {
-  input: AccountInput; auto: boolean; alreadyDone: boolean; onDone: (d: boolean) => void; onIdle: (i: boolean) => void;
+  input: AccountInput; auto: boolean; afterSetup: boolean; consentUrl: string; alreadyDone: boolean; onDone: (d: boolean) => void; onIdle: (i: boolean) => void;
   onRestart: () => void; onStart: () => void;
 }) {
   const { t } = useI18n();
-  const toast = useToast();
   const { snapshot } = useApp();
   const [phase, setPhase] = useState<Phase>(alreadyDone ? "done" : auto ? "starting" : "idle");
   const [ev, setEv] = useState<LoginEvent | null>(null);
@@ -329,6 +451,10 @@ function LoginStep({
   const phaseRef = useRef<Phase>(phase);
   phaseRef.current = phase;
   const auth: AuthKind = input.auth;
+  const progressText = (m: string) => {
+    const p = progressMsg(m);
+    return p ? t(p.key, p.params) : m;
+  };
 
   useEffect(() => {
     let alive = true;
@@ -352,7 +478,7 @@ function LoginStep({
         setPhase("waiting");
       }
     });
-    api.accounts.login(name).catch((e) => {
+    (afterSetup ? api.accounts.loginAfterSetup(name) : api.accounts.login(name)).catch((e) => {
       if (!alive) return;
       setPhase("error");
       setMessage(errMsg(e));
@@ -365,17 +491,14 @@ function LoginStep({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [name]);
 
-  const copy = async () => {
-    if (ev?.userCode && (await copyText(ev.userCode))) toast.success(t("wizard.copied"));
-  };
-
   return (
     <div className="flex min-h-[18rem] flex-col items-center justify-center gap-4 text-center" aria-live="polite">
       {phase === "idle" ? (
         <>
           <LogIn className="size-10 text-muted-foreground" aria-hidden />
-          <p className="text-base font-medium">{t("wizard.savedIdle")}</p>
-          <p className="max-w-md text-[13px] text-muted-foreground">{t("wizard.editLoginHint")}</p>
+          <p className="text-base font-medium">{t(consentUrl ? "wizard.savedConsent" : "wizard.savedIdle")}</p>
+          <p className="max-w-md text-[13px] text-muted-foreground">{t(consentUrl ? "wizard.savedConsentHint" : "wizard.editLoginHint")}</p>
+          {consentUrl && <ConsentNotice url={consentUrl} className="w-full max-w-lg" />}
           <Button variant="outline" onClick={onStart}>
             <LogIn /> {t("wizard.reLogin")}
           </Button>
@@ -396,37 +519,13 @@ function LoginStep({
           </Button>
         </>
       ) : ev?.kind === "device_code" ? (
-        <>
-          <p className="text-[13px] text-muted-foreground">{t("wizard.deviceHint")}</p>
-          {ev.userCode ? (
-            <div className="rounded-xl border bg-muted/50 px-8 py-4">
-              <p className="text-xs text-muted-foreground">{t("wizard.yourCode")}</p>
-              <p className="mt-1 font-mono text-3xl font-semibold tracking-[0.2em] select-all" aria-label={t("wizard.yourCode")}>
-                {ev.userCode}
-              </p>
-            </div>
-          ) : (
-            // No code in the event: Microsoft's own instructions are in the message.
-            <p className="max-w-md rounded-xl border bg-muted/50 px-5 py-3 text-[13px] break-words select-all">{ev.message}</p>
-          )}
-          <p className="max-w-md text-xs break-all text-muted-foreground">{ev.verificationUri}</p>
-          <div className="flex gap-2">
-            <Button variant="outline" disabled={!ev.userCode} onClick={() => void copy()}>
-              <Copy /> {t("wizard.copy")}
-            </Button>
-            <Button onClick={() => ev.verificationUri && void api.system.openExternal(ev.verificationUri)}>
-              <ExternalLink /> {t("wizard.openBrowser")}
-            </Button>
-          </div>
-          <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
-            <Spinner /> {t("wizard.waiting")}
-          </p>
-        </>
+        <DevicePrompt message={ev.message} userCode={ev.userCode} verificationUri={ev.verificationUri} />
       ) : ev?.kind === "browser_opened" ? (
+        <BrowserPrompt />
+      ) : ev?.kind === "progress" ? (
         <>
           <Spinner className="size-8 text-primary" />
-          <p className="text-base font-medium">{t("wizard.browserOpened")}</p>
-          <p className="text-[13px] text-muted-foreground">{t("wizard.browserOpenedHint")}</p>
+          <p className="max-w-md text-[13px] text-muted-foreground">{progressText(ev.message)}</p>
         </>
       ) : (
         <>

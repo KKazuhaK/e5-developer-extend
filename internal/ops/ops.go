@@ -48,6 +48,14 @@ type Ops struct {
 	// VaultFor replaces how the vault is opened; tests use it to give each
 	// simulated machine its own master key.
 	VaultFor func(cfg *config.Config) (*vault.Vault, error)
+	// Bootstrap replaces the administrator sign-in of automatic app setup
+	// (auth.Bootstrap when nil); tests use it to skip the identity service.
+	Bootstrap func(ctx context.Context, method, tenant, clientID string, scopes []string, ui auth.LoginUI, c *http.Client) (auth.Token, error)
+	// SetupBackoff replaces the waits for Microsoft to replicate a new app
+	// registration; nil means about two minutes in total.
+	SetupBackoff []time.Duration
+	// SetupHostname replaces os.Hostname in the client secret's name.
+	SetupHostname string
 	// SaveConfig replaces how an import saves config.toml; tests inject failures.
 	SaveConfig func(cfg *config.Config, path string) error
 }

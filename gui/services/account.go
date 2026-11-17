@@ -10,6 +10,7 @@ import (
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
 )
 
 // AccountService manages accounts and their sign-in.
@@ -107,7 +108,14 @@ func (s *AccountService) Test(name string) (TestResult, error) {
 // Login starts the sign-in of an account and returns at once. Progress and
 // the outcome arrive as LoginEvents on "login:<name>"; the last one is "done"
 // or "error". Only one sign-in per account runs at a time.
-func (s *AccountService) Login(name string) error {
+func (s *AccountService) Login(name string) error { return s.startLogin(name, false) }
+
+// LoginAfterSetup is Login for an account whose app registration automatic
+// setup has just created: while Microsoft is still replicating the app it
+// waits and tries again for about two minutes, sending "progress" events.
+func (s *AccountService) LoginAfterSetup(name string) error { return s.startLogin(name, true) }
+
+func (s *AccountService) startLogin(name string, afterSetup bool) error {
 	b := s.b
 	if err := b.Ops.CheckAccount(name); err != nil {
 		return err
@@ -130,7 +138,13 @@ func (s *AccountService) Login(name string) error {
 		}()
 		emit := func(ev LoginEvent) { b.Emit(LoginEventName(name), ev) }
 		ui := &loginUI{emit: emit, open: b.OpenURL}
-		res, err := b.Ops.Login(ctx, name, ui)
+		var res ops.LoginResult
+		var err error
+		if afterSetup {
+			res, err = b.Ops.LoginAfterSetup(ctx, name, ui, func(m string) { emit(LoginEvent{Kind: "progress", Message: m}) })
+		} else {
+			res, err = b.Ops.Login(ctx, name, ui)
+		}
 		switch {
 		case errors.Is(ctx.Err(), context.Canceled):
 			emit(LoginEvent{Kind: "error", Message: "sign-in cancelled"})

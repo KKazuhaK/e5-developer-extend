@@ -29,6 +29,11 @@ type app struct {
 	// noCallGap removes the pause between calls; tests only.
 	noCallGap bool
 
+	// bootstrap replaces the administrator sign-in of automatic setup; tests only.
+	bootstrap    func(ctx context.Context, method, tenant, clientID string, scopes []string, ui auth.LoginUI, c *http.Client) (auth.Token, error)
+	setupBackoff []time.Duration
+	setupHost    string
+
 	// The fields below let tests keep the real service manager, the real
 	// binary path and the terminal out of the picture. Zero values mean the
 	// real thing.
@@ -52,6 +57,7 @@ func (a *app) ops() *ops.Ops {
 	return &ops.Ops{
 		NewAuth: a.newAuth, GraphBase: a.graphBase, NoCallGap: a.noCallGap,
 		Runner: a.runner, Exe: a.exe, Svc: a.svc, WebhookBackoff: a.webhookBackoff,
+		Bootstrap: a.bootstrap, SetupBackoff: a.setupBackoff, SetupHostname: a.setupHost,
 	}
 }
 

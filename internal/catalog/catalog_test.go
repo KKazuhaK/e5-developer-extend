@@ -192,3 +192,31 @@ func TestDocTableMatchesYAML(t *testing.T) {
 		}
 	}
 }
+
+func TestRecommendedPermissionsAreUsedByTheCatalog(t *testing.T) {
+	apis := mustLoad(t)
+	used := map[string]map[string]bool{Delegated: {}, App: {}}
+	for _, a := range apis {
+		for _, k := range []string{Delegated, App} {
+			for _, s := range a.ScopesFor(k) {
+				used[k][s] = true
+			}
+		}
+	}
+	lists := map[string][]string{Delegated: RecommendedDelegated, App: RecommendedApplication}
+	for kind, list := range lists {
+		seen := map[string]bool{}
+		for _, p := range list {
+			if seen[p] {
+				t.Errorf("%s: %s listed twice", kind, p)
+			}
+			seen[p] = true
+			if p == "offline_access" { // structural: makes the sign-in renewable
+				continue
+			}
+			if !used[kind][p] {
+				t.Errorf("recommended %s permission %s is used by no API in apis.yaml", kind, p)
+			}
+		}
+	}
+}
