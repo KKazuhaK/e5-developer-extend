@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -185,10 +186,69 @@ func TestNoOneDrive(t *testing.T) {
 }
 
 func TestNoTeamsAndSites(t *testing.T) {
-	f := newFake(t, map[string]int{"/me/joinedTeams": 403, "/sites/root": 404})
+	f := newFake(t, map[string]int{"/me/joinedTeams": 404, "/sites/root": 404})
 	r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
 	expect(t, f, r, "teams", Unavailable, ReasonNoTeams)
 	expect(t, f, r, "sites", Unavailable, ReasonNoSharePoint)
+}
+
+// A 403 on Teams is a policy matter, not proof of a missing license.
+func TestTeamsForbiddenIsMaybe(t *testing.T) {
+	f := newFake(t, map[string]int{"/me/joinedTeams": 403})
+	r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
+	expect(t, f, r, "teams", Maybe, ReasonProbeFailed)
+}
+
+// Only 404 and 400 mean "no mailbox / no OneDrive"; other client errors do not.
+func TestOtherClientErrorsAreNotAbsent(t *testing.T) {
+	for _, st := range []int{402, 405, 409, 410, 422, 403} {
+		f := newFake(t, map[string]int{"/me/mailboxSettings": st, "/me/drive": st})
+		r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
+		expect(t, f, r, "mail", Maybe, ReasonProbeFailed)
+		expect(t, f, r, "files", Maybe, ReasonProbeFailed)
+	}
+}
+
+// Collection probes ask for one item with only its id; nothing is downloaded in bulk.
+func TestProbesAreSmall(t *testing.T) {
+	apis := loadAPIs(t)
+	byID := map[string]catalog.API{}
+	for _, a := range apis {
+		byID[a.ID] = a
+	}
+	for _, p := range Probes() {
+		for _, id := range p.APIs {
+			q := probeQuery(byID[id])
+			if singletons[id] {
+				if q != nil {
+					t.Errorf("%s: singleton with a query", id)
+				}
+				continue
+			}
+			if q.Get("$select") != "id" {
+				t.Errorf("%s: probe must select only id, got %v", id, q)
+			}
+			if id != "teams.joined" && q.Get("$top") != "1" {
+				t.Errorf("%s: collection probe must use $top=1, got %v", id, q)
+			}
+		}
+	}
+	// And on the wire.
+	var got []string
+	var mu sync.Mutex
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		got = append(got, r.URL.Path+"?"+r.URL.RawQuery)
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer srv.Close()
+	in := Input{Account: "a", Kind: catalog.Delegated, Granted: []string{"Mail.ReadBasic", "Files.Read"}, APIs: apis, Graph: &graph.Client{Base: srv.URL}, Token: "T"}
+	Run(context.Background(), in)
+	slices.Sort(got)
+	if !slices.Equal(got, []string{"/me/drive?", "/me/mailFolders?$select=id&$top=1"}) {
+		t.Errorf("requests: %v", got)
+	}
 }
 
 func TestMissingPermissionSkipsProbe(t *testing.T) {
@@ -253,7 +313,7 @@ func TestAppOnlyIdentity(t *testing.T) {
 	t.Run("picked user is not conclusive", func(t *testing.T) {
 		f := newFake(t, map[string]int{"/users/u-1/mailboxSettings": 404})
 		r := Run(context.Background(), f.input(t, catalog.App, granted, ""))
-		expect(t, f, r, "mail", Maybe, ReasonProbeFailed)
+		expect(t, f, r, "mail", Maybe, ReasonArbitraryUser)
 		expect(t, f, r, "files", Recommended, "")
 	})
 	t.Run("no user found", func(t *testing.T) {
@@ -277,5 +337,39 @@ func TestEmptyGrants(t *testing.T) {
 	}
 	if len(f.hits) != 0 {
 		t.Errorf("made requests: %v", f.hits)
+	}
+}
+
+func TestSuggestedKeepsMaybeAndDropsUnavailable(t *testing.T) {
+	rec := Recommendation{Categories: []CategoryAdvice{
+		{Category: "user", Status: Recommended, Default: true},
+		{Category: "mail", Status: Unavailable, Reason: ReasonNoMailbox, Default: true},
+		{Category: "teams", Status: Maybe, Reason: ReasonProbeFailed, Default: true},
+		{Category: "reports", Status: Maybe, Reason: ReasonNeedsAdminRole},
+	}}
+	// No current setting: the defaults are what runs.
+	if got := rec.Suggested(nil); !slices.Equal(got, []string{"user", "teams"}) {
+		t.Errorf("defaults: %v", got)
+	}
+	// An explicit list keeps its maybe categories (any case) and nothing else.
+	if got := rec.Suggested([]string{"Reports", "mail"}); !slices.Equal(got, []string{"user", "reports"}) {
+		t.Errorf("explicit: %v", got)
+	}
+	if rec.HasFailedProbes() != true {
+		t.Error("probe_failed not noticed")
+	}
+	rec.Categories[2].Reason = ReasonArbitraryUser
+	if rec.HasFailedProbes() {
+		t.Error("an arbitrary-user maybe is not a failed probe")
+	}
+}
+
+func TestDefaultFlagFollowsTheCatalog(t *testing.T) {
+	f := newFake(t, nil)
+	r := Run(context.Background(), f.input(t, catalog.Delegated, allDelegated(), ""))
+	for _, c := range r.Categories {
+		if want := c.Category != "reports"; c.Default != want {
+			t.Errorf("%s default = %v", c.Category, c.Default)
+		}
 	}
 }

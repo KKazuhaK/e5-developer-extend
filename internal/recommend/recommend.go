@@ -6,7 +6,9 @@ package recommend
 
 import (
 	"context"
+	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -33,6 +35,9 @@ const (
 	ReasonNeedsAdminRole    = "needs_admin_role"
 	ReasonNotSupported      = "not_supported"
 	ReasonProbeFailed       = "probe_failed"
+	// ReasonArbitraryUser: an application identity without a configured user
+	// was probed with an arbitrary user, so "absent" proves nothing.
+	ReasonArbitraryUser = "probe_arbitrary_user"
 )
 
 // Timeout bounds the probes of one recommendation.
@@ -43,6 +48,8 @@ type CategoryAdvice struct {
 	Category string `json:"category"`
 	Status   string `json:"status"`
 	Reason   string `json:"reason"`
+	// Default is true when the category runs for an account without a categories setting.
+	Default bool `json:"default"`
 }
 
 // Recommendation is the verdict on every category of the catalog.
@@ -63,16 +70,65 @@ func (r Recommendation) Recommended() []string {
 	return out
 }
 
+// HasFailedProbes reports whether some category could not be checked because a
+// probe failed (probably temporarily).
+func (r Recommendation) HasFailedProbes() bool {
+	for _, c := range r.Categories {
+		if c.Reason == ReasonProbeFailed {
+			return true
+		}
+	}
+	return false
+}
+
+// Suggested returns the categories to select: every recommended one, plus
+// every "maybe" one the account effectively has now. current is the account's
+// categories; empty means the catalog defaults. A "maybe" category is never
+// dropped, and an unavailable one is never kept.
+func (r Recommendation) Suggested(current []string) []string {
+	have := map[string]bool{}
+	for _, c := range current {
+		have[strings.ToLower(c)] = true
+	}
+	out := []string{}
+	for _, c := range r.Categories {
+		switch {
+		case c.Status == Recommended:
+			out = append(out, c.Category)
+		case c.Status == Maybe && ((len(current) == 0 && c.Default) || have[strings.ToLower(c.Category)]):
+			out = append(out, c.Category)
+		}
+	}
+	return out
+}
+
 // probe is one service check. Its request is the first of APIs (catalog IDs)
 // the granted permissions allow. Its outcome decides every category in
-// Categories; Absent lists the result classes that mean "this service is not
-// there for the account".
+// Categories; Absent lists the HTTP statuses that mean "this service is not
+// there for the account". Any other failure is not conclusive.
 type probe struct {
 	Name       string
 	APIs       []string
 	Categories []string
-	Absent     []graph.Class
+	Absent     []int
 	Reason     string
+}
+
+// singletons are probe APIs that return one small object, so they take no
+// query. Every other probe API is a collection and is asked for one item with
+// only its id (probeQuery), so a probe never downloads bulk data.
+var singletons = map[string]bool{"mail.settings": true, "drive.info": true, "sites.root": true}
+
+// probeQuery is the query of a collection probe. joinedTeams does not support
+// $top, but its result is only the user's own teams.
+func probeQuery(api catalog.API) url.Values {
+	if singletons[api.ID] {
+		return nil
+	}
+	if api.ID == "teams.joined" {
+		return url.Values{"$select": {"id"}}
+	}
+	return url.Values{"$top": {"1"}, "$select": {"id"}}
 }
 
 // probes is the only place that says which category depends on which service.
@@ -81,28 +137,29 @@ var probes = []probe{
 		Name:       "mailbox",
 		APIs:       []string{"mail.settings", "mail.folders", "mail.messages", "cal.list", "contacts.list"},
 		Categories: []string{"mail", "calendar", "contacts", "tasks"},
-		Absent:     []graph.Class{graph.NotFound, graph.ClientError},
+		Absent:     []int{http.StatusNotFound, http.StatusBadRequest},
 		Reason:     ReasonNoMailbox,
 	},
 	{
 		Name:       "onedrive",
 		APIs:       []string{"drive.info", "drive.root"},
 		Categories: []string{"files", "notes"},
-		Absent:     []graph.Class{graph.NotFound, graph.ClientError},
+		Absent:     []int{http.StatusNotFound, http.StatusBadRequest},
 		Reason:     ReasonNoOneDrive,
 	},
 	{
 		Name:       "teams",
 		APIs:       []string{"teams.joined"},
 		Categories: []string{"teams"},
-		Absent:     []graph.Class{graph.NotFound, graph.Forbidden},
-		Reason:     ReasonNoTeams,
+		// 403 is a policy or permission matter, not proof of a missing license.
+		Absent: []int{http.StatusNotFound},
+		Reason: ReasonNoTeams,
 	},
 	{
 		Name:       "sharepoint",
 		APIs:       []string{"sites.root"},
 		Categories: []string{"sites"},
-		Absent:     []graph.Class{graph.NotFound},
+		Absent:     []int{http.StatusNotFound},
 		Reason:     ReasonNoSharePoint,
 	},
 }
@@ -147,6 +204,7 @@ const (
 	unknown verdict = iota // no probe ran, or it could not tell
 	present
 	absent
+	arbitrary // absent, but for a user picked at random
 )
 
 // Run probes and returns the verdict on every category of in.APIs.
@@ -211,6 +269,8 @@ func Run(ctx context.Context, in Input) Recommendation {
 			switch results[i] {
 			case absent:
 				a.Status, a.Reason = Unavailable, p.Reason
+			case arbitrary:
+				a.Status, a.Reason = Maybe, ReasonArbitraryUser
 			case unknown:
 				a.Status, a.Reason = Maybe, ReasonProbeFailed
 			}
@@ -221,7 +281,12 @@ func Run(ctx context.Context, in Input) Recommendation {
 			a.Status, a.Reason = Maybe, reason
 		}
 	}
+	defaults := map[string]bool{}
+	for _, c := range catalog.DefaultCategories(in.APIs) {
+		defaults[c] = true
+	}
 	for _, c := range cats {
+		advice[c].Default = defaults[c]
 		rec.Categories = append(rec.Categories, *advice[c])
 	}
 	return rec
@@ -284,18 +349,16 @@ func runProbe(ctx context.Context, in Input, user *userLookup, api catalog.API, 
 		picked = in.Username == ""
 		path = strings.ReplaceAll(path, "{user}", url.PathEscape(u))
 	}
-	res := in.Graph.Call(ctx, in.Token, path, nil)
+	res := in.Graph.Call(ctx, in.Token, path, probeQuery(api))
 	if res.Class == graph.OK {
 		return present
 	}
-	for _, c := range p.Absent {
-		if res.Class == c {
-			// A user picked at random says nothing certain about the others.
-			if picked {
-				return unknown
-			}
-			return absent
+	if slices.Contains(p.Absent, res.Status) {
+		// A user picked at random says nothing certain about the others.
+		if picked {
+			return arbitrary
 		}
+		return absent
 	}
 	return unknown
 }

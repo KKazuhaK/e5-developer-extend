@@ -76,3 +76,57 @@ func TestSetCategories(t *testing.T) {
 		t.Error("unknown category must be refused")
 	}
 }
+
+// SetCategories changes only the categories, under the config lock: edits made
+// meanwhile to other accounts and fields survive.
+func TestSetCategoriesKeepsConcurrentChanges(t *testing.T) {
+	e := newTestEnv(t)
+	e.addDevice(t, "a")
+	e.addDevice(t, "b")
+	ctx := context.Background()
+	done := make(chan error, 2)
+	go func() {
+		var err error
+		for i := 0; i < 15 && err == nil; i++ {
+			err = e.SetCategories(ctx, "a", []string{"user", "mail"})
+			if err == nil {
+				err = e.SetCategories(ctx, "a", []string{"user"})
+			}
+		}
+		done <- err
+	}()
+	go func() {
+		var err error
+		for i := 0; i < 15 && err == nil; i++ {
+			_, err = e.Pause(ctx, "b")
+			if err == nil {
+				_, err = e.Resume(ctx, "b")
+			}
+			if err == nil {
+				err = e.SetCategories(ctx, "b", []string{"files"})
+			}
+		}
+		done <- err
+	}()
+	for i := 0; i < 2; i++ {
+		if err := <-done; err != nil {
+			t.Fatal(err)
+		}
+	}
+	a, _ := e.GetAccount("a")
+	b, _ := e.GetAccount("b")
+	if !slices.Equal(a.Categories, []string{"user"}) || !slices.Equal(b.Categories, []string{"files"}) {
+		t.Fatalf("a=%v b=%v", a.Categories, b.Categories)
+	}
+	if err := e.SetCategories(ctx, "ghost", []string{"user"}); err == nil {
+		t.Error("unknown account must fail")
+	}
+}
+
+func TestDefaultCategoriesExcludeReports(t *testing.T) {
+	e := newTestEnv(t)
+	d, err := e.DefaultCategories()
+	if err != nil || slices.Contains(d, "reports") || !slices.Contains(d, "mail") {
+		t.Fatalf("%v %v", d, err)
+	}
+}

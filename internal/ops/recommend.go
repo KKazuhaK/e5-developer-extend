@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
+	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
 	"github.com/KKazuhaK/e5-developer-extend/internal/recommend"
 )
@@ -61,18 +63,36 @@ func (o *Ops) RecommendCategories(ctx context.Context, name string) (Recommendat
 }
 
 // SetCategories replaces the API categories of an account and leaves every
-// other field alone. It does not tell the engine; the caller reloads it.
+// other field alone. The config is read, changed and saved under one lock, so
+// a concurrent change to the same file is not lost. It does not tell the
+// engine; the caller reloads it.
 func (o *Ops) SetCategories(ctx context.Context, name string, categories []string) error {
 	if len(categories) == 0 {
 		return errors.New("no categories to set")
 	}
-	in, err := o.GetAccount(name)
-	if err != nil {
+	if err := checkCategories(categories); err != nil {
 		return err
 	}
-	in.Categories = categories
-	if err := o.UpdateAccount(ctx, in); err != nil {
+	found := false
+	err := o.updateAccount(ctx, name, func(ac *config.Account) {
+		found = true
+		ac.Categories = slices.Clone(categories)
+	})
+	if err != nil {
 		return fmt.Errorf("save categories: %w", err)
 	}
+	if !found {
+		return fmt.Errorf("no account named %q", name)
+	}
 	return nil
+}
+
+// DefaultCategories lists the categories an account without a categories
+// setting runs on.
+func (o *Ops) DefaultCategories() ([]string, error) {
+	apis, err := catalog.Load()
+	if err != nil {
+		return nil, err
+	}
+	return catalog.DefaultCategories(apis), nil
 }
