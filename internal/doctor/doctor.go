@@ -742,8 +742,17 @@ func checkAPIs(d Deps, acct config.Account, id, title string) Check {
 		}
 		rounds[cat] = rs
 	}
+	// Only categories the account currently runs count: one switched off
+	// (for example by --apply) has old failures in the log but no problem.
+	enabled := map[string]bool{}
+	for _, c := range catalog.EffectiveCategories(apis, acct.Categories) {
+		enabled[strings.ToLower(c)] = true
+	}
 	var parts []string
 	for _, cat := range order {
+		if !enabled[strings.ToLower(cat)] {
+			continue
+		}
 		rs := rounds[cat]
 		if len(rs) < FailingRounds {
 			continue

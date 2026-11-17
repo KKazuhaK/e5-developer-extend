@@ -495,6 +495,20 @@ func TestKeepsFailingCategory(t *testing.T) {
 		}
 		expect(t, r.run(true), id, OK, "no category")
 	})
+	t.Run("a disabled category is ignored", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"mail.messages": 404})
+		}
+		// Before: the default selection includes mail, so it warns.
+		expect(t, r.run(true), id, Warn, "category mail")
+		// After `account test --recommend --apply` removed mail: no warning.
+		r.cfg.Accounts[0].Categories = []string{"user", "files"}
+		expect(t, r.run(true), id, OK, "no category")
+		// An explicit list that still has mail keeps warning.
+		r.cfg.Accounts[0].Categories = []string{"user", "Mail"}
+		expect(t, r.run(true), id, Warn, "category mail")
+	})
 	t.Run("empty log", func(t *testing.T) {
 		expect(t, newRig(t).run(true), id, OK, "no category")
 	})
