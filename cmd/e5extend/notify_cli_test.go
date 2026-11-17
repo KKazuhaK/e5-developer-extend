@@ -44,7 +44,7 @@ func TestNotifySetTestClear(t *testing.T) {
 	defer srv.Close()
 	hookURL := srv.URL + "/hook/SECRETTOKEN123"
 
-	if _, _, err := e.run("", "notify", "test"); err == nil || !strings.Contains(err.Error(), "no webhook") {
+	if _, _, err := e.run("", "notify", "test"); err == nil || !strings.Contains(err.Error(), "no notification channel") {
 		t.Fatalf("test without webhook: %v", err)
 	}
 	if _, _, err := e.run("", "notify", "set-webhook", "not a url"); err == nil || strings.Contains(err.Error(), "not a url") {
@@ -124,7 +124,7 @@ func TestSetWebhookReadsFromStdin(t *testing.T) {
 		t.Errorf("hits = %d", len(rc.got))
 	}
 	v, _ := vault.Open("auto")
-	if ok, _ := v.Has(notify.VaultKey); !ok {
+	if ok, _ := v.Has(notify.ChannelSecretKey("webhook", "url")); !ok {
 		t.Error("not stored in the vault")
 	}
 }

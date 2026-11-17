@@ -292,3 +292,69 @@ func TestAlertsAreRetriedUntilDelivered(t *testing.T) {
 		t.Errorf("alerts repeated after delivery: %v", n.kinds("main"))
 	}
 }
+
+func TestFailureSpikeAlertsOnRealFailuresOnly(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	n := &fakeNotifier{}
+	f.opts.Notifier = n
+	f.cfg.Schedule.APIsPerRoundMin, f.cfg.Schedule.APIsPerRoundMax = 4, 4
+	f.start()
+
+	// Most calls fail but one per round succeeds, so the account is not paused.
+	mostly := func(code int) func(string) (int, map[string]string) {
+		var mu sync.Mutex
+		i := 0
+		return func(string) (int, map[string]string) {
+			mu.Lock()
+			defer mu.Unlock()
+			i++
+			if i%4 == 0 {
+				return 200, nil
+			}
+			return code, nil
+		}
+	}
+	// A mailbox that does not exist is not an outage.
+	f.h.setStatus(mostly(404))
+	for i := 0; i < 3; i++ {
+		f.round("main")
+	}
+	if k := n.kinds(""); len(k) != 0 {
+		t.Fatalf("404s alerted: %v", k)
+	}
+
+	// Server errors for three rounds in a row are.
+	f.h.setStatus(mostly(503))
+	for i := 0; i < 3; i++ {
+		f.round("main")
+	}
+	k := n.kinds("main")
+	if len(k) != 1 || k[0] != "failure_spike" {
+		t.Fatalf("alerts after three bad rounds: %v", k)
+	}
+	n.mu.Lock()
+	ev := n.events[0]
+	n.mu.Unlock()
+	if ev.Rounds != 3 || ev.Failures < 5 || ev.FailRate < 0.5 {
+		t.Errorf("event: %+v", ev)
+	}
+	if as := f.acct("main"); as.Notified["failure_spike"].Pending {
+		t.Error("a delivered alert is still pending")
+	}
+
+	// Back to normal: three good rounds end it with a recovery that names the event.
+	f.h.setStatus(nil)
+	for i := 0; i < 3; i++ {
+		f.round("main")
+	}
+	k = n.kinds("main")
+	if len(k) != 2 || k[1] != "recovered" {
+		t.Fatalf("alerts after recovery: %v", k)
+	}
+	n.mu.Lock()
+	rec := n.events[1]
+	n.mu.Unlock()
+	if rec.Origin != "failure_spike" {
+		t.Errorf("recovery: %+v", rec)
+	}
+}

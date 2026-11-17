@@ -5,6 +5,7 @@ package notify
 
 import (
 	"encoding/json"
+	"strings"
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
@@ -128,4 +129,29 @@ const (
 // ChannelSecretKey is the vault key of one secret field of a channel.
 func ChannelSecretKey(channelID, field string) string {
 	return "notify/" + channelID + "/" + field
+}
+
+// IsChannelSecretKey reports whether key is a secret of a channel of cfg
+// (or of the legacy webhook channel).
+func IsChannelSecretKey(cfg *config.Config, key string) bool {
+	rest, ok := strings.CutPrefix(key, "notify/")
+	if !ok {
+		return false
+	}
+	id, field, ok := strings.Cut(rest, "/")
+	if !ok {
+		return false
+	}
+	typ := ""
+	if c, found := cfg.Notify.FindChannel(id); found {
+		typ = c.Type
+	} else if id == LegacyChannelID {
+		typ = config.ChannelWebhook
+	}
+	for _, f := range config.ChannelSecrets(typ) {
+		if f.Name == field {
+			return true
+		}
+	}
+	return false
 }

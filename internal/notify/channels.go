@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -26,6 +27,11 @@ import (
 type Target struct {
 	Channel config.Channel
 	Secrets map[string]string
+	// AllowHTTP lets the address be http: set for a webhook that is still
+	// stored the way older versions did, which accepted http.
+	AllowHTTP bool
+	// Err, when set, is why the secrets could not be read; Deliver reports it.
+	Err error
 }
 
 // Default servers of the services that have one.
@@ -85,6 +91,9 @@ func (d *Deliverer) host() string {
 // backoff. It does not apply the channel's level and event filters.
 func (d *Deliverer) Deliver(ctx context.Context, t Target, ev Event) error {
 	c := t.Channel
+	if t.Err != nil {
+		return fmt.Errorf("channel %s: %w", c.ID, t.Err)
+	}
 	lang := Language(c.Language, d.DefaultLanguage)
 	var rendered Rendered
 	if c.Type != config.ChannelWebhook || c.Format == config.FormatTemplate {
@@ -138,7 +147,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 			return request{}, err
 		}
 		base := strings.TrimRight(orDefault(c.APIBase, DefaultTelegramBase), "/")
-		if err := requireScheme(base, false); err != nil {
+		if err := requireScheme(base, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		return request{method: http.MethodPost, url: base + "/bot" + token + "/sendMessage", header: jsonHeader,
@@ -151,7 +160,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if err != nil {
 			return request{}, err
 		}
-		if err := requireScheme(u, false); err != nil {
+		if err := requireScheme(u, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		return request{method: http.MethodPost, url: u, header: jsonHeader,
@@ -163,7 +172,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if err != nil {
 			return request{}, err
 		}
-		if err := requireScheme(u, false); err != nil {
+		if err := requireScheme(u, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		var lines [][]map[string]string
@@ -191,7 +200,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if err != nil {
 			return request{}, err
 		}
-		if err := requireScheme(u, false); err != nil {
+		if err := requireScheme(u, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		secrets := []string{u}
@@ -218,7 +227,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if err != nil {
 			return request{}, err
 		}
-		if err := requireScheme(u, false); err != nil {
+		if err := requireScheme(u, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		// allowed_mentions: an alert text must never ping @everyone.
@@ -231,7 +240,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if err != nil {
 			return request{}, err
 		}
-		if err := requireScheme(u, false); err != nil {
+		if err := requireScheme(u, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		return request{method: http.MethodPost, url: u, header: jsonHeader,
@@ -295,7 +304,7 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		if err != nil {
 			return request{}, err
 		}
-		if err := requireScheme(u, false); err != nil {
+		if err := requireScheme(u, t.AllowHTTP); err != nil {
 			return request{}, err
 		}
 		body := []byte(nil)
@@ -332,12 +341,22 @@ func requireScheme(raw string, allowHTTP bool) error {
 	switch {
 	case err != nil || u.Host == "":
 		return &DeliveryError{msg: "the address is not a valid URL"}
-	case u.Scheme == "https", allowHTTP && u.Scheme == "http":
+	case u.Scheme == "https", allowHTTP && u.Scheme == "http", u.Scheme == "http" && IsLoopback(u.Hostname()):
 		return nil
 	case allowHTTP:
 		return &DeliveryError{msg: "the address must be an http(s) URL"}
 	}
 	return &DeliveryError{msg: "the address must be an https URL"}
+}
+
+// IsLoopback reports whether host is this machine: plain http to it never
+// crosses a network, so it is accepted (a local relay, a test receiver).
+func IsLoopback(host string) bool {
+	if strings.EqualFold(host, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 // IsPlainHTTP reports whether raw is an http (not https) URL.

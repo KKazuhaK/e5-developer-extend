@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/callstat"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
@@ -409,6 +410,7 @@ func (e *Engine) evalNotify() {
 		return
 	}
 	var evs []notify.Event
+	calls := e.recentCalls(e.clock.Now())
 	e.withLock(func() {
 		if e.state == nil {
 			return
@@ -416,7 +418,7 @@ func (e *Engine) evalNotify() {
 		var changed bool
 		evs, changed = notify.Evaluate(notify.Input{
 			Now: e.clock.Now(), Start: e.started, Config: e.cfg.Notify,
-			Accounts: e.cfg.Accounts, State: e.state,
+			Accounts: e.cfg.Accounts, State: e.state, Calls: calls, APIs: e.apis,
 		})
 		if changed {
 			e.saveLocked()
@@ -428,13 +430,34 @@ func (e *Engine) evalNotify() {
 				return
 			}
 			e.withLock(func() {
-				if e.state != nil && notify.MarkDelivered(e.state, ev.Account, ev.Event, ev.Time) {
+				if e.state != nil && notify.MarkEvent(e.state, ev) {
 					e.saveLocked()
 				}
 			})
 		})
 		e.event(ev.Account, "alert", ev.Event)
 	}
+}
+
+// callWindow is how far back the call log is read to judge a failure spike.
+const callWindow = 48 * time.Hour
+
+// recentCalls returns the call-log entries of the last callWindow, per
+// account. It is nil when the log cannot be read, which tells Evaluate not to
+// judge failure spikes this time.
+func (e *Engine) recentCalls(now time.Time) map[string][]store.Entry {
+	entries, err := e.store.Read(store.Filter{Since: now.Add(-callWindow)})
+	if err != nil {
+		e.log.Warn("call log not read for the failure check", "err", err.Error())
+		return nil
+	}
+	calls := map[string][]store.Entry{}
+	for _, en := range entries {
+		if callstat.IsCall(en) {
+			calls[en.Account] = append(calls[en.Account], en)
+		}
+	}
+	return calls
 }
 
 // acquire takes the engine lock, waiting briefly: `status` probes the lock and
