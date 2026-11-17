@@ -152,6 +152,8 @@ function mockTenants(): TenantSubscriptions[] {
     groups.set(key, [...(groups.get(key) ?? []), a.input.name]);
   }
   if (subVariantNow === "manual" && groups.size > 0 && !subManual.has([...groups.keys()][0])) subManual.set([...groups.keys()][0], day(40));
+  // The demo shows a second tenant (no account of its own in the demo data) so the cards sit side by side.
+  if (demo && subVariantNow !== "nopermission" && subVariantNow !== "manual" && !groups.has("fabrikam.onmicrosoft.com")) groups.set("fabrikam.onmicrosoft.com", ["fabrikam-sales"]);
   return [...groups.entries()].map(([tenant, names], i) => {
     const first = i === 0;
     const checked = subCheckedAt.get(tenant) ?? now0 - 3 * 3_600_000;
@@ -169,14 +171,14 @@ function mockTenants(): TenantSubscriptions[] {
     if (subVariantNow === "nopermission" || subVariantNow === "manual") {
       t = { ...base, access: "no_permission", checkedAt: null, subscriptions: [] };
     } else {
-      const days = first ? (subVariantNow === "expiring" ? 5 : subVariantNow === "warning" ? 20 : demo ? 80 : 89) : 60 + i * 37;
+      const days = first ? (subVariantNow === "expiring" ? 5 : subVariantNow === "warning" ? 20 : demo ? 80 : 89) : demo ? 25 : 60 + i * 37;
       const status = first && subVariantNow === "warning" ? "Warning" : "Enabled";
       const subs = [mockSub(`s-${i}`, "DEVELOPERPACK_E5", status, days, first ? {
         renewals: [
           { from: day(days - 180), to: day(days - 90), seenAt: iso(now0 - 91 * 86_400_000) },
           { from: day(days - 90), to: day(days), seenAt: iso(now0 - 2 * 86_400_000) },
         ],
-      } : {})];
+      } : demo ? { renewals: [{ from: day(days - 90), to: day(days), seenAt: iso(now0 - 64 * 86_400_000) }] } : {})];
       if (first && !demo) subs.push(mockSub("s-x", "POWER_BI_STANDARD", "Enabled", 400, { licenses: 1_000_000, isTrial: true }));
       t = { ...base, access: "ok", checkedAt: iso(checked), subscriptions: subs.map((x) => ({ ...x, checkedAt: iso(checked) })) };
     }

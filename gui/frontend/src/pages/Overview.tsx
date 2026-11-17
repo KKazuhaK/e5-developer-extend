@@ -134,6 +134,8 @@ export function Overview() {
           </div>
         </EmptyBlock>
       ) : (
+        <section aria-labelledby="accounts-title">
+        <h2 id="accounts-title" className="mb-3 text-[15px] font-semibold">{t("overview.accountsTitle", { count: accounts.length })}</h2>
         <div className="grid grid-cols-[repeat(auto-fill,minmax(320px,1fr))] gap-4">
           {accounts.map((a) => (
             <AccountCard
@@ -151,6 +153,7 @@ export function Overview() {
             />
           ))}
         </div>
+        </section>
       )}
     </>
   );

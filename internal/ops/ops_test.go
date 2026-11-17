@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/doctor"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
@@ -588,6 +590,58 @@ func TestServicePlanDoesNotTouchTheSystem(t *testing.T) {
 	}
 	if len(fr.Calls) != 0 {
 		t.Errorf("planning ran commands: %v", fr.Calls)
+	}
+}
+
+func TestServiceHeadlessIsWindowsOnly(t *testing.T) {
+	e := newTestEnv(t)
+	fr := &service.FakeRunner{}
+	e.Runner = fr
+	e.Exe = func() (string, error) {
+		return filepath.Join(string(filepath.Separator), "opt", "e5extend", "e5extend"), nil
+	}
+	e.Svc = SvcIdentity{Home: t.TempDir(), UID: "501", User: "tester"}
+	plan, _, err := e.ServicePlanWith("windows", InstallFlags{Headless: true})
+	if err != nil || !strings.Contains(plan.Format(), "S4U") {
+		t.Fatalf("windows: %v\n%s", err, plan.Format())
+	}
+	for _, platform := range []string{"linux", "darwin"} {
+		if _, _, err := e.ServicePlanWith(platform, InstallFlags{Headless: true}); err == nil {
+			t.Errorf("%s accepted --headless", platform)
+		}
+	}
+	// The real install is refused before anything runs on Linux and macOS,
+	// whatever host the test runs on.
+	for _, platform := range []string{service.Linux, service.Darwin} {
+		e.Platform = platform
+		if _, err := e.ServiceInstallWith(InstallFlags{Headless: true}); err == nil || len(fr.Calls) != 0 {
+			t.Errorf("%s install: %v %v", platform, err, fr.Calls)
+		}
+	}
+}
+
+// On a Windows host the headless install really writes the DPAPI key file; the
+// scheduler is the fake runner.
+func TestServiceHeadlessInstallOnWindows(t *testing.T) {
+	if runtime.GOOS != "windows" {
+		t.Skip("needs DPAPI")
+	}
+	e := newTestEnv(t)
+	fr := &service.FakeRunner{}
+	e.Runner = fr
+	e.Platform = service.Windows
+	e.Exe = func() (string, error) { return `C:\Program Files\e5extend\e5extend.exe`, nil }
+	e.Svc = SvcIdentity{Home: t.TempDir(), UID: "0", User: `PC\tester`}
+	t.Setenv("E5EXTEND_MASTER_KEY", vault.EncodeKey(make([]byte, 32)))
+	if _, err := e.ServiceInstallWith(InstallFlags{Headless: true}); err != nil {
+		t.Fatal(err)
+	}
+	cfgDir, _ := paths.ConfigDir()
+	if _, err := os.Stat(filepath.Join(cfgDir, vault.DPAPIKeyFileName)); err != nil {
+		t.Errorf("no key file: %v", err)
+	}
+	if got := strings.Join(fr.Commands(), "|"); !strings.Contains(got, "schtasks /Create") {
+		t.Errorf("commands = %s", got)
 	}
 }
 
