@@ -80,9 +80,11 @@ func (s *AppSetupService) Begin(id string, start AppSetupStart) error {
 	opts := ops.AppSetupOptions{AppOnly: start.AppOnly, Method: method, Account: start.Name}
 
 	b.mu.Lock()
-	if len(b.setups) > 0 {
-		b.mu.Unlock()
-		return errors.New("an app setup is already in progress")
+	for _, other := range b.setups {
+		if other.ctx.Err() == nil { // one that was cancelled is only finishing up
+			b.mu.Unlock()
+			return errors.New("an app setup is already in progress")
+		}
 	}
 	ctx, cancel := context.WithCancel(b.bgCtx)
 	sess := &setupSession{ctx: ctx, cancel: cancel, choice: make(chan appsetup.Choice, 1), finish: make(chan struct{}), state: "signing_in"}
@@ -240,6 +242,7 @@ func (s *AppSetupService) Finish(id string) error {
 	}
 	sess.state = "ending"
 	close(sess.finish)
+	sess.cancel()
 	return nil
 }
 
