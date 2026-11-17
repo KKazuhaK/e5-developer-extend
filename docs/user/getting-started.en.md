@@ -111,10 +111,12 @@ expiry date, the API categories and whether the account is paused. Change what y
 once; there is no second trip through the add wizard. The sign-in method cannot be changed; to use another one,
 remove the account and add it again.
 
-- **Renaming**: change the account name and save. The secret, the saved sign-in and the statistics move to the new
-  name, nothing needs to sign in again, and the rename raises no alert. Log entries already written keep the old
-  name; `e5extend logs <new name>` and the Logs page filtered by the new name show them too. On the command line:
-  `e5extend account rename <old> <new>`.
+- **Renaming**: change the account name and save. The secret, the saved sign-in, the statistics and the call log
+  stay with the account, nothing needs to sign in again, and the rename raises no alert. Log entries already
+  written keep the old name on their line; `e5extend logs <new name>` and the Logs page filtered by the new name
+  show them too. On the command line: `e5extend account rename <old> <new>`. A configuration that has been through
+  a rename holds an `id` per account, which an older version (v0.2.0 or earlier) cannot read: restart the
+  background service after upgrading the program.
 - Changing the tenant, client ID or user name discards the saved sign-in; after saving you are offered **Sign in now**.
 - **Sign in** and **Test** are separate actions on the account list, not steps of editing.
 

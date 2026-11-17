@@ -1,47 +1,68 @@
-# Renaming an account
+# 账号改名
 
-The account name is the key of everything per account: `config.toml`, the vault entries `secret/<name>` and
-`tokencache/<name>`, the state in `state.json`, and the account of every call-log line. `ops.RenameAccount` moves
-all of it.
+## 问题
 
-## Order
+账号名称原来就是所有按账号保存的数据的键：`config.toml` 里的账号、vault 里的 `secret/<名称>` 和 `tokencache/<名称>`、
+`state.json` 里的账号状态、租户订阅别名（`account:<名称>`）、触发文件、待采用的导入状态，以及调用日志里每一行的账号。
+只有引擎写 `state.json`，命令行和桌面版只能通过触发文件和交接文件把事情交给运行中的引擎。
+要让改名保留历史，只能在两条路里选一条：改名时把这一切搬到新名称下（需要和运行中的引擎交接状态，
+并且要处理交换名称、改名途中正在跑的一轮、崩溃等情形），或者让数据不再以名称为键。这里选后者。
 
-1. Under the config lock: validate the new name and uniqueness, refuse a name that already has a stored secret
-   (an app setup may be creating that account).
-2. Under the token-cache lock of both names: copy the vault entries to the new names (they are encrypted together
-   with their name, so they are read and written again). An unreadable old token cache is not copied (warning).
-3. Rename trigger files and a waiting import hand-over.
-4. Save `config.toml`. Anything that failed up to here is put back.
-5. Hand the state over, then delete the old vault entries.
+## 设计：稳定的账号 ID
 
-## State
+`config.Account` 新增 `id`（TOML 里 `id`，为空时不写出）。`Account.Key()` 返回 `id`，没有 `id` 时返回名称。
+**所有按账号保存的数据都以 `Key()` 为键，名称只用于显示和命令行参数。**
 
-Only the engine writes `state.json`. Without an engine, `ops` holds the engine lock and applies the rename to
-`state.json` itself; the rename is written first as an *uncommitted* file, which counts only if the config got as
-far as having the new name (a crash after the save still finds it). With an engine, the rename is written after the
-config was saved as a file of its own, `state.rename.<seq>.json`; the engine claims files in sequence order, loads
-the config after the claim, and applies the renames in order, so chains and swaps come out right. A state the
-loaded config did not have is kept in memory for an hour so a rename that arrives a moment late still finds it, but
-only when a rename names the account as its old name: before the config is saved with an engine running, `ops`
-writes a note (`state.rename-intent.<seq>.json`) that the engine reads when an account vanishes, so a plain removal
-drops the state at once. Every rename has an ID and a state remembers the IDs it applied (`rename_ids`), so applying
-one twice (a claimed file that could not be deleted, a crash before the cleanup, a rerun of a killed command)
-changes nothing.
-A round in flight keeps its runtime record and books its result under the new name.
+- 新账号（`ops.AddAccount`）一开始就得到一个 16 位的随机 ID（`[a-z2-7]`，`config.NewAccountID`，和已有的键、名称都不重复）。
+- 没有 ID 的老账号继续以名称为键，什么都不用迁移。第一次改名时把 ID 设为**旧名称**，也就是它所有数据已经在用的键，
+  所以不需要移动任何数据。
+- 校验（`config.Validate`）：ID 和名称用同一个格式；键在账号之间唯一；名称唯一；**名称不能等于另一个账号的键**
+  （否则两个账号会共用 vault 条目、状态和触发文件）。因此一个老账号改名后，它的旧名称不能再给别的账号用；
+  新账号的 ID 是随机的，改名和交换名称（a→t，b→a，t→b）不受这条限制。
+- 改名（`ops.RenameAccount`）：加配置锁、读配置、校验新名称、没有 ID 就把 ID 设成旧名称、改名称、保存、完事。
+  **只写 `config.toml`**，不碰 `state.json`、vault、触发文件、日志。调用方随后让运行中的引擎重新加载配置（`ReloadEngine`）。
+  同一个改名再做一次会因为找不到旧名称而失败，什么都不改。保存失败时什么都没有变。
 
-The call log is not rewritten. `state.json` records `renamed_from`, and reading the log of the new name includes
-the entries of the old ones.
+## 各处的键
 
-## Known limitations
+| 数据 | 键 |
+| --- | --- |
+| `state.json` 的 `accounts`，引擎的运行时记录，一轮的结算 | `Key()` |
+| vault `secret/…`、`tokencache/…`（密文绑定这个键），令牌缓存锁 | `Key()` |
+| 触发文件（`<键>`、`<键>.resume`、`<键>.subscription`、`<键>.pwreset`） | `Key()`，命令行先把名称换成键 |
+| 待采用的导入状态 `state.import.json` | `Key()` |
+| 租户键 `account:<…>`（不指明租户的账号单独成组）及别名 | `account:` + `Key()`；显示时用名称，不从键里截取 |
+| 告警事件 | `Event.Account` 是显示用的名称，`Event.Key` 是键，送达回执按键找状态 |
+| 调用日志 | 见下 |
 
-The engine claims the pending renames before it reads the config, but the config file is read without the config
-lock, so a rename saved during the read is picked up by the next reload (the in-memory set-aside covers the gap).
-An invalid config makes the engine hand the claimed files back and retry on its next reload, and logs that each time.
-A token refresh that is in flight under the old name when the rename is applied may write its token cache under
-the old name, which is then not used. The shortcut that skips the one-and-a-half second engine-lock probe when the
-heartbeat is fresh can, rarely, take a lock held by a status probe for a running engine and hand the rename over
-in a file that waits for the next start.
+### 调用日志
 
-The set-aside states live in memory only, so an engine restart between a config that ran ahead and its rename loses
-them. Renames that wait longer than seven days are discarded. The sequence numbers of the rename files come from the
-wall clock (kept increasing within a process), so a clock set back between two renames can reorder them.
+每一行有 `account`（写入时的名称）和 `aid`（账号有 ID 时写入的 ID）。账号的日志过滤条件是
+`aid == 键 || (aid == "" && account == 键)`。因此：
+
+- 老账号（键是名称）改名前写的行没有 `aid`，名称就是键，按新名称过滤仍然能看到；改名后新写的行带 `aid` 和新名称。
+- 删除账号 b、再添加 b：新账号有新的 ID，旧 b 的日志行不属于它。
+- 过滤一个配置里没有的名称时，按那个名称写下的行来过滤（`Filter.Name`）。
+
+## app setup 里的待用 Secret
+
+自动创建应用时，账号还不存在，Secret 先放在 vault 的 `secret/<名称>`；`ops.AddAccount` 带 `UseStoredSecret` 时给账号分配 ID，
+把它复制到 `secret/<ID>`，保存配置后删除裸名称条目（配置保存失败则删掉新条目）。已存在的账号轮换 Secret 时直接写它的键。
+
+## 备份
+
+格式不变：ID 在配置里，vault 条目和状态本来就以键保存。合并导入时，备份里的账号只要名称或键和本机某个账号的名称或键相同，
+就算冲突。
+
+## 升级
+
+- 老账号不需要迁移；没有改过名的配置和以前一模一样（没有 `id` 行）。
+- v0.2.0 的引擎读配置时使用 `DisallowUnknownFields`，遇到 `id` 会拒绝：它记一条 `config_error`，继续使用内存里的旧配置，
+  直到重启到新版本。所以改名之后（或者新添加了账号之后）旧版本的后台服务不会应用这些改动，升级程序后需要重启服务。
+  心跳文件里没有版本，命令行无法提示“引擎是旧版本”，说明写在用户文档里。
+- 改名只在引擎重新加载配置时生效；在这之前引擎仍用旧名称写日志行，但行里的 `aid` 是对的。
+
+## 已知限制
+
+- 日志行里的名称是写入时的名称，不会被改写；显示时按键归到账号，名称列保留当时的样子。
+- 老账号改名后，它的旧名称成为键，永远不能再给别的账号用（要放开，只能在配置里给它写别的 `id`，同时自己搬 vault 和状态）。
