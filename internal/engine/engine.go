@@ -473,10 +473,26 @@ func (e *Engine) recentCalls(now time.Time) map[string][]store.Entry {
 		e.log.Warn("call log not read for the failure check", "err", err.Error())
 		return nil
 	}
+	// Calls made under an earlier name count for the account's current one.
+	current := map[string]string{}
+	e.withLock(func() {
+		if e.state == nil {
+			return
+		}
+		for acct, olds := range e.state.RenamedFrom {
+			for _, o := range olds {
+				current[o] = acct
+			}
+		}
+	})
 	calls := map[string][]store.Entry{}
 	for _, en := range entries {
 		if callstat.IsCall(en) {
-			calls[en.Account] = append(calls[en.Account], en)
+			name := en.Account
+			if n, ok := current[name]; ok {
+				name = n
+			}
+			calls[name] = append(calls[name], en)
 		}
 	}
 	return calls
@@ -532,15 +548,20 @@ func (e *Engine) init() {
 		e.event("", "state_reset", err.Error())
 	}
 	var fixed []string
+	var renamed []store.Rename
+	claimed := e.claimRenames()
 	e.withLock(func() {
 		e.state = st
 		now := e.clock.Now()
 		e.started = now
+		renamed = e.applyRenamesLocked(claimed)
 		e.syncAccountsLocked(now, true)
+		e.tidyRenamesLocked()
 		e.pruneTenantsLocked()
 		fixed = e.fixFarFutureLocked(now)
 		e.saveLocked()
 	})
+	e.reportRenames(renamed)
 	e.reportClockFix(fixed)
 	e.applyPasswordResets()
 	e.adoptPending()
@@ -817,13 +838,20 @@ func (e *Engine) reloadConfig() {
 		return
 	}
 	var restart bool
+	var renamed []store.Rename
+	claimed := e.claimRenames()
 	e.withLock(func() {
 		restart = cfg.Network.Proxy != e.cfg.Network.Proxy || cfg.Vault.Backend != e.cfg.Vault.Backend
 		e.cfg, e.sched = cfg, sc
+		// Renames first: the state of a renamed account moves to its new name
+		// instead of being dropped with the old one.
+		renamed = e.applyRenamesLocked(claimed)
 		e.syncAccountsLocked(e.clock.Now(), false)
+		e.tidyRenamesLocked()
 		e.pruneTenantsLocked()
 		e.saveLocked()
 	})
+	e.reportRenames(renamed)
 	e.adoptPending()
 	msg := ""
 	if restart {

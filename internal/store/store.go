@@ -107,6 +107,10 @@ type State struct {
 	// domain, or "account:<name>") to the tenant GUID a token revealed, so
 	// accounts that name one tenant in different ways share one state.
 	TenantAliases map[string]string `json:"tenant_aliases,omitempty"`
+	// RenamedFrom lists, per account, the names it had before (newest last).
+	// The call log keeps the name an entry was written under, so reading the
+	// log of an account also reads the entries of these names.
+	RenamedFrom map[string][]string `json:"renamed_from,omitempty"`
 }
 
 // NewState returns an empty state.
@@ -251,8 +255,24 @@ type logFile struct {
 	day  time.Time
 }
 
+// namesOf returns the names whose log entries belong to account: the name
+// itself and the ones the account had before (State.RenamedFrom).
+func (s *Store) namesOf(account string) map[string]bool {
+	if account == "" {
+		return nil
+	}
+	names := map[string]bool{account: true}
+	if st, err := s.LoadState(); err == nil {
+		for _, n := range st.RenamedFrom[account] {
+			names[n] = true
+		}
+	}
+	return names
+}
+
 // Read returns the entries matching f, oldest first. Damaged lines are skipped.
 func (s *Store) Read(f Filter) ([]Entry, error) {
+	names := s.namesOf(f.Account)
 	loc := time.Local
 	if !f.Since.IsZero() {
 		loc = f.Since.Location()
@@ -278,7 +298,7 @@ func (s *Store) Read(f Filter) ([]Entry, error) {
 			if json.Unmarshal(sc.Bytes(), &e) != nil {
 				continue
 			}
-			if f.Account != "" && e.Account != f.Account {
+			if f.Account != "" && !names[e.Account] {
 				continue
 			}
 			if !f.Since.IsZero() && e.TS.Before(f.Since) {
