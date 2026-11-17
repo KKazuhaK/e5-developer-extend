@@ -39,6 +39,7 @@ func (a *ropcAuth) Token(ctx context.Context) (auth.Token, error) {
 	}
 	a.ropc++
 	if a.failure != nil {
+		g.Result(auth.ErrorCode(a.failure))
 		if code := auth.CredentialFailure(a.failure); code != "" {
 			g.Failed(code)
 		}
@@ -120,7 +121,7 @@ func TestPasswordSignInSavesTheHomeAccountID(t *testing.T) {
 	ra := &ropcAuth{homeID: "new.id"}
 	f := passwordFixture(t, ra)
 	var saved string
-	f.e.o.SaveHomeAccount = func(_ context.Context, name, id string) error { saved = name + "=" + id; return nil }
+	f.e.o.SaveHomeAccount = func(_ context.Context, a config.Account, id string) error { saved = a.Name + "=" + id; return nil }
 	f.round("pw")
 	if saved != "pw=new.id" {
 		t.Fatalf("saved %q", saved)
@@ -138,5 +139,31 @@ func TestForcedRefreshDoesNotRepeatAFailedPasswordSignIn(t *testing.T) {
 	f.round("pw")
 	if ra.ropc != 1 {
 		t.Fatalf("ropc = %d, want 1", ra.ropc)
+	}
+}
+
+func TestResetDuringTheRequestWinsOverTheFailure(t *testing.T) {
+	ra := &ropcAuth{}
+	f := passwordFixture(t, ra)
+	g := &passwordGate{e: f.e, name: "pw"}
+	if ok, _ := g.Allow(); !ok {
+		t.Fatal("attempt not allowed")
+	}
+	// A person sets a new password while the request is out.
+	f.e.resetPasswordGate("pw")
+	g.Result("AADSTS50126")
+	g.Failed("AADSTS50126")
+	st := f.acct("pw")
+	if st.PasswordBlocked != nil || st.LastPasswordCode != "" {
+		t.Fatalf("the old attempt's failure blocked the account: %+v", st)
+	}
+}
+
+func TestFailureIsStoredWithTheAttempt(t *testing.T) {
+	ra := &ropcAuth{failure: fmt.Errorf("%w: AADSTS50126: wrong", auth.ErrLoginRequired)}
+	f := passwordFixture(t, ra)
+	f.round("pw")
+	if st := f.acct("pw"); st.LastPasswordCode != "AADSTS50126" {
+		t.Fatalf("%+v", st)
 	}
 }

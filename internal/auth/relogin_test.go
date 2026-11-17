@@ -50,9 +50,12 @@ type testGate struct {
 	blocked string
 	failed  []string
 	allows  int
+	last    string
 }
 
 func (g *testGate) Allow() (bool, string) { g.allows++; return g.allow && g.blocked == "", g.blocked }
+func (g *testGate) Result(code string)    { g.last = code }
+func (g *testGate) LastCode() string      { return g.last }
 func (g *testGate) Failed(code string)    { g.failed = append(g.failed, code); g.blocked = code }
 
 // withGate is ctx5 plus permission to sign in with the password.
@@ -264,5 +267,36 @@ func TestCredentialFailureCodes(t *testing.T) {
 		if got := CredentialFailure(errors.New("AADSTS" + c)); got != "" {
 			t.Errorf("%s counted as credential failure", c)
 		}
+	}
+}
+
+func TestPasswordInsideIntervalReportsTheLastRealCause(t *testing.T) {
+	f := newFakeAAD(t)
+	a, _ := passwordSetup(t, f)
+	ctx, g := withGate(t)
+	g.allow, g.last = false, "AADSTS50055"
+	f.failWith("refresh_token", jsonError(400, ca70043))
+	_, err := a.Token(ctx)
+	if !errors.Is(err, ErrLoginRequired) || !strings.Contains(err.Error(), "AADSTS50055") || strings.Contains(err.Error(), "AADSTS70043") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestPasswordPausedAfterMissingConsentKeepsTheConsentClass(t *testing.T) {
+	f := newFakeAAD(t)
+	a, _ := passwordSetup(t, f)
+	ctx, g := withGate(t)
+	g.blocked = "AADSTS65001"
+	f.failWith("refresh_token", jsonError(400, ca70043))
+	_, err := a.Token(ctx)
+	if !errors.Is(err, ErrConsentRequired) || errors.Is(err, ErrLoginRequired) || !strings.Contains(err.Error(), "AADSTS65001") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestConditionalAccessBlockIsNotLoginRequired(t *testing.T) {
+	err := Classify(errors.New(`{"error":"access_denied","error_description":"AADSTS53003: Access has been blocked by Conditional Access policies.","error_codes":[53003]}`))
+	if errors.Is(err, ErrLoginRequired) {
+		t.Fatalf("a Conditional Access block cannot be fixed by signing in: %v", err)
 	}
 }

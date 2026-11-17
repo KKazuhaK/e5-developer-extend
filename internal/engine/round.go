@@ -481,7 +481,7 @@ func (e *Engine) saveHomeAccount(ctx context.Context, acct config.Account, tok a
 	if !acct.Delegated() || tok.HomeAccountID == "" || tok.HomeAccountID == acct.HomeAccountID || e.o.SaveHomeAccount == nil {
 		return
 	}
-	if err := e.o.SaveHomeAccount(ctx, acct.Name, tok.HomeAccountID); err != nil {
+	if err := e.o.SaveHomeAccount(ctx, acct, tok.HomeAccountID); err != nil {
 		e.log.Warn("save home account id", "account", acct.Name, "err", err)
 		return
 	}

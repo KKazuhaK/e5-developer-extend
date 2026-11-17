@@ -72,6 +72,7 @@ func TestHintsForPasswordSignInFailures(t *testing.T) {
 		"AADSTS50053": "Smart Lockout",
 		"AADSTS50055": "set-secret x",
 		"AADSTS50057": "disabled in Entra",
+		"AADSTS53003": "Conditional Access policy",
 		"AADSTS50126": "set-secret x",
 	} {
 		err := fmt.Errorf("%w: %s: failed", auth.ErrLoginRequired, code)
@@ -81,5 +82,38 @@ func TestHintsForPasswordSignInFailures(t *testing.T) {
 	}
 	if h := Hint(fmt.Errorf("%w: AADSTS70043", auth.ErrLoginRequired), "x"); !strings.Contains(h, "often comes with MFA") {
 		t.Errorf("70043 hint lacks the MFA warning: %q", h)
+	}
+}
+
+func TestSaveHomeAccountOnlyForTheSameIdentity(t *testing.T) {
+	e := newTestEnv(t)
+	ctx := context.Background()
+	in := AccountInput{Name: "pw", Auth: config.AuthPassword, Tenant: "t.example", ClientID: testGUID, Username: "a@t.example", Secret: "x", Categories: []string{"user"}}
+	if err := e.AddAccount(ctx, in); err != nil {
+		t.Fatal(err)
+	}
+	read := func() string {
+		cfg, _, err := e.LoadConfig()
+		if err != nil {
+			t.Fatal(err)
+		}
+		a, _ := cfg.Find("pw")
+		return a.HomeAccountID
+	}
+	cfg, _, _ := e.LoadConfig()
+	cur, _ := cfg.Find("pw")
+	other := *cur
+	other.Username = "someone@else"
+	if err := e.saveHomeAccount(ctx, other, "wrong.id"); err != nil {
+		t.Fatal(err)
+	}
+	if read() == "wrong.id" {
+		t.Fatal("wrote the id of a sign-in with another identity")
+	}
+	if err := e.saveHomeAccount(ctx, *cur, "right.id"); err != nil {
+		t.Fatal(err)
+	}
+	if read() != "right.id" {
+		t.Fatal("id not saved")
 	}
 }

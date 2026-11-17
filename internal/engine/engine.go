@@ -72,8 +72,9 @@ type Options struct {
 	Logger  *slog.Logger
 
 	// SaveHomeAccount stores the home account ID a password sign-in returned
-	// into the configuration (under the configuration lock); nil skips it.
-	SaveHomeAccount func(ctx context.Context, account, homeAccountID string) error
+	// into the configuration (under the configuration lock), provided the
+	// account on disk still has the identity it signed in with; nil skips it.
+	SaveHomeAccount func(ctx context.Context, signedIn config.Account, homeAccountID string) error
 
 	// Hint returns a suggested next step for a sign-in error, or "".
 	Hint func(err error, account string) string

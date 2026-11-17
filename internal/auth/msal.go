@@ -87,10 +87,13 @@ func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silen
 	}
 	ok, blocked := gate.Allow()
 	if blocked != "" {
-		return Token{}, fmt.Errorf("%w: automatic password sign-in is paused after %s; fix the cause, then run: e5extend account set-secret %s (or account login)",
-			ErrLoginRequired, blocked, d.acct.Name)
+		return Token{}, d.pausedErr(blocked, "paused after")
 	}
 	if !ok {
+		// Inside the interval: say what the last password sign-in ran into, which is the real cause.
+		if last := gate.LastCode(); last != "" {
+			return Token{}, d.pausedErr(last, "last failed with")
+		}
 		return Token{}, silentErr
 	}
 	c, err := d.msal()
@@ -100,6 +103,7 @@ func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silen
 	res, err := c.AcquireTokenByUsernamePassword(withRecovery(ctx), scopes, d.acct.Username, string(pw))
 	if err != nil {
 		err = d.wrap(err)
+		gate.Result(aadCode(err.Error()))
 		if code := CredentialFailure(err); code != "" {
 			gate.Failed(code)
 		}
@@ -114,7 +118,19 @@ func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silen
 	if d.acct.HomeAccountID != "" && res.Account.HomeAccountID != d.acct.HomeAccountID {
 		return Token{}, fmt.Errorf("%w: the password signs in as a different account than the one set up for %q", ErrLoginRequired, d.acct.Name)
 	}
+	gate.Result("")
 	return fromResult(res.AccessToken, res.ExpiresOn, res.Account.PreferredUsername, res.Account.HomeAccountID, d.acct), nil
+}
+
+// pausedErr is the error for a password sign-in that is not tried now because
+// of an earlier failure with code. It keeps the code in its text so the hint
+// for that failure applies, and keeps the consent class for a missing consent.
+func (d *delegated) pausedErr(code, what string) error {
+	kind := ErrLoginRequired
+	if code == "AADSTS65001" {
+		kind = ErrConsentRequired
+	}
+	return fmt.Errorf("%w: automatic password sign-in %s %s; fix the cause, then run: e5extend account set-secret %s (or account login)", kind, what, code, d.acct.Name)
 }
 
 func (d *delegated) silentToken(ctx context.Context) (Token, error) {

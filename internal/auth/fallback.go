@@ -48,7 +48,12 @@ type PasswordGate interface {
 	// the attempt. blocked is the code of the failure that stopped it, when
 	// that is why it may not.
 	Allow() (ok bool, blocked string)
-	// Failed records a credential failure, which blocks further attempts.
+	// Result records how the attempt ended: the AADSTS code of its failure, or "".
+	Result(code string)
+	// LastCode returns the code the last attempt failed with, or "".
+	LastCode() string
+	// Failed records a credential failure, which blocks further attempts. It
+	// has no effect when the attempt was reset (a person acted) meanwhile.
 	Failed(code string)
 }
 

@@ -76,6 +76,9 @@ type AccountState struct {
 	PasswordBlocked *PasswordBlock `json:"password_blocked,omitempty"`
 	// LastPasswordAttempt is when the engine last tried an automatic password sign-in.
 	LastPasswordAttempt time.Time `json:"last_password_attempt,omitzero"`
+	// LastPasswordCode is the AADSTS code the last automatic password sign-in failed with ("" when it worked),
+	// so the reason shown inside the interval is the real cause.
+	LastPasswordCode string `json:"last_password_code,omitempty"`
 	// Notified maps an alert kind to its last notice; only the engine writes it.
 	Notified map[string]Notice `json:"notified,omitempty"`
 }

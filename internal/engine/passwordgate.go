@@ -24,8 +24,9 @@ func TriggerPasswordReset(dataDir, account string) error {
 // passwordGate is the engine's decision on automatic password sign-in for one
 // account, kept in state.json so it holds across restarts and processes.
 type passwordGate struct {
-	e    *Engine
-	name string
+	e       *Engine
+	name    string
+	attempt time.Time // the attempt this gate recorded in Allow
 }
 
 func (e *Engine) gateContext(ctx context.Context, name string) context.Context {
@@ -47,20 +48,54 @@ func (g *passwordGate) Allow() (ok bool, blocked string) {
 			return
 		}
 		as.LastPasswordAttempt = now
+		g.attempt = now
 		g.e.saveLocked()
 		ok = true
 	})
 	return ok, blocked
 }
 
-func (g *passwordGate) Failed(code string) {
+// current returns the account's state when it still belongs to this gate's
+// attempt; a reset while the request ran (a person set a new password, say)
+// changes the attempt time, and then the outcome of the old attempt is dropped.
+func (g *passwordGate) current() *store.AccountState {
+	as := g.e.state.Accounts[g.name]
+	if as == nil || g.attempt.IsZero() || !as.LastPasswordAttempt.Equal(g.attempt) {
+		return nil
+	}
+	return as
+}
+
+func (g *passwordGate) Result(code string) {
 	g.e.withLock(func() {
-		if as := g.e.state.Accounts[g.name]; as != nil {
-			as.PasswordBlocked = &store.PasswordBlock{Code: code, At: g.e.clock.Now()}
+		if as := g.current(); as != nil {
+			as.LastPasswordCode = code
 			g.e.saveLocked()
 		}
 	})
-	g.e.event(g.name, "password_signin_blocked", code)
+}
+
+func (g *passwordGate) LastCode() (code string) {
+	g.e.withLock(func() {
+		if as := g.e.state.Accounts[g.name]; as != nil {
+			code = as.LastPasswordCode
+		}
+	})
+	return code
+}
+
+func (g *passwordGate) Failed(code string) {
+	blocked := false
+	g.e.withLock(func() {
+		if as := g.current(); as != nil {
+			as.PasswordBlocked = &store.PasswordBlock{Code: code, At: g.e.clock.Now()}
+			g.e.saveLocked()
+			blocked = true
+		}
+	})
+	if blocked {
+		g.e.event(g.name, "password_signin_blocked", code)
+	}
 }
 
 // resetPasswordGate clears the block and the attempt time of an account.
@@ -68,7 +103,7 @@ func (e *Engine) resetPasswordGate(name string) {
 	cleared := false
 	e.withLock(func() {
 		if as := e.state.Accounts[name]; as != nil && (as.PasswordBlocked != nil || !as.LastPasswordAttempt.IsZero()) {
-			as.PasswordBlocked, as.LastPasswordAttempt = nil, time.Time{}
+			as.PasswordBlocked, as.LastPasswordAttempt, as.LastPasswordCode = nil, time.Time{}, ""
 			e.saveLocked()
 			cleared = true
 		}

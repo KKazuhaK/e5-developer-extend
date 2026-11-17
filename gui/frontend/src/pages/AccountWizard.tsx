@@ -115,12 +115,24 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
       .catch((e) => setLoadError(errMsg(e)));
   }, [mode, name]);
 
+  // The account list may arrive after the source account; recompute the suggestion then, unless the name was edited.
+  const takenNames = useRef<string[]>([]);
+  takenNames.current = snapshot.data?.accounts.map((x) => x.name) ?? [];
+  const [sourceName, setSourceName] = useState<string | null>(null);
+  useEffect(() => {
+    if (mode !== "add" || !from || sourceName === null) return;
+    const better = appIdentityName(from, takenNames.current);
+    if (better === sourceName) return;
+    setInput((i) => (i.name === sourceName ? { ...i, name: better } : i));
+    setSourceName(better);
+  }, [mode, from, sourceName, snapshot.data]);
   useEffect(() => {
     if (mode !== "add" || !from) return;
     api.accounts
       .get(from)
       .then((a) => {
-        setInput((i) => ({ ...i, name: appIdentityName(from, snapshot.data?.accounts.map((x) => x.name) ?? []), auth: "client_secret", username: a.username }));
+        setInput((i) => ({ ...i, name: appIdentityName(from, takenNames.current), auth: "client_secret", username: a.username }));
+        setSourceName(appIdentityName(from, takenNames.current));
         setLoaded(true);
       })
       .catch((e) => setLoadError(errMsg(e)));
