@@ -3,6 +3,7 @@ package ops
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -520,6 +521,11 @@ func TestHintSuggestsNextStep(t *testing.T) {
 	}
 	if h := Hint(errors.New("plain"), "x"); h != "" {
 		t.Fatal(h)
+	}
+	// The exact error a real tenant with a sign-in frequency policy returned.
+	ca := fmt.Errorf("%w: AADSTS70043: The refresh token has expired or is invalid due to sign-in frequency checks by conditional access.", auth.ErrLoginRequired)
+	if h := Hint(ca, "x"); !strings.Contains(h, "Conditional Access") || !strings.Contains(h, "account login x") {
+		t.Fatalf("sign-in frequency hint: %q", h)
 	}
 }
 

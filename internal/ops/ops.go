@@ -138,6 +138,12 @@ func Hint(err error, name string) string {
 	switch {
 	case strings.Contains(text, "AADSTS7000218"):
 		return "enable \"Allow public client flows\" in the app registration (Authentication > Advanced settings)"
+	case strings.Contains(text, "AADSTS70043"):
+		// Seen on a real tenant: a Conditional Access "sign-in frequency" policy
+		// caps the refresh token's lifetime, so signing in again only buys that
+		// much time and the background job keeps stopping.
+		return "a Conditional Access sign-in frequency policy in this tenant ends the sign-in after a fixed time, so it cannot keep running in the background; " +
+			"exclude this app registration from that policy (Entra > Protection > Conditional Access), then run `e5extend account login " + name + "`"
 	case strings.Contains(text, "AADSTS50126"):
 		return "the stored password is wrong or expired: run `e5extend account set-secret " + name + "`"
 	case strings.Contains(text, "AADSTS50076"), strings.Contains(text, "AADSTS50079"):
