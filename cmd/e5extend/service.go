@@ -30,7 +30,7 @@ func (a *app) newServiceCmd() *cobra.Command {
 }
 
 func (a *app) newServiceInstallCmd() *cobra.Command {
-	var keyFile, linger, printOnly bool
+	var keyFile, linger, headless, printOnly bool
 	var platform string
 	cmd := &cobra.Command{
 		Use:   "install",
@@ -38,30 +38,32 @@ func (a *app) newServiceInstallCmd() *cobra.Command {
 		Long: "Install e5extend as a background job that starts at login and restarts after failures:\n" +
 			"  Linux    a systemd user unit (~/.config/systemd/user/e5extend.service)\n" +
 			"  macOS    a LaunchAgent (~/Library/LaunchAgents)\n" +
-			"  Windows  a scheduled task that runs at logon\n\n" +
+			"  Windows  a scheduled task that runs at logon (with --headless: also at boot, with nobody signed in)\n\n" +
 			"With --print nothing is written or run; the files and commands are shown instead.",
 		Args: cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			if platform != "" && !printOnly {
 				return errors.New("--platform only works together with --print")
 			}
+			f := ops.InstallFlags{KeyFile: keyFile, Linger: linger, Headless: headless}
 			if printOnly {
-				return a.printServicePlan(cmd, platform, keyFile, linger)
+				return a.printServicePlan(cmd, platform, f)
 			}
-			return a.installService(cmd, keyFile, linger)
+			return a.installService(cmd, f)
 		},
 	}
 	f := cmd.Flags()
 	f.BoolVar(&keyFile, "key-file", false, "Linux: store the master key in ConfigDir/master.key and hand it to the unit (for servers without a keyring)")
 	f.BoolVar(&linger, "enable-linger", false, "Linux: run loginctl enable-linger so the service keeps running after you log out")
+	f.BoolVar(&headless, "headless", false, "Windows: run whether or not anyone is signed in and start at boot (needs an elevated prompt; the master key goes to a DPAPI-protected file)")
 	f.BoolVar(&printOnly, "print", false, "show the files and commands without writing or running anything")
 	f.StringVar(&platform, "platform", "", "linux, darwin or windows (only with --print)")
 	_ = f.MarkHidden("platform")
 	return cmd
 }
 
-func (a *app) installService(cmd *cobra.Command, keyFile, linger bool) error {
-	res, err := a.ops().ServiceInstall(keyFile, linger)
+func (a *app) installService(cmd *cobra.Command, flags ops.InstallFlags) error {
+	res, err := a.ops().ServiceInstallWith(flags)
 	out := cmd.OutOrStdout()
 	if err != nil {
 		printResult(out, res)
@@ -95,12 +97,12 @@ func printResult(out io.Writer, res service.Result) {
 
 // printServicePlan shows what install would do. For another platform it uses
 // made-up user names and paths, since the real ones would be wrong.
-func (a *app) printServicePlan(cmd *cobra.Command, platform string, keyFile, linger bool) error {
+func (a *app) printServicePlan(cmd *cobra.Command, platform string, flags ops.InstallFlags) error {
 	out := cmd.OutOrStdout()
 	if platform == "" {
 		platform = runtime.GOOS
 	}
-	plan, warns, err := a.ops().ServicePlan(platform, keyFile, linger)
+	plan, warns, err := a.ops().ServicePlanWith(platform, flags)
 	if err != nil {
 		return err
 	}
@@ -149,6 +151,9 @@ func (a *app) newServiceStatusCmd() *cobra.Command {
 			if st.Platform == service.Linux && st.Installed {
 				fmt.Fprintf(out, "linger:    %s\n", st.Linger)
 			}
+			if st.Platform == service.Windows && st.Installed {
+				fmt.Fprintf(out, "headless:  %s\n", st.Headless)
+			}
 			for _, d := range st.Details {
 				fmt.Fprintf(out, "           %s\n", d)
 			}
@@ -167,6 +172,10 @@ func (a *app) newServiceStatusCmd() *cobra.Command {
 			}
 			if !st.Installed {
 				fmt.Fprintln(out, "install it with: e5extend service install")
+			} else if st.Platform == service.Windows && st.Headless == service.Yes && (st.KeyFileMissing || st.KeyFileErr != "") {
+				fmt.Fprintln(out, "WARNING: the headless task cannot read its master key file, so the engine cannot start; run from an elevated prompt: e5extend service install --headless")
+			} else if st.Platform == service.Windows && st.Headless == service.Yes && len(st.KeyFileBroad) > 0 {
+				fmt.Fprintln(out, "WARNING: the key file's access list admits more than you, SYSTEM and Administrators; run from an elevated prompt: e5extend service install --headless")
 			} else if st.Platform == service.Linux && st.Linger == service.No {
 				fmt.Fprintln(out, "WARNING: lingering is off, so the service stops when you log out; run: loginctl enable-linger "+firstNonEmpty(os.Getenv("USER"), "$USER"))
 			}

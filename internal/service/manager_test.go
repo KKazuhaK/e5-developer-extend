@@ -383,7 +383,7 @@ func TestSchtasksInstallUninstallStatus(t *testing.T) {
 	if _, err := m.Uninstall(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"schtasks /Query /TN e5extend", "schtasks /End /TN e5extend", "schtasks /Delete /TN e5extend /F"}
+	want := []string{"schtasks /Query /TN e5extend /XML", "schtasks /End /TN e5extend", "schtasks /Delete /TN e5extend /F"}
 	if strings.Join(fr.Commands(), "|") != strings.Join(want, "|") {
 		t.Errorf("uninstall = %v", fr.Commands())
 	}

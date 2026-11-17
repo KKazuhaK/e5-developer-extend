@@ -89,7 +89,11 @@ type Deps struct {
 	// LoadConfig returns the configuration or the reason it cannot be used.
 	LoadConfig func() (*config.Config, error)
 	OpenVault  func(cfg *config.Config) (Vault, error)
-	NewAuth    func(cfg *config.Config, acct config.Account) (auth.Authenticator, error)
+	// OpenVaultWithKeyFile opens the vault with the master key read from a
+	// DPAPI key file instead of the usual sources (the key a headless Windows
+	// task uses); nil skips that check.
+	OpenVaultWithKeyFile func(cfg *config.Config, keyFile string) (Vault, error)
+	NewAuth              func(cfg *config.Config, acct config.Account) (auth.Authenticator, error)
 	// HTTP returns the client for the network probe (it honors the proxy setting).
 	HTTP func(cfg *config.Config) *http.Client
 	// Service asks the platform about the background job; nil when unsupported.
@@ -149,7 +153,7 @@ func Run(ctx context.Context, d Deps, o Options) []Check {
 	}
 	groups = append(groups,
 		group{"engine", "Engine", func(context.Context) []Check { return []Check{checkEngine(d)} }},
-		group{"service", "Background service", func(context.Context) []Check { return checkService(d) }},
+		group{"service", "Background service", func(context.Context) []Check { return checkService(d, cfg) }},
 	)
 	if cfg != nil && cfgErr == nil {
 		st, _ := store.New(d.DataDir).LoadState()

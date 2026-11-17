@@ -93,6 +93,9 @@ func (m *systemd) Plan(o InstallOptions) (Plan, error) {
 	if o.Exe == "" || o.ConfigDir == "" || o.DataDir == "" {
 		return Plan{}, errors.New("service: executable and directories are required")
 	}
+	if o.Headless {
+		return Plan{}, errors.New(headlessWindowsOnly + "; on Linux use --key-file (a key the service can read without a keyring) and --enable-linger (keep running after you log out)")
+	}
 	params := SystemdParams{Exe: o.Exe, ConfigDir: o.ConfigDir, DataDir: o.DataDir}
 	var p Plan
 	if o.KeyFile {

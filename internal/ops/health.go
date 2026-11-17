@@ -36,6 +36,13 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 		OpenVault: func(cfg *config.Config) (doctor.Vault, error) {
 			return o.OpenVault(cfg)
 		},
+		OpenVaultWithKeyFile: func(cfg *config.Config, keyFile string) (doctor.Vault, error) {
+			dir, err := paths.VaultDir()
+			if err != nil {
+				return nil, err
+			}
+			return vault.New(dir, func() ([]byte, error) { return vault.ReadDPAPIKeyFile(keyFile) }), nil
+		},
 		NewAuth: func(cfg *config.Config, acct config.Account) (auth.Authenticator, error) {
 			return o.Authenticator(cfg, acct)
 		},
@@ -69,7 +76,7 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 
 // ServiceEnv describes this machine for the service manager.
 func (o *Ops) ServiceEnv() (service.Env, error) {
-	env := service.Env{GOOS: FirstNonEmpty(o.Platform, runtime.GOOS), Runner: o.Runner}
+	env := service.Env{GOOS: FirstNonEmpty(o.Platform, runtime.GOOS), Runner: o.Runner, Elevated: service.IsElevated}
 	if env.Runner == nil {
 		env.Runner = service.ExecRunner{}
 	}
@@ -96,6 +103,9 @@ func (o *Ops) ServiceEnv() (service.Env, error) {
 		return env, err
 	}
 	env.DataDir = dir
+	if cdir, err := paths.ConfigDir(); err == nil {
+		env.ConfigDir = cdir
+	}
 	return env, nil
 }
 
@@ -152,7 +162,15 @@ func (o *Ops) executable(strict bool) (string, []string, error) {
 	return exe, warnings, nil
 }
 
-func (o *Ops) installOptions(cfgBackend string, keyFile, linger, strict bool) (service.InstallOptions, []string, error) {
+// InstallFlags are the choices of `service install`.
+type InstallFlags struct {
+	KeyFile  bool // Linux: key file for the unit
+	Linger   bool // Linux: enable lingering
+	Headless bool // Windows: run without anyone signed in
+}
+
+func (o *Ops) installOptions(cfgBackend string, f InstallFlags, strict bool) (service.InstallOptions, []string, error) {
+	keyFile, linger := f.KeyFile, f.Linger
 	exe, warns, err := o.executable(strict)
 	if err != nil {
 		return service.InstallOptions{}, nil, err
@@ -168,8 +186,9 @@ func (o *Ops) installOptions(cfgBackend string, keyFile, linger, strict bool) (s
 	opts := service.InstallOptions{
 		Exe: exe, ConfigDir: cfgDir, DataDir: dataDir, KeyFile: keyFile, EnableLinger: linger,
 		ExplicitDirs: os.Getenv("E5EXTEND_CONFIG_DIR") != "" || os.Getenv("E5EXTEND_DATA_DIR") != "",
+		Headless:     f.Headless,
 	}
-	if keyFile {
+	if keyFile || f.Headless {
 		if cfgBackend == vault.BackendKeyring {
 			return opts, nil, errors.New("vault.backend is \"keyring\", which never reads the key file; set backend = \"auto\" or \"file\" in the config first")
 		}
@@ -188,11 +207,17 @@ func (o *Ops) installOptions(cfgBackend string, keyFile, linger, strict bool) (s
 // ServiceInstall installs and starts the background job for the current user.
 // The result is filled in even when err is not nil, so a caller can show what was done.
 func (o *Ops) ServiceInstall(keyFile, linger bool) (service.Result, error) {
+	return o.ServiceInstallWith(InstallFlags{KeyFile: keyFile, Linger: linger})
+}
+
+// ServiceInstallWith is ServiceInstall with every option.
+func (o *Ops) ServiceInstallWith(f InstallFlags) (service.Result, error) {
+	keyFile := f.KeyFile
 	cfg, _, err := o.LoadConfigOrDefault()
 	if err != nil {
 		return service.Result{}, err
 	}
-	opts, warns, err := o.installOptions(cfg.Vault.Backend, keyFile, linger, true)
+	opts, warns, err := o.installOptions(cfg.Vault.Backend, f, true)
 	if err != nil {
 		return service.Result{}, err
 	}
@@ -219,7 +244,7 @@ func (o *Ops) CheckServiceInstall() error {
 	if err != nil {
 		return err
 	}
-	if _, _, err := o.installOptions(cfg.Vault.Backend, false, false, true); err != nil {
+	if _, _, err := o.installOptions(cfg.Vault.Backend, InstallFlags{}, true); err != nil {
 		return err
 	}
 	_, err = o.ServiceManager()
@@ -286,6 +311,12 @@ func (o *Ops) ServiceStatus() (service.Status, error) {
 // ones would be wrong. warnings are about the real binary and only come back
 // for the current platform.
 func (o *Ops) ServicePlan(platform string, keyFile, linger bool) (plan service.Plan, warnings []string, err error) {
+	return o.ServicePlanWith(platform, InstallFlags{KeyFile: keyFile, Linger: linger})
+}
+
+// ServicePlanWith is ServicePlan with every option.
+func (o *Ops) ServicePlanWith(platform string, f InstallFlags) (plan service.Plan, warnings []string, err error) {
+	keyFile, linger := f.KeyFile, f.Linger
 	if platform == "" {
 		platform = runtime.GOOS
 	}
@@ -300,23 +331,24 @@ func (o *Ops) ServicePlan(platform string, keyFile, linger bool) (plan service.P
 		if env, err = o.ServiceEnv(); err != nil {
 			return service.Plan{}, nil, err
 		}
-		if opts, warnings, err = o.installOptions(cfg.Vault.Backend, keyFile, linger, false); err != nil {
+		if opts, warnings, err = o.installOptions(cfg.Vault.Backend, f, false); err != nil {
 			return service.Plan{}, nil, err
 		}
 	case platform == service.Linux:
 		env = service.Env{GOOS: platform, Home: "/home/you", User: "you"}
 		opts = service.InstallOptions{Exe: "/home/you/.local/bin/e5extend", ConfigDir: "/home/you/.config/e5extend",
-			DataDir: "/home/you/.local/share/e5extend", KeyFile: keyFile, EnableLinger: linger,
+			DataDir: "/home/you/.local/share/e5extend", KeyFile: keyFile, EnableLinger: linger, Headless: f.Headless,
 			MasterKey: func() ([]byte, error) { return nil, nil }}
 	case platform == service.Darwin:
 		env = service.Env{GOOS: platform, Home: "/Users/you", UID: "501", User: "you"}
 		dir := "/Users/you/Library/Application Support/e5extend"
-		opts = service.InstallOptions{Exe: "/usr/local/bin/e5extend", ConfigDir: dir, DataDir: dir, KeyFile: keyFile}
+		opts = service.InstallOptions{Exe: "/usr/local/bin/e5extend", ConfigDir: dir, DataDir: dir, KeyFile: keyFile, Headless: f.Headless}
 	case platform == service.Windows:
 		env = service.Env{GOOS: platform, Home: `C:\Users\you`, User: `DESKTOP-PC\you`, DataDir: `C:\Users\you\AppData\Local\e5extend`}
 		exe, _ := service.PickWindowsExe(`C:\Users\you\bin\e5extend.exe`, func(string) bool { return true })
 		opts = service.InstallOptions{Exe: exe, ConfigDir: `C:\Users\you\AppData\Roaming\e5extend`,
-			DataDir: `C:\Users\you\AppData\Local\e5extend`, KeyFile: keyFile}
+			DataDir: `C:\Users\you\AppData\Local\e5extend`, KeyFile: keyFile, Headless: f.Headless,
+			MasterKey: func() ([]byte, error) { return nil, nil }}
 	default:
 		return service.Plan{}, nil, fmt.Errorf("--platform must be linux, darwin or windows, got %q", platform)
 	}

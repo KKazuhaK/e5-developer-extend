@@ -217,6 +217,8 @@ func newFixture(t *testing.T, accts ...config.Account) *fixture {
 	t.Cleanup(f.srv.Close)
 
 	f.cfg = config.Default()
+	// The engine tests (and the one-year simulation) assume working days only.
+	f.cfg.Schedule.WorkDays = []string{"mon", "tue", "wed", "thu", "fri"}
 	f.cfg.Accounts = accts
 	for _, a := range accts {
 		f.auths[a.Name] = &fakeAuth{tok: auth.Token{

@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
 	"github.com/KKazuhaK/e5-developer-extend/internal/version"
 )
 
@@ -44,9 +45,12 @@ func newRootCmdWith(a *app) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: false,
 	}
-	var configDir, dataDir string
+	var configDir, dataDir, dpapiKeyFile string
 	root.PersistentFlags().StringVar(&configDir, "config-dir", "", "configuration folder (same as E5EXTEND_CONFIG_DIR)")
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data folder (same as E5EXTEND_DATA_DIR)")
+	// The Windows headless task hands the DPAPI key file over this way.
+	root.PersistentFlags().StringVar(&dpapiKeyFile, "dpapi-key-file", "", "Windows: DPAPI-protected master key file (same as "+vault.EnvMasterKeyDPAPIFile+"); written by service install --headless")
+	_ = root.PersistentFlags().MarkHidden("dpapi-key-file")
 	root.PersistentPreRunE = func(*cobra.Command, []string) error {
 		a.ops().CleanupUpdateLeftovers()
 		// The flags exist for job runners that cannot set environment
@@ -54,6 +58,7 @@ func newRootCmdWith(a *app) *cobra.Command {
 		for _, f := range []struct{ flag, env, val string }{
 			{"config-dir", "E5EXTEND_CONFIG_DIR", configDir},
 			{"data-dir", "E5EXTEND_DATA_DIR", dataDir},
+			{"dpapi-key-file", vault.EnvMasterKeyDPAPIFile, dpapiKeyFile},
 		} {
 			if f.val == "" {
 				continue

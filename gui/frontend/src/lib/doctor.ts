@@ -61,7 +61,7 @@ export interface TitleSpec {
 
 const FIXED: Record<string, DictKey> = {
   config: "doctor.config", vault: "doctor.vault", engine: "doctor.engine", service: "doctor.service",
-  linger: "doctor.linger", clock: "doctor.clock", network: "doctor.network", notify: "doctor.notify", update: "doctor.update",
+  linger: "doctor.linger", headless: "doctor.headless", clock: "doctor.clock", network: "doctor.network", notify: "doctor.notify", update: "doctor.update",
 };
 const PER_ACCOUNT: Record<string, DictKey> = {
   token: "doctor.account.token", scopes: "doctor.account.scopes", activity: "doctor.account.activity",
