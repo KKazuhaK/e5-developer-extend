@@ -86,6 +86,22 @@ func TriggerRun(dataDir, account string) error { return writeTrigger(dataDir, ac
 // TriggerResume asks the engine to clear a pause or attention state.
 func TriggerResume(dataDir, account string) error { return writeTrigger(dataDir, account+".resume") }
 
+// RenameTriggers moves the trigger files waiting for the account from (a
+// round, a resume, a subscription check, a password reset) to the name to,
+// so a request made just before a rename is not lost. A missing file is not
+// an error: the engine may have taken it already.
+func RenameTriggers(dataDir, from, to string) {
+	dir := triggerDir(dataDir)
+	for _, suffix := range []string{"", ".resume", subscriptionSuffix, passwordSuffix} {
+		src, dst := filepath.Join(dir, from+suffix), filepath.Join(dir, to+suffix)
+		if _, err := os.Stat(dst); err == nil {
+			_ = os.Remove(src)
+			continue
+		}
+		_ = os.Rename(src, dst)
+	}
+}
+
 // TriggerReload asks the engine to reload the configuration now.
 func TriggerReload(dataDir string) error { return writeTrigger(dataDir, ".reload") }
 
