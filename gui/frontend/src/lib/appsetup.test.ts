@@ -32,6 +32,12 @@ describe("actionMsg", () => {
     const c = { clientId: "c", displayName: "e5renew" };
     expect(actionMsg({ code: "adopt_or_create", text: "" }, plan({ candidates: [c, c] }))?.params).toEqual({ n: 2, name: "E5 Developer Extend" });
     expect(actionMsg({ code: "grant_consent", text: "" }, plan())?.key).toBe("auto.action.grant_consent");
+    expect(actionMsg({ code: "adopt_app", text: "" }, plan(), "e5renew")?.params).toEqual({ name: "e5renew" });
+    expect(actionMsg({ code: "add_tags", text: "add the tags e5extend, e5extend:delegated" }, plan())?.params).toEqual({ tags: "e5extend, e5extend:delegated" });
+    expect(actionMsg({ code: "add_permissions", text: "" }, plan({ missing: ["a", "b", "c"] }))?.params).toEqual({ n: 3 });
+    for (const code of ["rename_app", "set_notes", "add_redirect_uri", "set_public_client", "create_service_principal", "assign_roles", "create_secret"]) {
+      expect(actionMsg({ code, text: "" }, plan()), code).not.toBeNull();
+    }
     expect(actionMsg({ code: "future_thing", text: "x" }, plan())).toBeNull();
   });
 });

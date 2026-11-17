@@ -22,8 +22,11 @@ export function progressMsg(line: string): Msg | null {
   return null;
 }
 
-/** Maps an action of the plan (stable code) to a dictionary entry; null for a code this version does not know. */
-export function actionMsg(a: AppSetupAction, plan: AppSetupPlan): Msg | null {
+/**
+ * Maps an action of the plan (stable code) to a dictionary entry; null for a code this version does not know.
+ * adoptName is the display name of the app the user would adopt, for "adopt_app".
+ */
+export function actionMsg(a: AppSetupAction, plan: AppSetupPlan, adoptName?: string): Msg | null {
   switch (a.code) {
     case "create_app":
       return { key: "auto.action.create_app", params: { name: plan.displayName } };
@@ -31,6 +34,20 @@ export function actionMsg(a: AppSetupAction, plan: AppSetupPlan): Msg | null {
       return { key: "auto.action.update_app", params: { name: plan.existing?.displayName ?? plan.displayName } };
     case "adopt_or_create":
       return { key: "auto.action.adopt_or_create", params: { n: plan.candidates.length, name: plan.displayName } };
+    case "adopt_app":
+      return { key: "auto.action.adopt_app", params: { name: adoptName ?? plan.candidates[0]?.displayName ?? "" } };
+    case "rename_app":
+      return { key: "auto.action.rename_app", params: { name: plan.displayName } };
+    case "set_notes":
+      return { key: "auto.action.set_notes" };
+    case "add_tags":
+      return { key: "auto.action.add_tags", params: { tags: /add the tags (.+)$/i.exec(a.text)?.[1] ?? plan.tags.join(", ") } };
+    case "add_redirect_uri":
+      return { key: "auto.action.add_redirect_uri" };
+    case "set_public_client":
+      return { key: "auto.action.set_public_client" };
+    case "add_permissions":
+      return { key: "auto.action.add_permissions", params: { n: plan.missing.length } };
     case "create_service_principal":
       return { key: "auto.action.create_service_principal" };
     case "grant_consent":

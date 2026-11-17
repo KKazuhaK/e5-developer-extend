@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, ExternalLink, LogIn, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { api } from "@/api";
-import type { AccountInput, AppSetupResult, AuthKind, CatalogEntry, LoginEvent, TestResult } from "@/api";
+import type { AccountInput, AppSetupCancelResult, AppSetupResult, AuthKind, CatalogEntry, LoginEvent, TestResult } from "@/api";
 import { formatWhen } from "@/lib/time";
 import { DOCS_URL } from "@/config";
 import { useI18n, type DictKey } from "@/i18n";
 import { useApp } from "@/state/app";
+import { useToast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -52,6 +53,24 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
   const [setup, setSetup] = useState<AppSetupResult | null>(null);
   const [setupRestart, setSetupRestart] = useState(0);
   const auto = route === "auto";
+  const toast = useToast();
+  // The session of a finished automatic setup, until the account is saved (then it is finished) or the setup is thrown away (then it is cancelled).
+  const setupSid = useRef<string | null>(null);
+  const discardSetup = () => {
+    const sid = setupSid.current;
+    setupSid.current = null;
+    if (!sid) return;
+    // An unused client secret is deleted again; say what happened.
+    void api.appSetup
+      .cancel(sid)
+      .then((r: AppSetupCancelResult) => {
+        if (r.secretRemoved) toast.success(t("auto.secretRevoked"));
+        else if (r.error) toast.error(t("auto.secretStillLive", { detail: r.error }));
+      })
+      .catch(() => undefined);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => () => discardSetup(), []); // leaving the wizard
 
   const changeAuto = (patch: Partial<AccountInput>) => {
     setErrors({});
@@ -61,11 +80,13 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
       return next;
     });
     if (setup) {
+      discardSetup();
       setSetup(null);
       setInput((i) => ({ ...i, tenant: "", clientId: "", secretExpires: "" }));
     }
   };
-  const onSetupResult = (r: AppSetupResult) => {
+  const onSetupResult = (r: AppSetupResult, sessionId: string) => {
+    setupSid.current = sessionId;
     setSetup(r);
     setInput((i) => ({ ...i, tenant: r.tenantId, clientId: r.clientId, secretExpires: r.secretExpires }));
     // Without consent the account is saved but cannot sign in yet.
@@ -128,6 +149,11 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
         if (persisted) await api.accounts.update({ ...payload, secret: payload.secret || undefined });
         else await api.accounts.add(payload);
         setPersisted(true);
+        if (setupSid.current) {
+          // The account owns the setup's result now (and its secret).
+          void api.appSetup.finish(setupSid.current).catch(() => undefined);
+          setupSid.current = null;
+        }
         setSavedAuth(payload.auth);
         setInput((i) => ({ ...i, ...payload, secret: undefined })); // the secret is gone from memory after this
         void snapshot.refresh();
@@ -270,6 +296,7 @@ export function AccountWizard({ mode, name, startStep, onClose }: { mode: Mode; 
             onRestart={() => setSetupRestart((n) => n + 1)}
             onAbort={() => setStep(1)}
             onManual={() => {
+              discardSetup();
               setRoute("manual");
               setSetup(null);
               setStep(1);

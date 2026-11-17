@@ -106,7 +106,7 @@ interface ServiceInfo { platform: string; installed: boolean; enabled: string; r
 |---|---|
 | `StatusService` | `Snapshot()`、`RunNow(names: string[])` |
 | `AccountService` | `Add(in)`、`Update(in)`、`Remove(name)`、`SetSecret(name, secret)`、`Login(name)`（结果通过事件推送）、`LoginAfterSetup(name)`（同 `Login`，但新应用还没同步时等待并重试）、`CancelLogin(name)`、`Test(name)`、`Pause(name)`、`Resume(name)`、`Get(name): AccountInput`（不含 secret） |
-| `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Apply(id, choice)`、`Cancel(id)`；`id` 由前端生成，好在调用前先订阅事件 |
+| `AppSetupService` | `Begin(id, start)`（管理员登录，结果通过事件推送）、`Preview(id, choice)`（列出所选选项的具体事项，不写任何东西）、`Apply(id, choice)`、`Finish(id)`（向导已保存账号，结束会话）、`Cancel(id): { secretRemoved, error }`；`id` 由前端生成，好在调用前先订阅事件 |
 | `LogService` | `Read(account, sinceHours, limit)` |
 | `SettingsService` | `Get()`、`Save(s): ValidationError[]`、`SetStartAtLogin(on)`、`SetWebhook(url)`、`ClearWebhook()`、`TestWebhook()` |
 | `HealthService` | `Doctor(offline)`、`ServiceInfo()`、`InstallService()`、`StartService()`、`UninstallService()` |
@@ -206,6 +206,10 @@ CI 在前端构建成功后自动加 `-tags frontend`。发布构建必须带这
 - 事件：`login:<name>`（`LoginEvent`，最后一条是 `done` 或 `error`；`progress` 是需要告诉用户的等待，如“等待微软同步”）；
   `appsetup:<id>`（`AppSetupEvent`）：`device_code` / `browser_opened`（管理员登录，同上）→ `signed_in` → `plan`（`AppSetupPlan`：应用名、标签、权限、缺的权限、已有应用、候选、事项（`code` 稳定，`text` 为英文）、`needsChoice`）→ 前端调 `Apply` → 若干 `progress`（英文原文，前端按前缀翻译，认不出的原样显示）→ `result`（`AppSetupResult`：租户 ID、客户端 ID、应用名、是否创建 / 采用 / 改名、`consentGranted`、`adminConsentUrl`、`consentError`、`secretExpires`）；
   任何失败以 `error` 结束，带 `code`：`forbidden`（`roles` 列出能做这件事的角色）、`blocked`（租户禁止 Graph Command Line Tools）、`unknown_permission`、`cancelled`、`other`。
+  `result` 之后会话仍然保持，直到向导保存了账号（`Finish`）或放弃（`Cancel`）。应用身份的创建结果已出来、账号却没保存就放弃时，`Cancel` 会用 `RevokeSecret` 把新 Secret 从应用里删掉并清掉 vault 里的条目，
+  返回 `secretRemoved`；删不掉时 `error` 里写明仍然有效的 Secret（名字和 Key ID，不含值），界面用提示条显示。账号已经存在时 `Cancel` 不动它的 Secret。
+  计划里有候选应用时，界面每次改选（采用哪个、是否改名、新建）都调 `Preview`，“将要执行”列表显示所选选项的具体事项（`adopt_app`、`rename_app`、`set_notes`、`add_tags`、`add_redirect_uri`、`set_public_client`、`add_permissions`、`create_app`、`create_service_principal`、`grant_consent`、`assign_roles`、`create_secret`，每个都有中英文翻译）；列表为空就显示“一切已就绪”。
+  `AppSetupResult` 还带 `secretCreated`、`removedSecrets`（删掉的本机旧 Secret 个数）、`notRemovedSecrets`（因可能属于别的账号而没删的个数，界面提示自行处理）。
   同一时间只有一个创建会话；离开向导或点取消就 `Cancel`，已经在微软那边建好的应用保留（下次复用），不留半个账号。
   管理员的令牌只在后端内存里；事件里没有令牌、Secret，也没有管理员的登录名。应用身份的 Secret 由后端直接存进 vault（以账号名为键），向导随后用 `AccountInput.useStoredSecret` 添加账号。
   `run:done`（`{ error: string }`，在本进程里跑完一轮后发出）。

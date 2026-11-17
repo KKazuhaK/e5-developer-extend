@@ -83,7 +83,12 @@ export interface AppSetupResult {
   adminConsentUrl: string;
   consentError: string;
   secretExpires: string; // YYYY-MM-DD, app identity only; the secret itself stays in the vault
+  secretCreated: boolean; // a client secret was created and stored in the vault
+  removedSecrets: number; // this computer's earlier secrets deleted from the app
+  notRemovedSecrets: number; // older ones left alone because they might belong to another account
 }
+/** What cancelling undid: a client secret nobody uses is deleted again; error names the one still live if that failed. */
+export interface AppSetupCancelResult { secretRemoved: boolean; error: string }
 export type AppSetupErrorCode = "forbidden" | "blocked" | "unknown_permission" | "cancelled" | "other";
 export interface AppSetupEvent {
   // pushed through the Wails event "appsetup:<id>"

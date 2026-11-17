@@ -110,7 +110,7 @@ export function AutoStartForm({ input, method, errors, locked, onChange, onMetho
           <ShieldCheck className="mt-0.5 size-4 shrink-0 text-info" aria-hidden />
           <span>{t("auto.msTool")}</span>
         </p>
-        <p className="pl-6 text-xs text-muted-foreground">{t("auto.roles")}</p>
+        <p className="pl-6 text-xs text-muted-foreground">{t(identity === "app" ? "auto.roles.app" : "auto.roles.delegated")}</p>
       </div>
     </div>
   );
@@ -149,7 +149,7 @@ interface Failure { code: string; message: string; roles: string[] }
  */
 export function AppSetupStep({ input, method, done, onResult, onManual, onRestart, onAbort }: {
   input: AccountInput; method: AdminMethod; done: AppSetupResult | null;
-  onResult: (r: AppSetupResult) => void; onManual: () => void; onRestart: () => void; onAbort: () => void;
+  onResult: (r: AppSetupResult, sessionId: string) => void; onManual: () => void; onRestart: () => void; onAbort: () => void;
 }) {
   const { t } = useI18n();
   const [phase, setPhase] = useState<Phase>(done ? "done" : "starting");
@@ -199,7 +199,7 @@ export function AppSetupStep({ input, method, done, onResult, onManual, onRestar
           if (e.result) {
             setResult(e.result);
             setPhase("done");
-            onResult(e.result);
+            onResult(e.result, sid);
           }
           break;
         case "error":
@@ -251,7 +251,7 @@ export function AppSetupStep({ input, method, done, onResult, onManual, onRestar
       );
     }
     if (phase === "plan" && plan) {
-      return <PlanView plan={plan} adopt={adopt} rename={rename} submitting={submitting} onAdopt={setAdopt} onRename={setRename} onConfirm={() => void confirm()} onCancel={onAbort} />;
+      return <PlanView id={id.current} plan={plan} adopt={adopt} rename={rename} submitting={submitting} onAdopt={setAdopt} onRename={setRename} onConfirm={() => void confirm()} onCancel={onAbort} />;
     }
     if (phase === "applying") return <ProgressView lines={lines} />;
     return (
@@ -265,19 +265,47 @@ export function AppSetupStep({ input, method, done, onResult, onManual, onRestar
   return body;
 }
 
-function PlanView({ plan, adopt, rename, submitting, onAdopt, onRename, onConfirm, onCancel }: {
-  plan: AppSetupPlan; adopt: string; rename: boolean; submitting: boolean;
+function PlanView({ id, plan, adopt, rename, submitting, onAdopt, onRename, onConfirm, onCancel }: {
+  id: string; plan: AppSetupPlan; adopt: string; rename: boolean; submitting: boolean;
   onAdopt: (id: string) => void; onRename: (r: boolean) => void; onConfirm: () => void; onCancel: () => void;
 }) {
   const { t } = useI18n();
-  const missing = useMemo(() => new Set(plan.missing), [plan.missing]);
-  const nothing = plan.actions.length === 0;
+  // With candidates the steps depend on the selected option; the backend works them out without writing anything.
+  const [shown, setShown] = useState<AppSetupPlan>(plan);
+  const [loading, setLoading] = useState(plan.needsChoice);
+  const [previewError, setPreviewError] = useState("");
+  const seq = useRef(0);
+  const adopting = adopt !== "";
+  const renaming = adopting && rename;
+  useEffect(() => {
+    if (!plan.needsChoice) return;
+    const n = ++seq.current;
+    setLoading(true);
+    setPreviewError("");
+    api.appSetup
+      .preview(id, { adopt, createNew: !adopting, rename: renaming })
+      .then((p) => {
+        if (n !== seq.current) return;
+        setShown(p);
+        setLoading(false);
+      })
+      .catch((ex) => {
+        if (n !== seq.current) return;
+        setPreviewError(errMsg(ex));
+        setLoading(false);
+      });
+  }, [id, plan.needsChoice, adopt, adopting, renaming]);
+
+  const missing = useMemo(() => new Set(shown.missing), [shown.missing]);
+  const partial = missing.size > 0 && missing.size < shown.permissions.length;
+  const adoptName = plan.candidates.find((c) => c.clientId === adopt)?.displayName;
+  const nothing = !loading && !previewError && shown.actions.length === 0;
   return (
     <div className="space-y-4">
       <p className="text-base font-medium">{t("auto.planTitle")}</p>
       <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-[13px]">
         <dt className="text-muted-foreground">{t("auto.planName")}</dt>
-        <dd className="font-medium">{plan.existing ? plan.existing.displayName : plan.displayName}</dd>
+        <dd className="font-medium">{adoptName && !renaming ? adoptName : plan.existing ? plan.existing.displayName : plan.displayName}</dd>
         <dt className="text-muted-foreground">{t("auto.planTenant")}</dt>
         <dd className="font-mono text-xs break-all">{plan.tenantId}</dd>
       </dl>
@@ -285,11 +313,11 @@ function PlanView({ plan, adopt, rename, submitting, onAdopt, onRename, onConfir
       <div>
         <p className="mb-1.5 text-[13px] font-medium">
           {t("auto.planPerms", { n: plan.permissions.length })}
-          {plan.existing && plan.missing.length > 0 && <span className="ml-2 font-normal text-muted-foreground">{t("auto.planPermsNew", { n: plan.missing.length })}</span>}
+          {partial && <span className="ml-2 font-normal text-muted-foreground">{t("auto.planPermsNew", { n: missing.size })}</span>}
         </p>
         <ul className="flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
           {plan.permissions.map((p) => (
-            <li key={p} className={cn("rounded border px-1.5 py-0.5 font-mono text-xs", plan.existing && missing.has(p) ? "border-primary/50 bg-accent/60" : "bg-muted/50")}>
+            <li key={p} className={cn("rounded border px-1.5 py-0.5 font-mono text-xs", partial && missing.has(p) ? "border-primary/50 bg-accent/60" : "bg-muted/50")}>
               {p}
             </li>
           ))}
@@ -307,7 +335,7 @@ function PlanView({ plan, adopt, rename, submitting, onAdopt, onRename, onConfir
             ))}
             <ChoiceCard selected={adopt === ""} onSelect={() => onAdopt("")} title={t("auto.createNew")} hint={plan.displayName} />
           </div>
-          {adopt !== "" && (
+          {adopting && (
             <label className="mt-2.5 flex cursor-pointer items-center gap-2.5 text-[13px]">
               <Checkbox checked={rename} onCheckedChange={(v) => onRename(v === true)} />
               {t("auto.rename", { name: plan.displayName })}
@@ -316,23 +344,29 @@ function PlanView({ plan, adopt, rename, submitting, onAdopt, onRename, onConfir
         </div>
       )}
 
-      <div>
+      <div aria-live="polite">
         <p className="mb-1.5 text-[13px] font-medium">{t("auto.planActions")}</p>
-        {nothing ? (
+        {loading ? (
+          <p className="flex items-center gap-2 text-[13px] text-muted-foreground">
+            <Spinner /> {t("auto.previewing")}
+          </p>
+        ) : previewError ? (
+          <p role="alert" className="text-[13px] text-danger">{t("auto.previewFailed", { message: previewError })}</p>
+        ) : nothing ? (
           <p className="flex items-center gap-2 text-[13px]">
             <CheckCircle2 className="size-4 text-success" aria-hidden /> {t("auto.planNone")}
           </p>
         ) : (
           <ul className="list-disc space-y-0.5 pl-5 text-[13px]">
-            {plan.actions.map((a) => (
-              <li key={a.code}>{msg(t, actionMsg(a, plan), a.text)}</li>
+            {shown.actions.map((a) => (
+              <li key={a.code}>{msg(t, actionMsg(a, shown, adoptName), a.text)}</li>
             ))}
           </ul>
         )}
       </div>
 
       <div className="flex gap-2">
-        <Button onClick={onConfirm} disabled={submitting}>
+        <Button onClick={onConfirm} disabled={submitting || loading || !!previewError}>
           {submitting && <Spinner />}
           {nothing ? t("auto.confirmNone") : t("auto.confirm")}
         </Button>
@@ -396,7 +430,13 @@ function DoneView({ result }: { result: AppSetupResult }) {
       ) : (
         <ConsentNotice url={result.adminConsentUrl} />
       )}
-      {result.secretExpires && <p className="text-[13px] text-muted-foreground">{t("auto.done.secret", { date: result.secretExpires })}</p>}
+      {result.secretCreated && <p className="text-[13px] text-muted-foreground">{t("auto.done.secret", { date: result.secretExpires })}</p>}
+      {result.removedSecrets > 0 && <p className="text-[13px] text-muted-foreground">{t("auto.done.removedSecrets", { n: result.removedSecrets })}</p>}
+      {result.notRemovedSecrets > 0 && (
+        <p className="flex items-start gap-2 text-[13px] text-warning">
+          <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> {t("auto.done.notRemovedSecrets", { n: result.notRemovedSecrets })}
+        </p>
+      )}
       <p className="text-[13px] text-muted-foreground">{t("auto.done.next")}</p>
     </div>
   );

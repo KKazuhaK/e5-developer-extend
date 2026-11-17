@@ -3,7 +3,7 @@ import {
   AccountService, AppSetupService, BackupService, CatalogService, HealthService, LogService, SettingsService, StatusService,
 } from "../../bindings/github.com/KKazuhaK/e5-developer-extend/gui/services";
 import type { Api } from "./interface";
-import type { AppSetupEvent, LoginEvent, RunDone, Snapshot } from "./types";
+import type { AppSetupEvent, AppSetupPlan, LoginEvent, RunDone, Snapshot } from "./types";
 
 // The bindings are generated (gitignored); see README. Generated models are
 // classes whose structure matches ./types.ts, so results are cast. Go nil
@@ -50,13 +50,14 @@ export const wailsApi: Api = {
   },
   appSetup: {
     begin: (id, s) => AppSetupService.Begin(id, cast(s)),
+    preview: async (id, c) => planOf(cast<AppSetupPlan>(await AppSetupService.Preview(id, cast(c)))),
     apply: (id, c) => AppSetupService.Apply(id, cast(c)),
-    cancel: (id) => AppSetupService.Cancel(id),
+    finish: (id) => AppSetupService.Finish(id),
+    cancel: async (id) => cast<import("./types").AppSetupCancelResult>(await AppSetupService.Cancel(id)),
     onEvent: (id, cb) =>
       Events.On(`appsetup:${id}`, (ev) => {
         const e = payload<AppSetupEvent>(ev);
-        const p = e.plan;
-        cb(p ? { ...e, plan: { ...p, tags: arr(p.tags), permissions: arr(p.permissions), missing: arr(p.missing), candidates: arr(p.candidates), actions: arr(p.actions) } } : e);
+        cb(e.plan ? { ...e, plan: planOf(e.plan) } : e);
       }),
   },
   logs: { read: async (a, h, l) => arr(cast<import("./types").LogEntry[]>(await LogService.Read(a, h, l))) },
@@ -118,6 +119,10 @@ export const wailsApi: Api = {
     onNavigate: (cb) => Events.On("navigate", (ev) => cb(payload<{ page?: unknown }>(ev)?.page)),
   },
 };
+
+const planOf = (p: AppSetupPlan): AppSetupPlan => ({
+  ...p, tags: arr(p.tags), permissions: arr(p.permissions), missing: arr(p.missing), candidates: arr(p.candidates), actions: arr(p.actions),
+});
 
 function norm(r: { actions: string[] | null; warnings: string[] | null; manual: string[] | null }) {
   return { actions: arr(r.actions), warnings: arr(r.warnings), manual: arr(r.manual) };

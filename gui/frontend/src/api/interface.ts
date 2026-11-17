@@ -1,5 +1,5 @@
 import type {
-  AccountInput, AppSetupChoice, AppSetupEvent, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
+  AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
   TestResult, ValidationError,
 } from "./types";
 
@@ -40,8 +40,13 @@ export interface Api {
    */
   appSetup: {
     begin(id: string, start: AppSetupStart): Promise<void>;
+    /** The plan as it would be for this choice (actions and missing permissions); changes nothing. */
+    preview(id: string, choice: AppSetupChoice): Promise<AppSetupPlan>;
     apply(id: string, choice: AppSetupChoice): Promise<void>;
-    cancel(id: string): Promise<void>;
+    /** Ends the session after the account was saved. */
+    finish(id: string): Promise<void>;
+    /** Abandons the session; after a finished app-only setup that nobody uses it also deletes the new client secret. */
+    cancel(id: string): Promise<AppSetupCancelResult>;
     /** Subscribes to the "appsetup:<id>" event. Returns the unsubscribe function. */
     onEvent(id: string, cb: (e: AppSetupEvent) => void): () => void;
   };
