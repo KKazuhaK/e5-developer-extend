@@ -1,6 +1,6 @@
 import type {
   AccountInput, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupStart, BackupExportResult, BackupImportResult, ImportMode, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo, ServiceResult, Settings, Snapshot,
-  RecommendResult, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
+  RecommendResult, SubscriptionRefresh, TenantSubscriptions, TestResult, ValidationError, ChannelInput, ChannelTest, ChannelType, ChannelView, EmailPreset, MessagePreview,
 } from "./types";
 
 /**
@@ -86,6 +86,14 @@ export interface Api {
     /** Starts the installed service when it is stopped; does not rewrite it. */
     startService(): Promise<ServiceResult>;
     uninstallService(): Promise<ServiceResult>;
+  };
+  subscription: {
+    /** What the engine last saw of each tenant's subscriptions; makes no network call. */
+    list(): Promise<TenantSubscriptions[]>;
+    /** Reads them now for the tenant of the account (every tenant when empty); a running engine is asked and waited for. */
+    refresh(account: string): Promise<SubscriptionRefresh>;
+    /** Writes the end date (YYYY-MM-DD, "" removes it) of the account's tenant, for when it cannot be read. */
+    setExpires(account: string, date: string): Promise<void>;
   };
   catalog: {
     list(account: string): Promise<CatalogEntry[]>;

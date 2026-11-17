@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { AccountCard } from "@/components/AccountCard";
+import { SubscriptionCard } from "@/pages/SubscriptionCard";
 import { EmptyBlock, ErrorBlock, LoadingBlock, PageHeader, Spinner, ToneIcon } from "@/components/common";
 import { engineState, engineTone, compareStatus, isHealthy, needsAction } from "@/lib/status";
 import { formatRelative, formatWhen } from "@/lib/time";
@@ -101,6 +102,10 @@ export function Overview() {
           <span className="mt-0.5 block text-xs text-muted-foreground">{t("overview.accountsOk", { count: okCount })}</span>
         </Stat>
       </Card>
+      )}
+
+      {accounts.length > 0 && (
+        <SubscriptionCard accounts={accounts} onFix={(name) => navigate("accounts", { wizard: { mode: "add", from: name } })} />
       )}
 
       {eng === "stopped" && (

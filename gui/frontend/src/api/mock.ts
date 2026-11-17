@@ -5,7 +5,7 @@ import type { Api } from "./interface";
 import type {
   AccountInput, AppSetupAction, CategoryAdvice, AppSetupCancelResult, AppSetupChoice, AppSetupEvent, AppSetupPlan, AppSetupResult, AppSetupStart, BackupImportResult, AccountStatus, AccountSummary, CatalogEntry, DoctorCheck, LogEntry, LoginEvent, RunDone, ServiceInfo,
   ChannelInput, ChannelType, ChannelView, ChannelTest, MessagePreview, EmailPreset, SecretStatus,
-  Settings, Snapshot, ValidationError,
+  Settings, Snapshot, SubscriptionView, TenantSubscriptions, ValidationError,
 } from "./types";
 
 type Host = "gui" | "service" | "none";
@@ -108,6 +108,59 @@ function seedAccounts() {
   ];
 }
 if (!controls.empty) seedAccounts();
+
+
+// ---- subscriptions ----
+// ?subscription=ok|expiring|warning|nopermission|manual picks what the check found for the first tenant
+// (nopermission and manual apply to every tenant; manual also has a hand-written date on the first).
+type SubVariant = "ok" | "expiring" | "warning" | "nopermission" | "manual";
+const subVariant = (["ok", "expiring", "warning", "nopermission", "manual"].includes(q.get("subscription") ?? "") ? q.get("subscription") : "ok") as SubVariant;
+const subManual = new Map<string, string>(); // tenant -> hand-written date
+const subCheckedAt = new Map<string, number>();
+const daysFrom = (iso: string) => Math.round((Date.parse(`${iso}T00:00:00Z`) - Date.UTC(new Date().getUTCFullYear(), new Date().getUTCMonth(), new Date().getUTCDate())) / 86_400_000);
+function mockSub(id: string, sku: string, status: string, expires: number, extra: Partial<SubscriptionView> = {}): SubscriptionView {
+  return {
+    id, sku, watched: sku.startsWith("DEVELOPERPACK"), status, isTrial: false, licenses: 25, expires: day(expires), daysLeft: expires, checkedAt: iso(now0 - 3 * 3_600_000),
+    renewals: [], ...extra,
+  };
+}
+function mockTenants(): TenantSubscriptions[] {
+  const groups = new Map<string, string[]>();
+  for (const a of accounts) {
+    const key = a.input.tenant.toLowerCase();
+    groups.set(key, [...(groups.get(key) ?? []), a.input.name]);
+  }
+  if (subVariant === "manual" && groups.size > 0 && !subManual.has([...groups.keys()][0])) subManual.set([...groups.keys()][0], day(40));
+  return [...groups.entries()].map(([tenant, names], i) => {
+    const first = i === 0;
+    const checked = subCheckedAt.get(tenant) ?? now0 - 3 * 3_600_000;
+    const base = {
+      tenant, label: tenant, tenantId: first ? MOCK_TENANT : "", accounts: names, detail: "", attemptedAt: iso(checked), nextCheckAt: iso(checked + 86_400_000),
+      manualExpires: subManual.get(tenant) ?? "", manualDaysLeft: null as number | null, manualInUse: false, manualRedundant: false,
+    };
+    let t: TenantSubscriptions;
+    if (subVariant === "nopermission" || subVariant === "manual") {
+      t = { ...base, access: "no_permission", checkedAt: null, subscriptions: [] };
+    } else {
+      const days = first ? (subVariant === "expiring" ? 5 : subVariant === "warning" ? 20 : 89) : 60 + i * 37;
+      const status = first && subVariant === "warning" ? "Warning" : "Enabled";
+      const subs = [mockSub(`s-${i}`, "DEVELOPERPACK_E5", status, days, first ? {
+        renewals: [
+          { from: day(days - 180), to: day(days - 90), seenAt: iso(now0 - 91 * 86_400_000) },
+          { from: day(days - 90), to: day(days), seenAt: iso(now0 - 2 * 86_400_000) },
+        ],
+      } : {})];
+      if (first) subs.push(mockSub("s-x", "POWER_BI_STANDARD", "Enabled", 400, { licenses: 1_000_000, isTrial: true }));
+      t = { ...base, access: "ok", checkedAt: iso(checked), subscriptions: subs.map((x) => ({ ...x, checkedAt: iso(checked) })) };
+    }
+    if (t.manualExpires) {
+      t.manualDaysLeft = daysFrom(t.manualExpires);
+      t.manualInUse = !t.subscriptions.some((x) => x.watched);
+      t.manualRedundant = !t.manualInUse;
+    }
+    return t;
+  });
+}
 
 // ---- catalog ----
 const CATALOG: { id: string; category: string; name: string; scopes: string[] }[] = [
@@ -425,7 +478,9 @@ const EVENT_LABEL: Record<string, [string, string]> = {
   needs_attention: ["需要处理", "Needs attention"], recovered: ["已恢复", "Recovered"], auto_paused: ["已自动暂停", "Paused automatically"],
   stale: ["长时间没有成功调用", "No successful call for a long time"], secret_expiring: ["密钥即将过期", "Client secret expiring"],
   period_ended: ["运行周期已结束", "Run period ended"], failure_spike: ["调用失败率过高", "High failure rate"],
-  all_failing: ["所有账号同时异常", "All accounts failing"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
+  all_failing: ["所有账号同时异常", "All accounts failing"],
+  subscription_expiring: ["E5 订阅即将到期", "E5 subscription expiring"], subscription_status: ["E5 订阅状态变化", "E5 subscription status changed"],
+  subscription_renewed: ["E5 订阅已续期", "E5 subscription renewed"], test: ["测试消息", "Test message"], digest: ["免打扰期间的告警汇总", "Alerts held during quiet hours"],
 };
 
 function validateSettings(s: Settings): ValidationError[] {
@@ -762,7 +817,13 @@ export const mockApi: Api = {
       if (template.includes("{{.Nope}}")) throw new Error("template: can't evaluate field Nope (checked with the example needs_attention event)");
       const zh = language === "zh" || (language === "" && (settings.ui.language === "zh" || (settings.ui.language === "auto" && navigator.language.startsWith("zh"))));
       const label = (EVENT_LABEL[event] ?? [event, event])[zh ? 0 : 1];
-      const msg = event === "failure_spike" ? "9 of the last 12 calls failed (75%) over the last 3 rounds" : "needs attention: login required; run: e5extend account login demo";
+      const SUB = "of tenant contoso.onmicrosoft.com";
+      const msg = ({
+        failure_spike: "9 of the last 12 calls failed (75%) over the last 3 rounds",
+        subscription_expiring: `subscription DEVELOPERPACK_E5 ${SUB} expires in 7 days (2027-02-14); renew it in the Microsoft 365 admin center`,
+        subscription_status: `subscription DEVELOPERPACK_E5 ${SUB} changed from Enabled to Warning; check it in the Microsoft 365 admin center (Billing > Your products)`,
+        subscription_renewed: `subscription DEVELOPERPACK_E5 ${SUB} was renewed: the end date moved from 2027-02-14 to 2027-05-14`,
+      } as Record<string, string>)[event] ?? "needs attention: login required; run: e5extend account login demo";
       const bold = (x: string) => (type === "telegram" ? `<b>${x}</b>` : type === "slack" ? `*${x}*` : ["wecom", "dingtalk", "discord", "serverchan"].includes(type) ? `**${x}**` : x);
       const body = template.trim()
         ? template.replace(/\{\{\s*\.(\w+)\s*\}\}/g, (_m, k: string) => (k === "Event" ? event : k === "Account" ? "demo" : k === "Message" ? msg : k === "Level" ? "warning" : ""))
@@ -819,6 +880,27 @@ export const mockApi: Api = {
           skippedCodes: mode === "merge" ? [{ code: "merge_settings", args: [] }] : [], noteCodes: [],
         },
       };
+    },
+  },
+  subscription: {
+    async list() {
+      await lag();
+      return mockTenants();
+    },
+    async refresh(account) {
+      await wait(rand(500, 900));
+      const key = account ? accounts.find((a) => a.input.name === account)?.input.tenant.toLowerCase() : null;
+      for (const t of mockTenants()) if (!key || t.tenant === key) subCheckedAt.set(t.tenant, Date.now());
+      return { tenants: mockTenants(), queued: false };
+    },
+    async setExpires(account, date) {
+      await lag();
+      const a = accounts.find((x) => x.input.name === account);
+      if (!a) throw new Error(`no account named "${account}"`);
+      if (date && !/^\d{4}-\d{2}-\d{2}$/.test(date)) throw new Error(`not a YYYY-MM-DD date: "${date}"`);
+      const key = a.input.tenant.toLowerCase();
+      if (date) subManual.set(key, date);
+      else subManual.delete(key);
     },
   },
   health: {
