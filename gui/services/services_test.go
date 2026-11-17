@@ -5,8 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +17,7 @@ import (
 	"github.com/zalando/go-keyring"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
+	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
@@ -619,5 +622,61 @@ func TestStartServiceNeedsAnInstalledServiceAndWithdrawsHandover(t *testing.T) {
 	cancels = 0
 	if _, err := h.StartService(); err == nil || cancels != 1 {
 		t.Fatalf("failed start: err=%v cancels=%d", err, cancels)
+	}
+}
+
+func TestRecommendProbesTheSignedInAccount(t *testing.T) {
+	r := newRig(t)
+	acc := NewAccountService(r.b)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.Method != http.MethodGet {
+			t.Errorf("probe used %s", req.Method)
+		}
+		if req.URL.Path == "/me/drive" {
+			w.WriteHeader(404)
+		}
+	}))
+	defer srv.Close()
+	r.b.Ops.GraphBase = srv.URL
+	r.fa.tok.Scopes = catalog.RecommendedDelegated
+	if err := acc.Add(AccountInput{Name: "me", Auth: config.AuthDeviceCode, Tenant: "t.example", ClientID: testGUID}); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := acc.Recommend("me")
+	if err != nil || res.NeedsLogin {
+		t.Fatalf("%+v %v", res, err)
+	}
+	r.keep(res)
+	status := map[string]string{}
+	for _, c := range res.Categories {
+		status[c.Category] = c.Status + "/" + c.Reason
+	}
+	if status["files"] != "unavailable/no_onedrive" || status["mail"] != "recommended/" {
+		t.Errorf("status %v", status)
+	}
+	if slices.Contains(res.Recommended, "files") || !slices.Contains(res.Recommended, "mail") {
+		t.Errorf("recommended %v", res.Recommended)
+	}
+	for _, leaked := range []string{tokenValue, upn} {
+		if strings.Contains(r.returned[0], leaked) {
+			t.Errorf("result leaks %q", leaked)
+		}
+	}
+
+	// Not signed in: no advice, no error.
+	r.fa.err = auth.ErrLoginRequired
+	res, err = acc.Recommend("me")
+	if err != nil || !res.NeedsLogin || len(res.Categories) != 0 || res.Recommended == nil {
+		t.Fatalf("not signed in: %+v %v", res, err)
+	}
+
+	// Any other failure is an error.
+	r.fa.err = auth.ErrTransient
+	if _, err := acc.Recommend("me"); err == nil {
+		t.Error("a transient sign-in failure must be an error")
+	}
+	if _, err := acc.Recommend("nobody"); err == nil {
+		t.Error("unknown account must be an error")
 	}
 }

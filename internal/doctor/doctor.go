@@ -22,6 +22,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
 	"github.com/KKazuhaK/e5-developer-extend/internal/graph"
 	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
+	"github.com/KKazuhaK/e5-developer-extend/internal/recommend"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
@@ -49,6 +50,12 @@ const (
 	Timeout = 30 * time.Second
 
 	fewAPIs = 5
+
+	// FailingRounds is how many rounds in a row a category must have failed
+	// with "not found" before the doctor warns about it.
+	FailingRounds = 3
+	// failingWindow is how far back the call log is read for that check.
+	failingWindow = 14 * 24 * time.Hour
 )
 
 // Check is one result.
@@ -423,7 +430,7 @@ func checkAccount(ctx context.Context, d Deps, cfg *config.Config, acct config.A
 		out = append(out, checkScopes(acct, id, title, scopes, recorded))
 	}
 
-	out = append(out, checkActivity(d, acct, as, id, title), checkState(acct, as, id, title))
+	out = append(out, checkActivity(d, acct, as, id, title), checkState(acct, as, id, title), checkAPIs(d, acct, id, title))
 	if acct.NeedsSecret() && acct.SecretExpires != "" {
 		out = append(out, checkSecret(d, acct, id, title))
 	}
@@ -689,4 +696,102 @@ func checkNotify(d Deps, cfg *config.Config) Check {
 		c.Level, c.Detail = OK, "webhook set (stored in the vault)"
 	}
 	return c
+}
+
+// checkAPIs warns about a category whose calls found nothing in each of its
+// last FailingRounds rounds, which usually means the account lacks the service
+// (no mailbox, no OneDrive). It only reads the local call log.
+func checkAPIs(d Deps, acct config.Account, id, title string) Check {
+	c := Check{ID: id + ".apis", Title: title + " APIs"}
+	apis, err := catalog.Load()
+	if err != nil {
+		c.Level, c.Detail = Warn, "the API catalog could not be read"
+		return c
+	}
+	category := make(map[string]string, len(apis))
+	for _, a := range apis {
+		category[a.ID] = a.Category
+	}
+	entries, err := store.New(d.DataDir).Read(store.Filter{Account: acct.Name, Since: d.now().Add(-failingWindow)})
+	if err != nil {
+		c.Level, c.Detail = OK, "the call log could not be read"
+		return c
+	}
+	// Per category, the rounds it was called in (oldest first) and whether
+	// every call of that round found nothing.
+	type round struct {
+		id       string
+		allFound bool
+	}
+	rounds := map[string][]round{}
+	var order []string
+	for _, e := range entries {
+		cat, known := category[e.API]
+		if e.Event != "" || e.Round == "" || !known {
+			continue
+		}
+		missing := e.Class == string(graph.NotFound) || (e.Class == string(graph.ClientError) && e.Status == 400)
+		rs := rounds[cat]
+		if len(rs) == 0 {
+			order = append(order, cat)
+		}
+		if n := len(rs); n > 0 && rs[n-1].id == e.Round {
+			rs[n-1].allFound = rs[n-1].allFound && missing
+		} else {
+			rs = append(rs, round{e.Round, missing})
+		}
+		rounds[cat] = rs
+	}
+	// Only categories the account currently runs count: one switched off
+	// (for example by --apply) has old failures in the log but no problem.
+	enabled := map[string]bool{}
+	for _, c := range catalog.EffectiveCategories(apis, acct.Categories) {
+		enabled[strings.ToLower(c)] = true
+	}
+	var parts []string
+	for _, cat := range order {
+		if !enabled[strings.ToLower(cat)] {
+			continue
+		}
+		rs := rounds[cat]
+		if len(rs) < FailingRounds {
+			continue
+		}
+		failing := true
+		for _, r := range rs[len(rs)-FailingRounds:] {
+			failing = failing && r.allFound
+		}
+		if failing {
+			parts = append(parts, fmt.Sprintf("category %s keeps failing (not found%s)", cat, missingHint(cat)))
+		}
+	}
+	if len(parts) == 0 {
+		c.Level, c.Detail = OK, fmt.Sprintf("no category found nothing in its last %d rounds", FailingRounds)
+		return c
+	}
+	c.Level, c.Detail = Warn, strings.Join(parts, "; ")
+	c.Fix = "e5extend account test " + acct.Name + " --recommend"
+	return c
+}
+
+// missingHint guesses why a category finds nothing, from the probe table.
+func missingHint(category string) string {
+	for _, p := range recommend.Probes() {
+		for _, c := range p.Categories {
+			if c != category {
+				continue
+			}
+			switch p.Reason {
+			case recommend.ReasonNoMailbox:
+				return "; no mailbox?"
+			case recommend.ReasonNoOneDrive:
+				return "; no OneDrive?"
+			case recommend.ReasonNoTeams:
+				return "; no Teams license?"
+			case recommend.ReasonNoSharePoint:
+				return "; no SharePoint?"
+			}
+		}
+	}
+	return ""
 }

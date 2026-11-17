@@ -220,3 +220,28 @@ func TestRecommendedPermissionsAreUsedByTheCatalog(t *testing.T) {
 		}
 	}
 }
+
+// "An account without categories runs on the default categories" is only a
+// clean statement while a category is entirely default or entirely not.
+func TestCategoriesAreAllDefaultOrNone(t *testing.T) {
+	apis, err := Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	on, off := map[string]int{}, map[string]int{}
+	for _, a := range apis {
+		if a.Default {
+			on[a.Category]++
+		} else {
+			off[a.Category]++
+		}
+	}
+	for c := range on {
+		if off[c] > 0 {
+			t.Errorf("category %q mixes default and non-default entries (%d on, %d off)", c, on[c], off[c])
+		}
+	}
+	if len(DefaultCategories(apis)) != len(on) {
+		t.Errorf("DefaultCategories = %v", DefaultCategories(apis))
+	}
+}

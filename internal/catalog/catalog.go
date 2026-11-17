@@ -133,3 +133,27 @@ func Available(apis []API, kind string, granted, categories []string) []API {
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
 }
+
+// DefaultCategories lists, in catalog order, the categories that have at
+// least one default-on entry. An account without a categories setting runs
+// on exactly these.
+func DefaultCategories(apis []API) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, a := range apis {
+		if a.Default && !seen[a.Category] {
+			seen[a.Category] = true
+			out = append(out, a.Category)
+		}
+	}
+	return out
+}
+
+// EffectiveCategories returns the categories an account really runs: its own
+// list, or the default categories when the list is empty.
+func EffectiveCategories(apis []API, categories []string) []string {
+	if len(categories) > 0 {
+		return categories
+	}
+	return DefaultCategories(apis)
+}
