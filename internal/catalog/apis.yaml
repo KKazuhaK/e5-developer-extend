@@ -278,6 +278,15 @@
     app: [Sites.Read.All]
   default: true
 
+# No application path: followed sites belong to a signed-in user.
+- id: sites.followed
+  category: sites
+  name: Followed sites
+  delegated: /me/followedSites
+  scopes:
+    delegated: [Sites.Read.All]
+  default: true
+
 # No application path: OneNote app-only access was retired on 2025-03-31.
 - id: onenote.notebooks
   category: notes
@@ -312,6 +321,16 @@
   name: Planner tasks
   delegated: /me/planner/tasks
   app: /users/{user}/planner/tasks
+  scopes:
+    delegated: [Tasks.Read, Group.Read.All]
+    app: [Tasks.Read.All]
+  default: true
+
+- id: planner.plans
+  category: tasks
+  name: Planner plans
+  delegated: /me/planner/plans
+  app: /users/{user}/planner/plans
   scopes:
     delegated: [Tasks.Read, Group.Read.All]
     app: [Tasks.Read.All]

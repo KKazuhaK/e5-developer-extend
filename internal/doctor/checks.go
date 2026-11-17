@@ -860,10 +860,21 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 	}
 	rounds := map[string][]round{}
 	var order []string
+	// A brand-new mailbox or OneDrive answers 403/404 until the person has
+	// signed in to office.com once: the account never got a mail or files
+	// call through, but was refused some.
+	mailFilesOK, mailFilesRefused := false, false
 	for _, e := range entries {
 		cat, known := category[e.API]
 		if !callstat.IsCall(e) || !known {
 			continue
+		}
+		if cat == "mail" || cat == "files" {
+			if callstat.IsUnavailable(e.Class) {
+				mailFilesRefused = true
+			} else if e.Status >= 200 && e.Status < 300 {
+				mailFilesOK = true
+			}
 		}
 		missing := callstat.IsMissing(e.Class, e.Status)
 		rs := rounds[cat]
@@ -882,12 +893,17 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 	enabled := callstat.EnabledCategories(apis, acct.Categories)
 	// APIs the account was refused (403/404) are left out for 24 hours.
 	var paused []Msg
+	pausedN := 0
 	if as != nil {
 		if n := callstat.PausedAPIs(as.APISkipUntil, d.now()); n > 0 {
+			pausedN = n
 			paused = append(paused, M("apis.paused", "count", itoa(n)))
 		}
 	}
 	var parts []Msg
+	// Hint at the first sign-in when the account keeps being refused and has
+	// never had a mail or OneDrive call succeed.
+	firstSignIn := mailFilesRefused && !mailFilesOK && (enabled["mail"] || enabled["files"])
 	for _, cat := range order {
 		if !enabled[strings.ToLower(cat)] {
 			continue
@@ -904,10 +920,16 @@ func checkAPIs(d Deps, acct config.Account, as *store.AccountState, id, title st
 			parts = append(parts, M(missingCode(cat), "category", cat))
 		}
 	}
+	if firstSignIn && len(parts) == 0 && pausedN >= manyPausedAPIs {
+		parts = append(parts, M("apis.manyRefused"))
+	}
 	if len(parts) == 0 {
 		c.Level = OK
 		c.setDetail(append([]Msg{M("apis.ok", "count", itoa(FailingRounds))}, paused...)...)
 		return c
+	}
+	if firstSignIn {
+		paused = append(paused, M("apis.firstSignIn"))
 	}
 	c.Level = Warn
 	c.setDetail(append(parts, paused...)...)

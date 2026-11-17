@@ -204,6 +204,12 @@ network)" skips the network checks. When something looks wrong, start here, then
 
 ![Health check](../images/en/health.webp)
 
+### New account: mail and OneDrive answer 403/404
+
+A freshly created user often has no mailbox or OneDrive until the account has signed in once. Sign in at
+https://www.office.com with it and open Outlook and OneDrive; provisioning can take up to 24 hours. The test step of the
+account wizard and the health check mention this (details in the Chinese [FAQ](faq.md)).
+
 ## Command line and servers
 
 For a machine without a desktop, Docker, or if you simply prefer a terminal. The desktop installers already include

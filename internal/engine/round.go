@@ -135,7 +135,7 @@ func (e *Engine) bookLocked(as *store.AccountState, acct config.Account, out out
 			// A round that only met some refusals or throttling is neutral:
 			// with few APIs per round, picking unavailable ones is normal.
 			as.ConsecutiveFailedRound++
-			if as.ConsecutiveFailedRound >= AutoPauseRounds {
+			if as.ConsecutiveFailedRound >= AutoPauseRounds && e.cfg.Schedule.AutoPause {
 				as.Status = store.StatusPaused
 				what := fmt.Sprintf("%d rounds in a row failed (last error: %s)", as.ConsecutiveFailedRound, out.lastFail)
 				if out.failed == 0 && out.calls == 0 {

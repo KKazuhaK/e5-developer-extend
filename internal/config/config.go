@@ -53,16 +53,18 @@ type Config struct {
 
 // Schedule controls when and how much the engine runs.
 type Schedule struct {
-	IntervalMin     string          `toml:"interval_min"`
-	IntervalMax     string          `toml:"interval_max"`
-	APIsPerRoundMin int             `toml:"apis_per_round_min"`
-	APIsPerRoundMax int             `toml:"apis_per_round_max"`
-	RandomOrder     bool            `toml:"random_order"`
-	WorkDays        []string        `toml:"work_days"`
-	WorkStart       string          `toml:"work_start"`
-	WorkEnd         string          `toml:"work_end"`
-	PeriodStart     *toml.LocalDate `toml:"period_start,omitempty"`
-	PeriodEnd       *toml.LocalDate `toml:"period_end,omitempty"`
+	IntervalMin     string `toml:"interval_min"`
+	IntervalMax     string `toml:"interval_max"`
+	APIsPerRoundMin int    `toml:"apis_per_round_min"`
+	APIsPerRoundMax int    `toml:"apis_per_round_max"`
+	RandomOrder     bool   `toml:"random_order"`
+	// AutoPause pauses an account after AutoPauseRounds failed rounds in a row (it is probed now and then). Off keeps it running; the alerts still fire.
+	AutoPause   bool            `toml:"auto_pause"`
+	WorkDays    []string        `toml:"work_days"`
+	WorkStart   string          `toml:"work_start"`
+	WorkEnd     string          `toml:"work_end"`
+	PeriodStart *toml.LocalDate `toml:"period_start,omitempty"`
+	PeriodEnd   *toml.LocalDate `toml:"period_end,omitempty"`
 }
 
 // Network holds outbound HTTP settings.
@@ -218,6 +220,7 @@ func Default() *Config {
 			APIsPerRoundMin: 3,
 			APIsPerRoundMax: 8,
 			RandomOrder:     true,
+			AutoPause:       true,
 			WorkDays:        []string{"mon", "tue", "wed", "thu", "fri", "sat", "sun"},
 			WorkStart:       "00:00",
 			WorkEnd:         "00:00", // equal to WorkStart: all day

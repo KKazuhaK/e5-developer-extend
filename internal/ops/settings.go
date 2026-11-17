@@ -26,6 +26,7 @@ interval_max = "2h"         # upper bound
 apis_per_round_min = 3
 apis_per_round_max = 8
 random_order = true
+auto_pause = true           # pause an account after 3 failed rounds in a row (it is probed now and then); false keeps it running, the alerts still fire
 work_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]   # every day; e.g. ["mon", "tue", "wed", "thu", "fri"] for weekdays only
 work_start = "00:00"        # local time; start == end means all day (the default), e.g. "08:00" and "22:00" for 08:00-22:00
 work_end = "00:00"
@@ -148,6 +149,7 @@ type ScheduleSettings struct {
 	APIsPerRoundMin int      `json:"apisPerRoundMin"`
 	APIsPerRoundMax int      `json:"apisPerRoundMax"`
 	RandomOrder     bool     `json:"randomOrder"`
+	AutoPause       bool     `json:"autoPause"`
 	WorkDays        []string `json:"workDays"`
 	WorkStart       string   `json:"workStart"`
 	WorkEnd         string   `json:"workEnd"`
@@ -216,7 +218,7 @@ func (o *Ops) LoadSettings() (Settings, error) {
 		Schedule: ScheduleSettings{
 			IntervalMin: cfg.Schedule.IntervalMin, IntervalMax: cfg.Schedule.IntervalMax,
 			APIsPerRoundMin: cfg.Schedule.APIsPerRoundMin, APIsPerRoundMax: cfg.Schedule.APIsPerRoundMax,
-			RandomOrder: cfg.Schedule.RandomOrder, WorkDays: nonNil(cfg.Schedule.WorkDays),
+			RandomOrder: cfg.Schedule.RandomOrder, AutoPause: cfg.Schedule.AutoPause, WorkDays: nonNil(cfg.Schedule.WorkDays),
 			WorkStart: cfg.Schedule.WorkStart, WorkEnd: cfg.Schedule.WorkEnd,
 			PeriodStart: dateString(cfg.Schedule.PeriodStart), PeriodEnd: dateString(cfg.Schedule.PeriodEnd),
 		},
@@ -295,7 +297,7 @@ func (o *Ops) SaveSettings(ctx context.Context, s Settings) ([]ValidationError, 
 	cfg.Schedule = config.Schedule{
 		IntervalMin: strings.TrimSpace(s.Schedule.IntervalMin), IntervalMax: strings.TrimSpace(s.Schedule.IntervalMax),
 		APIsPerRoundMin: s.Schedule.APIsPerRoundMin, APIsPerRoundMax: s.Schedule.APIsPerRoundMax,
-		RandomOrder: s.Schedule.RandomOrder, WorkDays: nonNil(s.Schedule.WorkDays),
+		RandomOrder: s.Schedule.RandomOrder, AutoPause: s.Schedule.AutoPause, WorkDays: nonNil(s.Schedule.WorkDays),
 		WorkStart: strings.TrimSpace(s.Schedule.WorkStart), WorkEnd: strings.TrimSpace(s.Schedule.WorkEnd),
 		PeriodStart: ps, PeriodEnd: pe,
 	}

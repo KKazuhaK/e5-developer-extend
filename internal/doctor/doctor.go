@@ -52,6 +52,9 @@ const (
 	FailingRounds = 3
 	// failingWindow is how far back the call log is read for that check.
 	failingWindow = 14 * 24 * time.Hour
+	// manyPausedAPIs is how many APIs held back for 24 h make an account that
+	// never reached its mailbox or OneDrive look like a first sign-in is missing.
+	manyPausedAPIs = 3
 )
 
 // Check is one result. Detail and Fix are English text, for the CLI. The

@@ -137,6 +137,7 @@ export interface Settings {
     apisPerRoundMin: number;
     apisPerRoundMax: number;
     randomOrder: boolean;
+    autoPause: boolean;
     workDays: string[];
     workStart: string;
     workEnd: string;

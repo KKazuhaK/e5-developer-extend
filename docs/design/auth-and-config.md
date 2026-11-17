@@ -28,6 +28,7 @@ interval_max = "2h"              # 上限
 apis_per_round_min = 3
 apis_per_round_max = 8
 random_order = true
+auto_pause = true                # 连续 3 轮失败后自动暂停账号（并定时探测）；false 则一直运行，失败告警照常
 work_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]   # 默认每天；只在工作日调用写 ["mon", "tue", "wed", "thu", "fri"]
 work_start = "00:00"             # 本地时间；work_start == work_end 表示全天（默认）
 work_end = "00:00"

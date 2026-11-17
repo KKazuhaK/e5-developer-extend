@@ -502,7 +502,7 @@ function mockProgress(plan: AppSetupPlan, actions: AppSetupAction[], account: st
 // ---- settings / health state ----
 let settings: Settings = {
   schedule: {
-    intervalMin: "20m", intervalMax: "45m", apisPerRoundMin: 3, apisPerRoundMax: 6, randomOrder: true,
+    intervalMin: "20m", intervalMax: "45m", apisPerRoundMin: 3, apisPerRoundMax: 6, randomOrder: true, autoPause: true,
     workDays: ["mon", "tue", "wed", "thu", "fri", "sat", "sun"], workStart: "00:00", workEnd: "00:00",
     periodStart: "", periodEnd: day(300),
   },

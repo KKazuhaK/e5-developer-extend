@@ -188,3 +188,30 @@ func TestLongOverdueRunsOneRoundSoon(t *testing.T) {
 		}
 	}
 }
+
+func TestAutoPauseOffKeepsRunning(t *testing.T) {
+	f := newFixture(t, delegatedAcct("main"))
+	f.cfg.Schedule.AutoPause = false
+	n := &fakeNotifier{}
+	f.opts.Notifier = n
+	f.h.setStatus(func(string) (int, map[string]string) { return 500, nil })
+	f.start()
+	for i := 0; i < AutoPauseRounds+2; i++ {
+		f.round("main")
+	}
+	as := f.acct("main")
+	if as.Status == store.StatusPaused || as.NextRun.IsZero() || !as.NextProbe.IsZero() {
+		t.Fatalf("paused although auto_pause is off: %+v", as)
+	}
+	if as.ConsecutiveFailedRound != AutoPauseRounds+2 {
+		t.Errorf("failed rounds = %d", as.ConsecutiveFailedRound)
+	}
+	if f.hasEvent("auto_pause") {
+		t.Error("auto_pause event")
+	}
+	for _, k := range n.kinds("main") {
+		if k == "auto_paused" {
+			t.Errorf("auto_paused alert: %v", n.kinds("main"))
+		}
+	}
+}
