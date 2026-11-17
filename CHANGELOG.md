@@ -15,6 +15,8 @@
 
 - 异常检测和多渠道通知：新增事件 `failure_spike`（最近几轮调用失败率过高；不把 404 和“账号没有这项服务”算作异常，判断和 `doctor` 的 `account.<名称>.apis` 一致）和 `all_failing`（所有未暂停的账号同时异常，至少 2 个账号）；`failure_spike` 解除时发 `recovered` 并写明原事件。新增通知渠道：Telegram、邮件（SMTP，带 Gmail / Outlook / QQ / 163 预设）、企业微信、飞书和钉钉（可选签名）、Discord、Slack、Bark、ntfy、Server 酱和通用 Webhook；每个渠道有最低级别和事件过滤，内置中英文模板，也可以用自定义模板（保存前检查）。所有令牌、密码、Webhook 地址和签名密钥存在 vault 的 `notify/<渠道名>/<字段>` 里。新增降噪：冷却时间（默认 6 小时，严重告警减半）、免打扰时段（只发严重告警，其余结束后合并成一条）。命令行：`notify channel list|add|edit|remove`、`notify test [名称]`、`notify preview <事件>`，`notify set-webhook` 保留为别名；桌面版“设置 → 高级设置 → 告警”管理渠道（测试、预览、降噪），没有渠道时基础设置页提示。旧的单个 Webhook 继续可用，显示为名为 `webhook` 的渠道，保存一次即迁移到新格式。详见 [docs/user/notifications.md](docs/user/notifications.md) 和 [docs/design/alerts.md](docs/design/alerts.md)。
 
+- 订阅到期检测：引擎每天按租户读一次 `GET /directory/subscriptions`（同一租户的多个账号只读一次，失败按指数退避、最长 6 小时一次，不影响普通调用轮次），记录每个订阅的状态、到期时间和续期历史（最多 20 条）。新增事件 `subscription_expiring`（到期前 30 天警告，7、1 天严重）、`subscription_status`（状态变坏严重、恢复提示）和 `subscription_renewed`（到期时间后移），走现有的渠道、过滤、冷却和免打扰，内置中英文模板、预览和示例消息。命令行：`e5extend subscription [<账号>] [--json] [--cached] [--set-expires 日期|--clear-expires]`；`doctor` 新增 `subscription.<租户>`；桌面版概览页新增“E5 订阅”卡片（状态、到期日、剩余天数、续期记录、补齐权限、手动填写到期日）。没有 `Organization.Read.All` 时降级为说明，可用 `subscription_expires` 手动填写到期日；`subscription.skus` 指定要关注的 SKU（默认以 `DEVELOPERPACK` 开头的订阅）。`Organization.Read.All` 加入委托身份的推荐权限，已有的应用注册重新运行 `e5extend app setup` 即可补齐。详见 [docs/design/subscription.md](docs/design/subscription.md) 和 [入门](docs/user/getting-started.md#看订阅什么时候到期)。
+
 ### 变更
 
 - 通用 Webhook 的请求体新增 `level`（以及恢复通知的 `origin`、免打扰汇总的 `items`）字段；原有字段不变。

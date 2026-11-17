@@ -101,6 +101,9 @@ Client Secret 还剩 30 天以内（警告）、7 天以内或已过期（失败
 | `failure_spike` | 警告 | 最近几轮调用失败率过高（404 和“没有这项服务”不算） |
 | `stale` | 警告 | 超过 `notify.stale_after`（默认 72 小时）没有成功调用，之后每 24 小时最多再提醒一次 |
 | `secret_expiring` | 警告 | Client Secret 到期前 30、7、1 天和到期当天各一次 |
+| `subscription_expiring` | 警告 / 严重 | 关注的订阅离到期（`nextLifecycleDateTime`）30 天提醒一次（警告），7 天和 1 天各一次（严重），到期当天还会再提醒；续期后重新计 |
+| `subscription_status` | 严重 / 提示 | 订阅状态从 `Enabled` 变成 `Warning`、`Suspended`、`LockedOut` 或 `Deleted`（严重），或恢复为 `Enabled`（提示） |
+| `subscription_renewed` | 提示 | 订阅的到期时间向后移动了，写明从哪天移到哪天 |
 | `recovered` | 提示 | 之后恢复正常 |
 | `period_ended` | 提示 | 运行期限结束 |
 
