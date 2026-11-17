@@ -109,6 +109,10 @@ func (i *Installer) PlanFor(in Installation, current string) Plan {
 		p.Reason = ReasonDev
 	case in.Kind == KindUnknown:
 		p.Reason = ReasonUnsupported
+	case (in.Kind == KindLinuxStandalone || in.Kind == KindMacCLI) && pathBase(in.Exe) != "e5extend":
+		// The archive holds "e5extend"; putting it over another file (the
+		// desktop app, a renamed copy) would replace the wrong program.
+		p.Reason = ReasonUnsupported
 	case !HasPublicKey(i.PublicKey):
 		p.Reason = ReasonNoKey
 	default:
@@ -305,10 +309,19 @@ func (i *Installer) replaceArchive(dir, archive string, in Installation, aside b
 		out.step("manual", in.Dir, in.Dir+" is not writable for this user")
 		return nil
 	}
+	var swapped []string
 	for _, n := range targets {
-		if err := replaceFile(filepath.Join(in.Dir, n), extracted[n], aside); err != nil {
+		dst := filepath.Join(in.Dir, n)
+		if err := replaceFile(dst, extracted[n], aside); err != nil {
+			// All or nothing: a mix of old and new programs is the worst result.
+			if aside {
+				for _, d := range swapped {
+					undoAside(d)
+				}
+			}
 			return err
 		}
+		swapped = append(swapped, dst)
 		out.step("replaced", n, "replaced "+n)
 	}
 	out.Done, out.RestartService = true, true

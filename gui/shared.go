@@ -94,6 +94,21 @@ func shouldQuit(start time.Time, content []byte, mtime time.Time, exists bool) b
 	return at.After(start)
 }
 
+// quitRequested reports whether another process asked this one, started at
+// start, to quit (see quitFile and shouldQuit).
+func quitRequested(start time.Time) bool {
+	f, err := quitFile()
+	if err != nil {
+		return false
+	}
+	fi, err := os.Stat(f)
+	if err != nil {
+		return false
+	}
+	content, _ := os.ReadFile(f)
+	return shouldQuit(start, content, fi.ModTime(), true)
+}
+
 // cancelHandover withdraws a handover request after a failed install: the
 // request file is removed (if the tray has not read it yet) and the tray is
 // told to end its quiet time.

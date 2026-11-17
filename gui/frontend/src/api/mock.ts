@@ -1028,7 +1028,7 @@ export const mockApi: Api = {
       updateCheckedAt = Date.now();
       return mockUpdateInfo();
     },
-    async install() {
+    async install(_version) {
       await lag();
       if (updateRunning) throw new Error("an upgrade is already running");
       void runMockUpgrade();

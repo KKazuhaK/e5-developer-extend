@@ -148,6 +148,14 @@ type Update struct {
 	Channel string `toml:"channel"`
 }
 
+// EffectiveChannel is the channel in force: an empty setting means stable.
+func (u Update) EffectiveChannel() string {
+	if u.Channel == UpdatePrerelease {
+		return UpdatePrerelease
+	}
+	return UpdateStable
+}
+
 // DefaultSubscriptionSKU is the SKU prefix of E5 developer subscriptions.
 const DefaultSubscriptionSKU = "DEVELOPERPACK"
 

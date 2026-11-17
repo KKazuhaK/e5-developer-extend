@@ -114,7 +114,7 @@ func (o *Ops) Snapshot() (Snapshot, error) {
 
 	if cfg.Update.Check {
 		cur := o.updateCurrent()
-		if c := update.LoadCache(dataDir); c.Channel == cfg.Update.Channel && c.Available(cur) {
+		if c := update.LoadCache(dataDir); c.Channel == cfg.Update.EffectiveChannel() && c.Available(cur) {
 			snap.Update = UpdateNote{Available: true, Version: c.Latest.Version, URL: c.Latest.URL}
 		}
 	}

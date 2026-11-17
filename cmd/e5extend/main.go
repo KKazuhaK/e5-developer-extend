@@ -48,6 +48,7 @@ func newRootCmdWith(a *app) *cobra.Command {
 	root.PersistentFlags().StringVar(&configDir, "config-dir", "", "configuration folder (same as E5EXTEND_CONFIG_DIR)")
 	root.PersistentFlags().StringVar(&dataDir, "data-dir", "", "data folder (same as E5EXTEND_DATA_DIR)")
 	root.PersistentPreRunE = func(*cobra.Command, []string) error {
+		a.ops().CleanupUpdateLeftovers()
 		// The flags exist for job runners that cannot set environment
 		// variables (Windows scheduled tasks); they simply set them.
 		for _, f := range []struct{ flag, env, val string }{

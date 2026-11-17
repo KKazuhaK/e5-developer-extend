@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -10,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/ops"
+	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/update"
 	"github.com/KKazuhaK/e5-developer-extend/internal/update/updatetest"
 )
@@ -120,6 +122,7 @@ func TestUpdateInstallReplacesTheProgram(t *testing.T) {
 	_ = os.MkdirAll(filepath.Dir(unit), 0o755)
 	_ = os.WriteFile(unit, []byte("[Service]\n"), 0o644)
 
+	r.e.runner.Replies = map[string]service.Output{"systemctl --user is-active": {Stdout: "active\n"}}
 	if _, _, err := r.run(t, "0.2.0", "", "update", "install"); err == nil || !strings.Contains(err.Error(), "--yes") {
 		t.Fatalf("without a terminal and without --yes: %v", err)
 	}
@@ -198,5 +201,61 @@ func TestUpdateCheckAutoOffSwitch(t *testing.T) {
 	out, _, _ = r.run(t, "0.2.0", "", "doctor", "--offline")
 	if strings.Contains(out, "is available") {
 		t.Errorf("doctor mentions the update although the check is off:\n%s", out)
+	}
+}
+
+func TestUpdateInstallLeavesAStoppedServiceAlone(t *testing.T) {
+	if runtime.GOOS != "linux" {
+		t.Skip("the fake service is a systemd unit")
+	}
+	r := newUpdateRig(t, "v0.3.0")
+	unit := filepath.Join(r.e.home, ".config", "systemd", "user", "e5extend.service")
+	_ = os.MkdirAll(filepath.Dir(unit), 0o755)
+	_ = os.WriteFile(unit, []byte("[Service]\n"), 0o644)
+	r.e.runner.Replies = map[string]service.Output{"systemctl --user is-active": {Stdout: "inactive\n", ExitCode: 3}}
+	out, _, err := r.run(t, "0.2.0", "", "update", "install", "--yes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(strings.Join(r.e.runner.Commands(), "\n"), "restart") || strings.Contains(out, "restarted") {
+		t.Fatalf("a service the person had stopped was started:\n%v\n%s", r.e.runner.Commands(), out)
+	}
+	if b, _ := os.ReadFile(r.exe); string(b) != "NEW PROGRAM" {
+		t.Fatal("not upgraded")
+	}
+}
+
+func TestUpdateInstallThatOnlyPrintsACommandIsNotSuccess(t *testing.T) {
+	if os.Geteuid() == 0 || runtime.GOOS == "windows" {
+		t.Skip("needs a folder this user cannot write")
+	}
+	r := newUpdateRig(t, "v0.3.0")
+	if err := os.Chmod(filepath.Dir(r.exe), 0o555); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Dir(r.exe), 0o755) })
+	out, _, err := r.run(t, "0.2.0", "", "update", "install", "--yes")
+	var ee exitError
+	if !errors.As(err, &ee) || ee.code != 3 || !strings.Contains(out, "sudo install") {
+		t.Fatalf("err=%v\n%s", err, out)
+	}
+	if b, _ := os.ReadFile(r.exe); string(b) != "OLD" {
+		t.Fatal("changed a program in a folder it cannot write")
+	}
+}
+
+func TestUpdateInstallRefusesToReplaceARenamedProgram(t *testing.T) {
+	r := newUpdateRig(t, "v0.3.0")
+	renamed := filepath.Join(filepath.Dir(r.exe), "e5extend-gui")
+	if err := os.Rename(r.exe, renamed); err != nil {
+		t.Fatal(err)
+	}
+	r.exe = renamed
+	_, _, err := r.run(t, "0.2.0", "", "update", "install", "--yes")
+	if err == nil || !strings.Contains(err.Error(), "cannot upgrade itself") {
+		t.Fatalf("err = %v", err)
+	}
+	if b, _ := os.ReadFile(renamed); string(b) != "OLD" {
+		t.Fatal("overwrote a program that is not the command line")
 	}
 }

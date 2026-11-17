@@ -71,14 +71,15 @@ export function UpdateProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => api.update.onProgress((p) => setInstall((s) => reduceProgress(s, p))), []);
 
+  const latest = info?.latest ?? "";
   const start = useCallback(async () => {
     setInstall({ phase: "running", progress: null });
     try {
-      await api.update.install();
+      await api.update.install(latest);
     } catch (e) {
       setInstall({ phase: "error", code: "other", message: errMsg(e), result: null });
     }
-  }, []);
+  }, [latest]);
 
   const restart = useCallback(async () => {
     try {

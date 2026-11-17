@@ -139,6 +139,13 @@ func replaceFile(dst, src string, aside bool) error {
 	return nil
 }
 
+// undoAside puts the program that replaceFile moved aside back in its place.
+func undoAside(dst string) {
+	if err := os.Rename(dst+asideSuffix, dst); err != nil {
+		return
+	}
+}
+
 func copyFile(src, dst string, mode fs.FileMode) error {
 	in, err := os.Open(src)
 	if err != nil {

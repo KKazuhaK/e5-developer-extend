@@ -91,20 +91,27 @@ func runTray() error {
 
 	auto := wailsAutostart{app}
 	t := newTrayUI(app, log)
-	t.build(ctx, trayhost.MenuTexts(language(cfgDir)), auto, o, ctl, func() {
-		// Tell an open window first, so it closes while the engine stops.
-		if f, err := quitFile(); err != nil {
-			log.Warn("quit request", "err", err)
-		} else if err := paths.WriteFileAtomic(f, []byte(time.Now().Format(time.RFC3339Nano)+"\n")); err != nil {
-			log.Warn("quit request", "err", err)
-		}
-		// Stopping the engine can take a while; keep the UI thread free.
-		stop()
-		go func() {
-			ctl.Stop()
-			app.Quit()
-		}()
-	})
+	// quit is the tray's Quit item; the same path runs when another process
+	// (the window, after an upgrade) asks for a quit by writing the quit file.
+	var quitOnce sync.Once
+	quit := func() {
+		quitOnce.Do(func() {
+			// Tell an open window first, so it closes while the engine stops.
+			if f, err := quitFile(); err != nil {
+				log.Warn("quit request", "err", err)
+			} else if err := paths.WriteFileAtomic(f, []byte(time.Now().Format(time.RFC3339Nano)+"\n")); err != nil {
+				log.Warn("quit request", "err", err)
+			}
+			// Stopping the engine can take a while; keep the UI thread free.
+			stop()
+			go func() {
+				ctl.Stop()
+				app.Quit()
+			}()
+		})
+	}
+	started := time.Now()
+	t.build(ctx, trayhost.MenuTexts(language(cfgDir)), auto, o, ctl, quit)
 
 	var once sync.Once
 	refresh := func() {
@@ -130,6 +137,10 @@ func runTray() error {
 						// A handover request or a resume should not wait for the next refresh.
 						if ctl.CheckHandover() || ctl.CheckResume() {
 							refresh()
+						}
+						// An upgrade asks the tray to quit so a new one can start.
+						if quitRequested(started) {
+							quit()
 						}
 					}
 				}

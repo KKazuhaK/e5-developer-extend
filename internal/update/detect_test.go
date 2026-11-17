@@ -120,11 +120,11 @@ func TestPlanFor(t *testing.T) {
 		reason  string
 		keyless bool
 	}{
-		{Installation{Kind: KindLinuxStandalone}, "0.2.0", ModeAuto, "", false},
+		{Installation{Kind: KindLinuxStandalone, Exe: "/x/e5extend"}, "0.2.0", ModeAuto, "", false},
 		{Installation{Kind: KindDocker}, "0.2.0", ModeManual, ReasonDocker, false},
-		{Installation{Kind: KindLinuxStandalone}, "dev", ModeManual, ReasonDev, false},
+		{Installation{Kind: KindLinuxStandalone, Exe: "/x/e5extend"}, "dev", ModeManual, ReasonDev, false},
 		{Installation{Kind: KindUnknown}, "0.2.0", ModeManual, ReasonUnsupported, false},
-		{Installation{Kind: KindLinuxStandalone}, "0.2.0", ModeManual, ReasonNoKey, true},
+		{Installation{Kind: KindLinuxStandalone, Exe: "/x/e5extend"}, "0.2.0", ModeManual, ReasonNoKey, true},
 	}
 	for _, c := range cases {
 		inst := *i
@@ -138,7 +138,7 @@ func TestPlanFor(t *testing.T) {
 	}
 	// An architecture without release files cannot upgrade itself.
 	odd := &Installer{PublicKey: key, GOOS: "linux", GOARCH: "riscv64"}
-	if p := odd.PlanFor(Installation{Kind: KindLinuxStandalone}, "0.2.0"); p.Mode != ModeManual || p.Reason != ReasonUnsupported {
+	if p := odd.PlanFor(Installation{Kind: KindLinuxStandalone, Exe: "/x/e5extend"}, "0.2.0"); p.Mode != ModeManual || p.Reason != ReasonUnsupported {
 		t.Errorf("riscv64: %+v", p)
 	}
 }

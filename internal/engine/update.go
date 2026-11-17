@@ -26,7 +26,7 @@ func (e *Engine) updateTick(ctx context.Context, now time.Time) {
 	var channel string
 	var enabled, busy bool
 	e.withLock(func() {
-		enabled, channel = e.cfg.Update.Check, e.cfg.Update.Channel
+		enabled, channel = e.cfg.Update.Check, e.cfg.Update.EffectiveChannel()
 		if !enabled {
 			e.update = nil // switched off: what was found is not news any more
 			return

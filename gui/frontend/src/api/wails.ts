@@ -140,7 +140,7 @@ export const wailsApi: Api = {
   update: {
     info: async () => cast<UpdateInfo>(await UpdateService.Info()),
     check: async (force) => cast<UpdateInfo>(await UpdateService.Check(force)),
-    install: () => UpdateService.Install(),
+    install: (version) => UpdateService.Install(version),
     restart: () => UpdateService.Restart(),
     onProgress: (cb) => Events.On("update:progress", (ev) => cb(normProgress(payload<UpdateProgress>(ev)))),
   },

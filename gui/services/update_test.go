@@ -130,7 +130,7 @@ func TestUpdateServiceInfoAndCheck(t *testing.T) {
 
 func TestUpdateServiceInstallReportsStagesAndReplacesTheProgram(t *testing.T) {
 	u := newUpdateRig(t, nil)
-	if err := u.svc.Install(); err != nil {
+	if err := u.svc.Install(""); err != nil {
 		t.Fatal(err)
 	}
 	end := u.waitEnd()
@@ -154,7 +154,7 @@ func TestUpdateServiceInstallReportsStagesAndReplacesTheProgram(t *testing.T) {
 	}
 	// Up to date now: nothing to install, and it says so.
 	u.hooks("0.3.0", "")
-	if err := u.svc.Install(); err != nil {
+	if err := u.svc.Install(""); err != nil {
 		t.Fatal(err)
 	}
 	deadline := time.Now().Add(5 * time.Second)
@@ -176,13 +176,13 @@ func TestUpdateServiceOnlyOneUpgradeAtATime(t *testing.T) {
 	hooks := u.b.Ops.Update
 	hooks.AllowDownload = func(string) bool { entered.Store(true); <-gate; return true }
 	u.b.Ops.Update = hooks
-	if err := u.svc.Install(); err != nil {
+	if err := u.svc.Install(""); err != nil {
 		t.Fatal(err)
 	}
 	for !entered.Load() {
 		time.Sleep(time.Millisecond)
 	}
-	if err := u.svc.Install(); err == nil || !strings.Contains(err.Error(), "already running") {
+	if err := u.svc.Install(""); err == nil || !strings.Contains(err.Error(), "already running") {
 		t.Fatalf("a second upgrade: %v", err)
 	}
 	if u.b.Idle() {
@@ -220,7 +220,7 @@ func TestUpdateServiceErrorCodes(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			u := newUpdateRig(t, nil)
 			c.tweak(u)
-			if err := u.svc.Install(); err != nil {
+			if err := u.svc.Install(""); err != nil {
 				t.Fatal(err)
 			}
 			end := u.waitEnd()
@@ -262,7 +262,7 @@ func TestUpdateServiceWindowsInstallerStartsAndExits(t *testing.T) {
 			Exists: func(p string) bool { return p == dir+`\uninstall.exe` }}
 	}
 	u.b.Ops.Update = h
-	if err := u.svc.Install(); err != nil {
+	if err := u.svc.Install(""); err != nil {
 		t.Fatal(err)
 	}
 	end := u.waitEnd()
@@ -290,5 +290,29 @@ func TestUpdateServiceRestart(t *testing.T) {
 	u.b.RestartApp = func() error { called = true; return nil }
 	if err := u.svc.Restart(); err != nil || !called {
 		t.Fatalf("restart: %v called=%v", err, called)
+	}
+}
+
+func TestUpdateServiceRefusesAnotherVersionThanTheOneConfirmed(t *testing.T) {
+	u := newUpdateRig(t, nil)
+	if err := u.svc.Install("0.2.9"); err != nil {
+		t.Fatal(err)
+	}
+	end := u.waitEnd()
+	if end.Stage != "error" || !strings.Contains(end.Error, "0.2.9") || !strings.Contains(end.Error, "0.3.0") {
+		t.Fatalf("end: %+v", end)
+	}
+	if u.program() != "OLD" {
+		t.Fatal("installed a version nobody confirmed")
+	}
+	if err := u.svc.Install("0.3.0"); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for u.program() != "NEW PROGRAM" && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	if u.program() != "NEW PROGRAM" {
+		t.Fatal("the confirmed version was not installed")
 	}
 }

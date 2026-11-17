@@ -53,7 +53,7 @@ func (o *Ops) Doctor(ctx context.Context, offline bool) ([]doctor.Check, error) 
 			}
 			cur := o.updateCurrent()
 			c := update.LoadCache(dataDir)
-			if c.Channel != cfg.Update.Channel || !c.Available(cur) {
+			if c.Channel != cfg.Update.EffectiveChannel() || !c.Available(cur) {
 				return nil
 			}
 			return &doctor.UpdateNote{Current: cur, Latest: c.Latest.Version, URL: c.Latest.URL}

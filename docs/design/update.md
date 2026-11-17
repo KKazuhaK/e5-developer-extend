@@ -130,16 +130,19 @@ channel = "stable"    # stable | prerelease
 |---|---|---|---|
 | Docker | Linux 且有 `/.dockerenv` 或环境变量 `E5EXTEND_DOCKER` | — | 只通知；说明 `docker pull ghcr.io/kkazuhak/e5-developer-extend:<版本>` |
 | Windows 安装包 | 可执行文件所在目录有 `uninstall.exe`，或就是 `%LOCALAPPDATA%\Programs\E5 Developer Extend` | `E5-Developer-Extend_<v>_windows_<arch>_setup.exe` | 后台启动 `setup.exe /S`（分离进程，用户级，无需管理员），然后**本进程立即退出**。安装程序自己结束托盘和后台任务、替换文件、重新启动任务，托盘原来在运行就静默重启（`installer.nsi` 已经这样做） |
-| Windows 命令行 zip | 其他 Windows 安装 | `e5extend_<v>_windows_<arch>.zip` | 对目录里已有的 `e5extend.exe`、`e5extend-bg.exe`：先把正在运行的文件**改名**为 `.old`（Windows 允许改名但不允许覆盖或删除），再写入新文件，失败则改名回去；之后重启计划任务；`.old` 文件下次运行时清理 |
+| Windows 命令行 zip | 其他 Windows 安装 | `e5extend_<v>_windows_<arch>.zip` | 对目录里已有的 `e5extend.exe`、`e5extend-bg.exe`：先把正在运行的文件**改名**为 `.old`（Windows 允许改名但不允许覆盖或删除），再写入新文件；任何一个失败，已经换好的也改名回去（要么全换，要么都不换）；之后重启计划任务；`.old` 文件在下次启动 `e5extend` / 桌面版时清理 |
 | macOS 应用 | 可执行文件路径含 `.app/Contents/MacOS/` | `E5-Developer-Extend_<v>_macos_universal.dmg` | `hdiutil attach -nobrowse -readonly` 挂载，`ditto` 复制到 `.app` 同目录的暂存名，把旧 `.app` 改名为 `.old`、暂存名改为 `.app`（失败则还原），删旧的，`hdiutil detach`。`.app` 所在目录不可写时不动手，说明手动拖拽的步骤。之后重启后台服务，并让用户重启应用 |
 | macOS 命令行 | 其他 macOS 安装 | `e5extend_<v>_darwin_universal.tar.gz` | 从 tar.gz 取出 `e5extend`，写成同目录的 `.new` 再 `rename` 覆盖（原子）；目录不可写则给出 `sudo install` 命令；之后重启 launchd 服务 |
 | Linux deb / rpm | `dpkg -S` / `rpm -qf` 认领了这个文件 | 命令行包；桌面包也装着（旁边有 `e5extend-gui`）时**两个包都下载** | root：直接 `apt-get install -y a.deb b.deb`（或 `dnf install -y`）一次装完；窗口里：`pkexec` 提权（找得到 `pkexec` 时）；命令行或没有 `pkexec`：**不动手**，打印确切的 `sudo ...` 命令，下载的文件保留在临时目录。两个包必须一起装（桌面包精确依赖同版本的命令行包） |
-| Linux 独立程序 | 其他 Linux 安装 | `e5extend_<v>_linux_<arch>.tar.gz` | 同 macOS 命令行：原子替换，目录不可写则给 `sudo install` 命令；之后 `systemctl --user restart e5extend`（服务已安装时） |
+| Linux 独立程序 | 其他 Linux 安装（可执行文件必须就叫 `e5extend`，改过名的不会被档案里的程序覆盖，按“无法识别”处理） | `e5extend_<v>_linux_<arch>.tar.gz` | 同 macOS 命令行：原子替换，目录不可写则给 `sudo install` 命令；之后 `systemctl --user restart e5extend`（服务已安装时） |
 
 升级之后的收尾：
 
 - **后台服务**：已经安装的服务继续跑旧进程。升级成功后由 `ops` 调用服务管理器的新方法 `Restart`（systemd：`systemctl --user restart`；launchd：`launchctl kickstart -k`；计划任务：`/End` 再 `/Run`）。服务没装就什么都不做；重启失败只是警告，结果里照实说明。Windows 安装包升级不需要（安装程序自己做了）。
-- **托盘和窗口**：新程序已经在磁盘上，但运行中的进程还是旧的。桌面版给出“立即重启”：写入已有的 `gui-quit` 文件让托盘退出，再用一个延迟几秒的分离进程重新启动托盘（只在托盘正在运行或开机启动已打开时）。
+- **托盘和窗口**：新程序已经在磁盘上，但运行中的进程还是旧的。桌面版给出“立即重启”：写入已有的 `gui-quit` 文件，托盘（每 3 秒查一次这个文件，只认比自己启动时间晚的请求）和窗口都会退出，再用一个延迟几秒的分离进程重新启动托盘（只在托盘正在运行或开机启动已打开时）。
+- 后台服务**停着的就不去启动它**（用户可能是故意停的）：升级只替换文件，服务下次启动自然用新程序；结果里 `service` 是 `not_running`。
+- 升级过程里用数据目录的 `update.lock` 互斥：命令行和窗口不会同时替换同一批文件。窗口在升级过程中被关闭不会取消升级（窗口等它做完）。
+- 命令行升级只装用户确认的那个版本：确认之后又发了更新的版本，会拒绝并提示重新检查。`update install` 只给出手动命令、什么也没装时退出码是 3，脚本不会把它当成功。
 - 每一步都记入结果的 `steps`（稳定的 code + 英文文本），界面按 code 显示中文，命令行直接打印文本。
 
 ### 不会自动升级的情况（`Plan.Reason`）

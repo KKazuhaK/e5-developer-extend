@@ -147,7 +147,7 @@ func (a *app) newUpdateInstallCmd() *cobra.Command {
 				}
 			}
 			last := ""
-			res, err := o.UpdateInstall(ctx, ops.UpdateInstallOptions{Progress: func(p update.Progress) {
+			res, err := o.UpdateInstall(ctx, ops.UpdateInstallOptions{Version: info.Latest, Progress: func(p update.Progress) {
 				if p.Stage != last {
 					last = p.Stage
 					fmt.Fprintf(errOut, "%s...\n", stageText(p.Stage))
@@ -157,6 +157,10 @@ func (a *app) newUpdateInstallCmd() *cobra.Command {
 			var me *update.ManualError
 			if errors.As(err, &me) {
 				return fmt.Errorf("%s", planText(ops.UpdateInfo{Mode: me.Plan.Mode, Reason: me.Plan.Reason, Kind: string(me.Plan.Kind)}))
+			}
+			if err == nil && !res.Done && len(res.Manual) > 0 {
+				// Nothing was installed: a script must not read this as success.
+				return exitError{code: 3}
 			}
 			return err
 		},

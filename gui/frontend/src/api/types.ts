@@ -429,7 +429,7 @@ export interface UpdateResult {
   /** The tray and the window still run the old program. */
   restartApp: boolean;
   keepDir?: string;
-  service: "" | "restarted" | "not_installed" | "failed";
+  service: "" | "restarted" | "not_installed" | "not_running" | "failed";
   serviceNote: string;
 }
 /** A report of a running upgrade (event "update:progress"). */

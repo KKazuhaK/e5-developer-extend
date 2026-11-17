@@ -327,3 +327,11 @@ func TestUpdateSettings(t *testing.T) {
 		t.Fatalf("%+v %v", back, err)
 	}
 }
+
+func TestEffectiveChannel(t *testing.T) {
+	for in, want := range map[string]string{"": UpdateStable, "stable": UpdateStable, "prerelease": UpdatePrerelease} {
+		if got := (Update{Channel: in}).EffectiveChannel(); got != want {
+			t.Errorf("%q: %q, want %q", in, got, want)
+		}
+	}
+}

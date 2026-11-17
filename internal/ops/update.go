@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"time"
 
+	"github.com/gofrs/flock"
+
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
@@ -211,6 +213,9 @@ type UpdateInstallOptions struct {
 	UsePkexec bool
 	// Progress sees the stages and the download progress.
 	Progress func(update.Progress)
+	// Version, when not empty, is the version the person agreed to; the
+	// upgrade is refused when the newest release has become another one.
+	Version string
 }
 
 // UpdateResult is what an upgrade did.
@@ -219,7 +224,8 @@ type UpdateResult struct {
 	UpToDate bool `json:"upToDate"`
 	update.Outcome
 	// Service says what happened to the background service: "" (nothing to do),
-	// "restarted", "not_installed" or "failed" (ServiceNote says why).
+	// "restarted", "not_installed", "not_running" (stopped on purpose, left
+	// alone) or "failed" (ServiceNote says why).
 	Service     string `json:"service"`
 	ServiceNote string `json:"serviceNote"`
 }
@@ -252,7 +258,14 @@ func (o *Ops) UpdateInstall(ctx context.Context, opts UpdateInstallOptions) (Upd
 	}
 	if v, err := rel.Version(); err != nil || !update.Newer(svc.Current, v.String()) {
 		return UpdateResult{UpToDate: true}, nil
+	} else if opts.Version != "" && opts.Version != v.String() {
+		return UpdateResult{}, fmt.Errorf("version %s was announced but the newest release is now %s; check again and confirm that one", opts.Version, v)
 	}
+	unlock, err := lockUpdate(dataDir)
+	if err != nil {
+		return UpdateResult{}, err
+	}
+	defer unlock()
 	out, err := inst.Install(ctx, rel, in, svc.Current)
 	res := UpdateResult{Outcome: out}
 	if err != nil {
@@ -264,6 +277,36 @@ func (o *Ops) UpdateInstall(ctx context.Context, opts UpdateInstallOptions) (Upd
 	return res, nil
 }
 
+// CleanupUpdateLeftovers removes the .old programs a Windows upgrade left next
+// to the running program. Best effort and cheap; call it at start-up.
+func (o *Ops) CleanupUpdateLeftovers() {
+	if runtime.GOOS != "windows" {
+		return
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return
+	}
+	update.CleanupAside(filepath.Dir(exe))
+}
+
+// lockUpdate takes the lock that keeps two upgrades (the command line and a
+// window, say) from replacing the same files at once.
+func lockUpdate(dataDir string) (func(), error) {
+	if err := paths.EnsureDir(dataDir); err != nil {
+		return nil, err
+	}
+	fl := flock.New(filepath.Join(dataDir, "update.lock"))
+	ok, err := fl.TryLock()
+	if err != nil {
+		return nil, fmt.Errorf("lock the upgrade: %w", err)
+	}
+	if !ok {
+		return nil, errors.New("another upgrade is already running")
+	}
+	return func() { _ = fl.Unlock() }, nil
+}
+
 // restartService restarts the background service after its program was replaced.
 func (o *Ops) restartService() (state, note string) {
 	m, err := o.ServiceManager()
@@ -272,6 +315,11 @@ func (o *Ops) restartService() (state, note string) {
 			return "not_installed", ""
 		}
 		return "failed", err.Error()
+	}
+	// A service that was stopped on purpose stays stopped: it runs the new
+	// program whenever it is started next.
+	if st, serr := m.Status(); serr == nil && st.Installed && st.Running == service.No {
+		return "not_running", ""
 	}
 	if _, err := m.Restart(); err != nil {
 		if errors.Is(err, service.ErrNotInstalled) {

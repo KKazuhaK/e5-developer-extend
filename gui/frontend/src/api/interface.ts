@@ -106,8 +106,8 @@ export interface Api {
     info(): Promise<UpdateInfo>;
     /** Asks GitHub. force false (on opening a window) only goes out when the daily check is due; true is "check now". Rejects when the check fails. */
     check(force: boolean): Promise<UpdateInfo>;
-    /** Starts the upgrade and returns at once; reports arrive via onProgress. */
-    install(): Promise<void>;
+    /** Starts the upgrade and returns at once; reports arrive via onProgress. version is the one the person saw: the backend refuses when the newest release has become another. */
+    install(version: string): Promise<void>;
     /** Closes the app and starts it again, so the upgraded program runs. */
     restart(): Promise<void>;
     /** Subscribes to the "update:progress" event. Returns the unsubscribe function. */

@@ -1,6 +1,7 @@
 package services
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"time"
@@ -59,8 +60,11 @@ func (s *UpdateService) Check(force bool) (UpdateInfo, error) {
 }
 
 // Install upgrades the app and returns at once; the upgrade reports on the
-// event "update:progress". Only one upgrade runs at a time.
-func (s *UpdateService) Install() error {
+// event "update:progress". Only one upgrade runs at a time. version is the
+// version the person saw and agreed to ("" for whatever is newest); the
+// upgrade is refused when the newest release has become another one. Closing
+// the window does not cancel an upgrade under way: the window waits for it.
+func (s *UpdateService) Install(version string) error {
 	b := s.b
 	b.mu.Lock()
 	if b.updateBusy {
@@ -71,7 +75,7 @@ func (s *UpdateService) Install() error {
 	b.mu.Unlock()
 	end := b.begin() // the window waits for an upgrade in progress before it exits
 	go func() {
-		res, err := s.run()
+		res, err := s.run(version)
 		b.mu.Lock()
 		b.updateBusy = false
 		b.mu.Unlock()
@@ -91,7 +95,7 @@ func (s *UpdateService) Install() error {
 	return nil
 }
 
-func (s *UpdateService) run() (UpdateResult, error) {
+func (s *UpdateService) run(version string) (UpdateResult, error) {
 	b := s.b
 	var mu sync.Mutex
 	var last time.Time
@@ -107,7 +111,7 @@ func (s *UpdateService) run() (UpdateResult, error) {
 		lastStage, last = p.Stage, now
 		b.Emit(UpdateProgressEvent, UpdateProgress{Stage: p.Stage, File: p.File, Done: p.Done, Total: p.Total})
 	}
-	return b.Ops.UpdateInstall(b.bgCtx, ops.UpdateInstallOptions{UsePkexec: true, Progress: progress})
+	return b.Ops.UpdateInstall(context.WithoutCancel(b.bgCtx), ops.UpdateInstallOptions{UsePkexec: true, Version: version, Progress: progress})
 }
 
 // Restart closes the app and starts it again, so the upgraded program runs.

@@ -584,3 +584,43 @@ func TestCleanOldWorkDirs(t *testing.T) {
 		}
 	}
 }
+
+func TestInstallWindowsCLIUndoesTheFirstSwapWhenTheSecondFails(t *testing.T) {
+	zipName := "e5extend_0.3.0_windows_amd64.zip"
+	f := newFixture(t, "v0.3.0", map[string][]byte{zipName: zipOf(t, map[string]string{"e5extend.exe": "NEW CLI", "e5extend-bg.exe": "NEW BG"})}, fixtureOpts{})
+	dir := t.TempDir()
+	writeExe(t, filepath.Join(dir, "e5extend.exe"), "OLD CLI")
+	writeExe(t, filepath.Join(dir, "e5extend-bg.exe"), "OLD BG")
+	// A non-empty folder where the second program would be moved aside: that swap fails.
+	blocker := filepath.Join(dir, "e5extend-bg.exe"+asideSuffix)
+	if err := os.MkdirAll(filepath.Join(blocker, "x"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := f.installer("windows", "amd64").Install(context.Background(), f.rel,
+		Installation{Kind: KindWindowsCLI, Exe: filepath.Join(dir, "e5extend.exe"), Dir: dir}, "0.2.0")
+	if err == nil {
+		t.Fatal("expected the second swap to fail")
+	}
+	if read(t, filepath.Join(dir, "e5extend.exe")) != "OLD CLI" || read(t, filepath.Join(dir, "e5extend-bg.exe")) != "OLD BG" {
+		t.Fatal("a half-upgraded installation was left behind")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "e5extend.exe"+asideSuffix)); err == nil {
+		t.Fatal("the first program's aside copy was not put back")
+	}
+}
+
+func TestPlanForRefusesToReplaceAnotherProgramWithTheArchivesBinary(t *testing.T) {
+	i := &Installer{PublicKey: testKeyText(t), GOOS: "linux", GOARCH: "amd64"}
+	for _, exe := range []string{"/opt/x/e5extend-gui", "/opt/x/my-e5"} {
+		p := i.PlanFor(Installation{Kind: KindLinuxStandalone, Exe: exe}, "0.2.0")
+		if p.Mode != ModeManual || p.Reason != ReasonUnsupported {
+			t.Errorf("%s: %+v", exe, p)
+		}
+	}
+	if p := i.PlanFor(Installation{Kind: KindLinuxStandalone, Exe: "/opt/x/e5extend"}, "0.2.0"); p.Mode != ModeAuto {
+		t.Errorf("the program itself: %+v", p)
+	}
+	if p := i.PlanFor(Installation{Kind: KindMacCLI, Exe: "/usr/local/bin/e5extend"}, "0.2.0"); p.Mode != ModeAuto {
+		t.Errorf("mac: %+v", p)
+	}
+}
