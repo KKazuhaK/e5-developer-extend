@@ -253,6 +253,32 @@ func (s *AppSetupSession) RevokeSecret(ctx context.Context, res *appsetup.Result
 	return s.setup.RevokeSecret(ctx, res.ObjectID, res.SecretKeyID, res.SecretName)
 }
 
+// DiscardSecret undoes a finished Apply whose client secret will not be used
+// (the user left before the account was saved): the secret is deleted from the
+// app and from the vault. It does nothing when the account exists, because
+// then the account owns the secret (false: nothing was done). The error names the secret that is still
+// live in Entra if revoking failed.
+func (s *AppSetupSession) DiscardSecret(ctx context.Context, res *appsetup.Result) (bool, error) {
+	if res == nil || res.SecretKeyID == "" || !s.opts.AppOnly {
+		return false, nil
+	}
+	cfg, _, err := s.o.LoadConfigOrDefault()
+	if err != nil {
+		return false, err
+	}
+	if _, exists := cfg.Find(s.opts.Account); exists {
+		return false, nil
+	}
+	revokeErr := s.RevokeSecret(ctx, res)
+	var vaultErr error
+	if v, err := s.o.OpenVault(cfg); err != nil {
+		vaultErr = err
+	} else if err := v.Delete(vault.SecretKey(s.opts.Account)); err != nil && !errors.Is(err, vault.ErrNotFound) {
+		vaultErr = fmt.Errorf("remove the stored secret: %w", err)
+	}
+	return true, errors.Join(revokeErr, vaultErr)
+}
+
 // Apply carries the plan out. choice is only used when the plan has
 // candidates. For the application identity the client secret goes into the
 // vault under the account's name; if that account already exists its

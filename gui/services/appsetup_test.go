@@ -137,12 +137,20 @@ func TestAppSetupDelegatedFlowThenLoginAfterSetup(t *testing.T) {
 	if progress == 0 {
 		t.Error("no progress events")
 	}
-	// The session is over; nothing is left to cancel or apply.
-	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+	// The wizard saves the account and ends the session; nothing is left to cancel or apply.
 	if err := r.svc.Apply(id, AppSetupChoice{}); err == nil {
-		t.Error("Apply after the end must fail")
+		t.Error("Apply after the result must fail")
 	}
-	r.svc.Cancel(id)
+	if err := r.svc.Finish(id); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+	if err := r.svc.Finish(id); err == nil {
+		t.Error("Finish twice")
+	}
+	if c := r.svc.Cancel(id); c.SecretRemoved || c.Error != "" {
+		t.Errorf("cancel after the end: %+v", c)
+	}
 
 	// The account is added and signed in; Microsoft is slow to know the new app.
 	acc := NewAccountService(r.b)
@@ -223,6 +231,7 @@ func TestAppSetupCandidatesNeedAChoice(t *testing.T) {
 	if res == nil || !res.AdoptedApp || !res.Renamed || res.ClientID != otherClient || res.DisplayName != appsetup.NameDelegated {
 		t.Fatalf("result: %+v", res)
 	}
+	r.svc.Cancel(id)
 	if len(r.g.Apps) != 1 {
 		t.Errorf("an app was created as well: %d apps", len(r.g.Apps))
 	}
@@ -244,6 +253,7 @@ func TestAppSetupCreateNewDespiteCandidates(t *testing.T) {
 	if res == nil || !res.CreatedApp || res.AdoptedApp || len(r.g.Apps) != 2 {
 		t.Fatalf("result: %+v, %d apps", res, len(r.g.Apps))
 	}
+	r.svc.Cancel(id)
 }
 
 func TestAppSetupConsentNotGrantedKeepsTheApp(t *testing.T) {
@@ -399,4 +409,144 @@ func TestAppSetupApplicationIdentityKeepsTheSecretInTheVault(t *testing.T) {
 		t.Errorf("vault: %q %v", got, err)
 	}
 	r.noLeak()
+}
+
+func actionCodes(p *AppSetupPlan) string {
+	var out []string
+	for _, a := range p.Actions {
+		out = append(out, a.Code)
+	}
+	return strings.Join(out, " ")
+}
+
+func TestAppSetupPreviewFollowsTheChoice(t *testing.T) {
+	r := newSetupRig(t)
+	cand := r.g.AddApp(map[string]any{"displayName": "e5renew"})
+	candClient, _ := r.g.App(cand)["appId"].(string)
+	id := r.id()
+	if err := r.svc.Begin(id, AppSetupStart{Name: "new1", Auth: config.AuthDeviceCode}); err != nil {
+		t.Fatal(err)
+	}
+	r.wait(id, "plan")
+
+	if p, err := r.svc.Preview(id, AppSetupChoice{}); err != nil || actionCodes(p) != "adopt_or_create" {
+		t.Fatalf("no choice yet: %v %v", p, err)
+	}
+	p, err := r.svc.Preview(id, AppSetupChoice{Adopt: candClient, Rename: true})
+	if err != nil || !strings.HasPrefix(actionCodes(p), "adopt_app rename_app set_notes add_tags") || !strings.HasSuffix(actionCodes(p), "create_service_principal grant_consent") {
+		t.Fatalf("adopt: %v %v", p, err)
+	}
+	if len(p.Missing) != len(p.Permissions) {
+		t.Errorf("missing: %v", p.Missing)
+	}
+	if p, _ = r.svc.Preview(id, AppSetupChoice{Adopt: candClient}); strings.Contains(actionCodes(p), "rename_app") {
+		t.Errorf("keep the name: %s", actionCodes(p))
+	}
+	if p, _ = r.svc.Preview(id, AppSetupChoice{CreateNew: true}); actionCodes(p) != "create_app create_service_principal grant_consent" {
+		t.Errorf("new: %s", actionCodes(p))
+	}
+	if _, err := r.svc.Preview(id, AppSetupChoice{Adopt: "00000000-0000-0000-0000-00000000dead"}); err == nil {
+		t.Error("a stranger was previewed")
+	}
+	if len(r.g.Writes()) != 0 {
+		t.Errorf("a preview wrote: %v", r.g.Writes())
+	}
+	if _, err := r.svc.Preview("unknown-id-123", AppSetupChoice{}); err == nil {
+		t.Error("unknown session")
+	}
+	r.svc.Cancel(id)
+}
+
+func appOnlyDone(t *testing.T, r *setupRig) (string, *AppSetupResult) {
+	t.Helper()
+	id := r.id()
+	if err := r.svc.Begin(id, AppSetupStart{Name: "app1", AppOnly: true, Username: "user@contoso.example"}); err != nil {
+		t.Fatal(err)
+	}
+	r.wait(id, "plan")
+	if err := r.svc.Apply(id, AppSetupChoice{}); err != nil {
+		t.Fatal(err)
+	}
+	res := last(r.wait(id, "result", "error")).Result
+	if res == nil || !res.SecretCreated {
+		t.Fatalf("result: %+v", res)
+	}
+	return id, res
+}
+
+func liveSecrets(r *setupRig) int {
+	n := 0
+	r.g.Do(func() {
+		for _, ps := range r.g.Passwords {
+			n += len(ps)
+		}
+	})
+	return n
+}
+
+func TestAppSetupCancelAfterApplyRevokesTheUnusedSecret(t *testing.T) {
+	r := newSetupRig(t)
+	id, _ := appOnlyDone(t, r)
+	if liveSecrets(r) != 1 {
+		t.Fatalf("live secrets: %d", liveSecrets(r))
+	}
+	c := r.svc.Cancel(id)
+	if !c.SecretRemoved || c.Error != "" {
+		t.Fatalf("cancel: %+v", c)
+	}
+	if liveSecrets(r) != 0 {
+		t.Error("the secret is still live in Entra")
+	}
+	cfg, _, _ := r.b.Ops.LoadConfigOrDefault()
+	v, err := r.b.Ops.OpenVault(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := v.Get(vault.SecretKey("app1")); err == nil {
+		t.Error("the secret is still in the vault")
+	}
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+	r.noLeak()
+}
+
+func TestAppSetupFinishKeepsTheSecret(t *testing.T) {
+	r := newSetupRig(t)
+	id, res := appOnlyDone(t, r)
+	if err := NewAccountService(r.b).Add(AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: res.TenantID, ClientID: res.ClientID,
+		Username: "user@contoso.example", Categories: []string{"user"}, SecretExpires: res.SecretExpires, UseStoredSecret: true}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.svc.Finish(id); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool { r.b.mu.Lock(); defer r.b.mu.Unlock(); return len(r.b.setups) == 0 })
+	if c := r.svc.Cancel(id); c.SecretRemoved || liveSecrets(r) != 1 {
+		t.Errorf("a used secret was touched: %+v, %d live", c, liveSecrets(r))
+	}
+}
+
+func TestAppSetupCancelNeverRevokesAnAccountsSecret(t *testing.T) {
+	r := newSetupRig(t)
+	id, res := appOnlyDone(t, r)
+	// The account exists (saved some other way) but Finish was not called.
+	if err := NewAccountService(r.b).Add(AccountInput{Name: "app1", Auth: config.AuthClientSecret, Tenant: res.TenantID, ClientID: res.ClientID,
+		Username: "user@contoso.example", Categories: []string{"user"}, UseStoredSecret: true}); err != nil {
+		t.Fatal(err)
+	}
+	if c := r.svc.Cancel(id); c.SecretRemoved || c.Error != "" || liveSecrets(r) != 1 {
+		t.Errorf("cancel: %+v, %d live", c, liveSecrets(r))
+	}
+}
+
+func TestAppSetupCancelSaysWhichSecretStaysLive(t *testing.T) {
+	r := newSetupRig(t)
+	id, _ := appOnlyDone(t, r)
+	r.g.Do(func() { r.g.Forbidden["POST /applications/"] = true })
+	c := r.svc.Cancel(id)
+	if c.SecretRemoved || !strings.Contains(c.Error, "key ID") || !strings.Contains(c.Error, "still live") {
+		t.Fatalf("cancel: %+v", c)
+	}
+	if strings.Contains(c.Error, r.g.Secrets[0]) {
+		t.Error("the secret is in the error")
+	}
 }

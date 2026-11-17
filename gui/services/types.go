@@ -115,6 +115,21 @@ type AppSetupResult struct {
 	ConsentError    string `json:"consentError"`
 	// SecretExpires (YYYY-MM-DD) is the expiry of the client secret stored in the vault, for the application identity.
 	SecretExpires string `json:"secretExpires"`
+	// SecretCreated says a client secret was created and stored in the vault (never shown).
+	SecretCreated bool `json:"secretCreated"`
+	// RemovedSecrets counts this computer's earlier secrets deleted from the app;
+	// NotRemovedSecrets counts older ones left alone because they might belong to another account.
+	RemovedSecrets    int `json:"removedSecrets"`
+	NotRemovedSecrets int `json:"notRemovedSecrets"`
+}
+
+// AppSetupCancelResult says what Cancel undid. SecretRemoved is true when a
+// client secret created for the abandoned setup was deleted again. Error is
+// set when that failed; it names the secret (name and key ID, never the
+// value) that is still live in Entra.
+type AppSetupCancelResult struct {
+	SecretRemoved bool   `json:"secretRemoved"`
+	Error         string `json:"error"`
 }
 
 // LogEntry is one line of the call log.
