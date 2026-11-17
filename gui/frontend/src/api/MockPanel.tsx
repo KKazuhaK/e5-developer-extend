@@ -6,6 +6,8 @@ import { mockControls, mockNavigate } from "./mock";
 export default function MockPanel() {
   const c = useSyncExternalStore(mockControls.subscribe, mockControls.get);
   const [open, setOpen] = useState(false);
+  // ?demo=1 is the screenshot data set: keep the panel out of the picture.
+  if (new URLSearchParams(location.search).get("demo") === "1") return null;
   return (
     <div className="fixed bottom-12 left-3 z-[70] text-xs">
       {open ? (
