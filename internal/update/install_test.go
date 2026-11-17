@@ -224,7 +224,7 @@ func TestInstallRefusals(t *testing.T) {
 		exe := filepath.Join(bin, "e5extend")
 		writeExe(t, exe, "OLD")
 		i := f.installer("linux", "amd64")
-		i.PublicKey = PublicKeyText
+		i.PublicKey = placeholderKey
 		_, err := i.Install(context.Background(), f.rel, inst(exe, bin), "0.2.0")
 		var me *ManualError
 		if !errors.As(err, &me) || me.Plan.Reason != ReasonNoKey || f.hits.Load() != 0 {
