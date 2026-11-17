@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowLeft, ArrowRight, Check, CheckCircle2, ExternalLink, LogIn, RefreshCw, ShieldCheck, XCircle } from "lucide-react";
 import { api } from "@/api";
-import type { AccountInput, AppSetupCancelResult, AppSetupResult, AuthKind, CatalogEntry, LoginEvent, TestResult } from "@/api";
+import type { AccountInput, AppSetupCancelResult, AppSetupResult, AuthKind, CatalogEntry, LoginEvent, RecommendResult, TestResult } from "@/api";
 import { formatWhen } from "@/lib/time";
 import { DOCS_URL } from "@/config";
 import { useI18n, type DictKey } from "@/i18n";
@@ -17,6 +17,7 @@ import type { AccountErrorCode } from "@/lib/account";
 import { cn, errMsg } from "@/lib/utils";
 import { BrowserPrompt, DevicePrompt } from "@/components/signin";
 import { progressMsg, validateAutoStart } from "@/lib/appsetup";
+import { adviceByCategory, diffFromRecommended, categoriesToSave, hasFailedProbes, preselect, reasonMsg } from "@/lib/recommend";
 import { AppSetupStep, AutoStartForm, ChoiceCard, ConsentNotice, type AdminMethod } from "./AppSetupFlow";
 
 type Mode = "add" | "edit";
@@ -49,7 +50,7 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
   const canContinue = loginDone || idle;
   const [restart, setRestart] = useState(0);
   // Add: log in straight after saving. Edit: only when asked (or when opened from "re-login").
-  const [autoLogin, setAutoLogin] = useState(mode === "add" || startStep === 4);
+  const [autoLogin, setAutoLogin] = useState(mode === "add" || startStep === 3);
   // Add: the app registration is created for the user (default) or the user brings one. Edit is always manual.
   const [route, setRoute] = useState<Route>(mode === "add" ? "auto" : "manual");
   const [adminMethod, setAdminMethod] = useState<AdminMethod>("device_code");
@@ -138,21 +139,80 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
       .catch((e) => setLoadError(errMsg(e)));
   }, [mode, from]);
 
-  useEffect(() => {
-    api.catalog
-      .categories()
-      .then((c) => {
-        setAllCategories(c);
-        // New accounts start with everything ticked; the user narrows down.
-        if (mode === "add") setInput((i) => (i.categories.length ? i : { ...i, categories: [...c] }));
+  const [defaultCategories, setDefaultCategories] = useState<string[]>([]);
+  const loadCategories = useCallback(() => {
+    setCatError(null);
+    Promise.all([api.catalog.categories(), api.catalog.defaultCategories()])
+      .then(([all, dflt]) => {
+        setAllCategories(all);
+        setDefaultCategories(dflt);
       })
       .catch((e) => setCatError(errMsg(e)));
-  }, [mode]);
+  }, []);
+  useEffect(() => loadCategories(), [loadCategories]);
+
+  // What the API step knows about the account. It is kept across steps so going back does not undo the user's choice.
+  const [rec, setRec] = useState<RecState | null>(null);
+  const probeSeq = useRef(0);
+  const probe = useCallback(async () => {
+    if (!allCategories) return;
+    const seq = ++probeSeq.current;
+    setRec({ phase: "run", result: null, message: "" });
+    try {
+      const result = await api.accounts.recommend(input.name.trim());
+      if (seq !== probeSeq.current) return;
+      if (result.needsLogin) {
+        setRec({ phase: "login", result: null, message: "" });
+        // Without advice an account with no choice yet gets the catalog defaults (what it runs on anyway), not everything.
+        setInput((i) => (i.categories.length ? i : { ...i, categories: defaultCategories.filter((c) => allCategories.includes(c)) }));
+      } else {
+        setRec({ phase: "ok", result, message: "" });
+        // A fresh account (no categories yet) starts from the recommendation; an existing choice is kept and compared.
+        setInput((i) => (i.categories.length ? i : { ...i, categories: preselect(allCategories, result, []) }));
+      }
+    } catch (e) {
+      if (seq !== probeSeq.current) return;
+      setRec({ phase: "fail", result: null, message: errMsg(e) });
+      setInput((i) => (i.categories.length ? i : { ...i, categories: defaultCategories.filter((c) => allCategories.includes(c)) }));
+    }
+  }, [allCategories, defaultCategories, input.name]);
+  useEffect(() => {
+    if (step === 4 && loaded && allCategories && !rec) void probe();
+  }, [step, loaded, allCategories, rec, probe]);
 
   const err = (f: string): string | undefined => {
     const c = errors[f];
     if (!c) return undefined;
     return c === "guid" ? t("wizard.err.guid") : c === "name" ? t("wizard.err.name") : c === "date" ? t("wizard.err.date") : t("wizard.err.required");
+  };
+
+  // Saves the account: the first time it is added (before sign-in needs it to exist), afterwards updated.
+  const persist = async (): Promise<boolean> => {
+    setSaving(true);
+    try {
+      const payload: AccountInput = { ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim() };
+      // Exactly the catalog defaults is saved as an empty list so new default categories keep applying.
+      payload.categories = categoriesToSave(input.categories, defaultCategories);
+      // Automatic setup already put the client secret in the vault.
+      if (auto && setup && payload.auth === "client_secret" && !persisted) payload.useStoredSecret = true;
+      if (persisted) await api.accounts.update({ ...payload, secret: payload.secret || undefined });
+      else await api.accounts.add(payload);
+      setPersisted(true);
+      if (setupSid.current) {
+        // The account owns the setup's result now (and its secret).
+        void api.appSetup.finish(setupSid.current).catch(() => undefined);
+        setupSid.current = null;
+      }
+      setSavedAuth(payload.auth);
+      setInput((i) => ({ ...i, ...payload, categories: i.categories, secret: undefined })); // the secret is gone from memory after this
+      void snapshot.refresh();
+      return true;
+    } catch (ex) {
+      setSaveError(errMsg(ex));
+      return false;
+    } finally {
+      setSaving(false);
+    }
   };
 
   const next = async () => {
@@ -167,33 +227,15 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
       setErrors(e);
       if (Object.keys(e).length) return;
     }
-    if (step === 3) {
+    if (step === 2) {
+      if (!(await persist())) return;
+      setRec(null); // the sign-in may be new; ask again on the API step
+    }
+    if (step === 4) {
       const e = validateAccountInput(input, mode, "categories");
       setErrors(e);
       if (Object.keys(e).length) return;
-      // Persist now; the login step needs the account to exist.
-      setSaving(true);
-      try {
-        const payload: AccountInput = { ...input, name: input.name.trim(), tenant: input.tenant.trim(), clientId: input.clientId.trim(), username: input.username.trim() };
-        // Automatic setup already put the client secret in the vault.
-        if (auto && setup && payload.auth === "client_secret" && !persisted) payload.useStoredSecret = true;
-        if (persisted) await api.accounts.update({ ...payload, secret: payload.secret || undefined });
-        else await api.accounts.add(payload);
-        setPersisted(true);
-        if (setupSid.current) {
-          // The account owns the setup's result now (and its secret).
-          void api.appSetup.finish(setupSid.current).catch(() => undefined);
-          setupSid.current = null;
-        }
-        setSavedAuth(payload.auth);
-        setInput((i) => ({ ...i, ...payload, secret: undefined })); // the secret is gone from memory after this
-        void snapshot.refresh();
-      } catch (ex) {
-        setSaveError(errMsg(ex));
-        setSaving(false);
-        return;
-      }
-      setSaving(false);
+      if (!(await persist())) return;
     }
     setStep((s) => Math.min(6, s + 1));
   };
@@ -378,37 +420,6 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
         )}
 
         {step === 3 && (
-          <div>
-            <p className="mb-3 text-[13px] text-muted-foreground">{t("wizard.categoriesHint")}</p>
-            {catError ? (
-              <ErrorBlock message={catError} />
-            ) : !allCategories ? (
-              <LoadingBlock rows={2} />
-            ) : (
-              <>
-                <div className="mb-3 flex gap-2">
-                  <Button size="sm" variant="outline" onClick={() => set("categories", [...allCategories])}>{t("wizard.selectAll")}</Button>
-                  <Button size="sm" variant="outline" onClick={() => set("categories", [])}>{t("wizard.selectNone")}</Button>
-                  <span className="ml-auto self-center text-xs tabular-nums text-muted-foreground">{t("wizard.selectedN", { n: input.categories.length, total: allCategories.length })}</span>
-                </div>
-                <div className="grid grid-cols-2 gap-2 md:grid-cols-3" role="group" aria-label={t("wizard.step3")}>
-                  {allCategories.map((c) => {
-                    const on = input.categories.includes(c);
-                    return (
-                      <label key={c} className={cn("flex cursor-pointer items-center gap-2.5 rounded-md border px-3 py-2 text-[13px] hover:bg-accent/50", on && "border-primary/60 bg-accent/40")}>
-                        <Checkbox checked={on} onCheckedChange={(v) => set("categories", v ? [...input.categories, c] : input.categories.filter((x) => x !== c))} />
-                        <CategoryName id={c} />
-                      </label>
-                    );
-                  })}
-                </div>
-                {errors.categories && <p role="alert" className="mt-2 text-xs text-danger">{t("wizard.err.categories")}</p>}
-              </>
-            )}
-          </div>
-        )}
-
-        {step === 4 && (
           <LoginStep
             key={restart}
             input={input}
@@ -416,7 +427,10 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
             afterSetup={auto && !!setup}
             consentUrl={auto && setup && !setup.consentGranted ? setup.adminConsentUrl : ""}
             alreadyDone={loginDone}
-            onDone={setLoginDone}
+            onDone={(d) => {
+              setLoginDone(d);
+              if (d) setRec(null); // a fresh sign-in: ask again on the API step
+            }}
             onIdle={setIdle}
             onRestart={() => setRestart((n) => n + 1)}
             onStart={() => {
@@ -424,6 +438,18 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
               setIdle(false);
               setRestart((n) => n + 1);
             }}
+          />
+        )}
+        {step === 4 && (
+          <CategoriesStep
+            categories={allCategories}
+            error={catError}
+            onReload={loadCategories}
+            selected={input.categories}
+            onChange={(c) => set("categories", c)}
+            rec={rec}
+            onRetry={() => void probe()}
+            invalid={!!errors.categories}
           />
         )}
         {step === 5 && <TestStep name={input.name} />}
@@ -443,9 +469,9 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
         </Button>
         <div className="flex gap-2">
           {step < 6 ? (
-            <Button onClick={() => void next()} disabled={saving || cleaning || (step === 4 && !canContinue) || (step === 2 && auto && !setup)}>
+            <Button onClick={() => void next()} disabled={saving || cleaning || (step === 3 && !canContinue) || (step === 4 && (!!catError || !rec || rec.phase === "run")) || (step === 2 && auto && !setup)}>
               {saving && <Spinner />}
-              {step === 3 ? t("wizard.saveAndLogin") : t("wizard.next")} {!saving && <ArrowRight />}
+              {step === 2 ? t("wizard.saveAndLogin") : step === 4 ? t("wizard.saveAndTest") : t("wizard.next")} {!saving && <ArrowRight />}
             </Button>
           ) : (
             <Button onClick={onClose}>{t("wizard.finish")}</Button>
@@ -459,6 +485,94 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
 function CategoryName({ id }: { id: string }) {
   const { tl } = useI18n();
   return <span className="truncate">{tl(`cat.${id}`, id)}</span>;
+}
+
+/** What the API step knows about the account. */
+type RecState = { phase: "run" | "ok" | "login" | "fail"; result: RecommendResult | null; message: string };
+
+const BADGE: Record<string, { key: DictKey; cls: string }> = {
+  recommended: { key: "rec.badge.recommended", cls: "bg-success-bg text-success" },
+  unavailable: { key: "rec.badge.unavailable", cls: "bg-muted text-muted-foreground" },
+  maybe: { key: "rec.badge.maybe", cls: "bg-warning-bg text-warning" },
+};
+
+function CategoriesStep({
+  categories, error, onReload, selected, onChange, rec, onRetry, invalid,
+}: {
+  categories: string[] | null; error: string | null; onReload: () => void; selected: string[]; onChange: (c: string[]) => void;
+  rec: RecState | null; onRetry: () => void; invalid: boolean;
+}) {
+  const { t, tl, lang } = useI18n();
+  if (error) return <ErrorBlock message={error} onRetry={onReload} />;
+  if (!categories || !rec || rec.phase === "run") {
+    return (
+      <div className="flex min-h-[18rem] flex-col items-center justify-center gap-3" role="status">
+        <Spinner className="size-8 text-primary" />
+        <p className="text-[13px] text-muted-foreground">{t("rec.checking")}</p>
+      </div>
+    );
+  }
+  const advice = adviceByCategory(rec.result);
+  const nRecommended = rec.result?.categories.filter((c) => c.status === "recommended").length ?? 0;
+  const diff = rec.phase === "ok" ? diffFromRecommended(categories, selected, rec.result) : { drop: [], add: [] };
+  const names = (ids: string[]) => ids.map((c) => tl(`cat.${c}`, c)).join(lang === "zh" ? "、" : ", ");
+  return (
+    <div>
+      <p className="mb-3 text-[13px] text-muted-foreground">{t("wizard.categoriesHint")}</p>
+      {rec.phase === "ok" && <p className="mb-3 text-[13px] text-muted-foreground">{t("rec.summary", { n: nRecommended })}</p>}
+      {(diff.drop.length > 0 || diff.add.length > 0) && (
+        <p role="status" className="mb-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">
+          {diff.drop.length > 0 && <span className="block">{t("rec.diff.drop", { names: names(diff.drop) })}</span>}
+          {diff.add.length > 0 && <span className="block">{t("rec.diff.add", { names: names(diff.add) })}</span>}
+        </p>
+      )}
+      {rec.phase === "ok" && hasFailedProbes(rec.result) && <p role="status" className="mb-3 text-[13px] text-warning">{t("rec.partial")}</p>}
+      {rec.phase === "login" && <p role="status" className="mb-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">{t("rec.needsLogin")}</p>}
+      {rec.phase === "fail" && (
+        <div role="alert" className="mb-3 flex items-center gap-3 rounded-md border border-warning/40 bg-warning-bg px-3 py-2 text-[13px] text-warning">
+          <span className="min-w-0 flex-1 break-words">{t("rec.failed", { detail: rec.message })}</span>
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            <RefreshCw /> {t("rec.retry")}
+          </Button>
+        </div>
+      )}
+      <div className="mb-3 flex gap-2">
+        {rec.phase === "ok" ? (
+          <Button size="sm" variant="outline" onClick={() => onChange(preselect(categories, rec.result, selected))}>{t("wizard.selectRecommended")}</Button>
+        ) : (
+          <Button size="sm" variant="outline" onClick={() => onChange([...categories])}>{t("wizard.selectAll")}</Button>
+        )}
+        <Button size="sm" variant="outline" onClick={() => onChange([])}>{t("wizard.selectNone")}</Button>
+        {rec.phase === "ok" && (
+          <Button size="sm" variant="ghost" onClick={onRetry}>
+            <RefreshCw /> {t("rec.retry")}
+          </Button>
+        )}
+        <span className="ml-auto self-center text-xs tabular-nums text-muted-foreground">{t("wizard.selectedN", { n: selected.length, total: categories.length })}</span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-3" role="group" aria-label={t("wizard.step4")}>
+        {categories.map((c) => {
+          const on = selected.includes(c);
+          const adv = advice.get(c);
+          const badge = adv ? BADGE[adv.status] : undefined;
+          const why = adv ? reasonMsg(adv.reason) : null;
+          return (
+            <label key={c} className={cn("flex cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2 text-[13px] hover:bg-accent/50", on && "border-primary/60 bg-accent/40", adv?.status === "unavailable" && !on && "opacity-70")}>
+              <Checkbox className="mt-0.5" checked={on} onCheckedChange={(v) => onChange(v ? [...selected, c] : selected.filter((x) => x !== c))} />
+              <span className="min-w-0 flex-1">
+                <span className="flex items-center gap-2">
+                  <CategoryName id={c} />
+                  {badge && <span className={cn("shrink-0 rounded px-1.5 py-px text-[11px] font-medium", badge.cls)}>{t(badge.key)}</span>}
+                </span>
+                {why && <span className="mt-0.5 block break-words text-xs text-muted-foreground">{t(why.key, why.params)}</span>}
+              </span>
+            </label>
+          );
+        })}
+      </div>
+      {invalid && <p role="alert" className="mt-2 text-xs text-danger">{t("wizard.err.categories")}</p>}
+    </div>
+  );
 }
 
 type Phase = "idle" | "starting" | "waiting" | "done" | "error";

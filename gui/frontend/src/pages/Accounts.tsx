@@ -149,7 +149,7 @@ export function Accounts() {
                         </div>
                         <div className="flex shrink-0 items-center gap-0.5">
                           {attention ? (
-                            <Button size="sm" onClick={() => navigate("accounts", { wizard: { mode: "edit", name: a.name, step: 4 } })}>
+                            <Button size="sm" onClick={() => navigate("accounts", { wizard: { mode: "edit", name: a.name, step: 3 } })}>
                               <LogIn /> {a.status === "not_signed_in" ? t("account.signIn") : t("account.reLogin")}
                             </Button>
                           ) : (

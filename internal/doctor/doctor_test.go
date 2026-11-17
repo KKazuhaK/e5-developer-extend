@@ -437,3 +437,87 @@ func TestPanicInACheckIsContained(t *testing.T) {
 		t.Error("panic not reported as a failed check")
 	}
 }
+
+// logRound writes one round of calls (api -> status/class) to the call log.
+func (r *rig) logRound(round string, at time.Duration, calls map[string]int) {
+	r.t.Helper()
+	st := store.New(r.dir)
+	i := 0
+	for api, status := range calls {
+		class := "ok"
+		switch status {
+		case 404:
+			class = "not_found"
+		case 400:
+			class = "client_error"
+		case 403:
+			class = "forbidden"
+		}
+		i++
+		e := store.Entry{TS: now.Add(at + time.Duration(i)*time.Second), Account: "main", Round: round, API: api, Status: status, Class: class}
+		if err := st.Append(e); err != nil {
+			r.t.Fatal(err)
+		}
+	}
+}
+
+func TestKeepsFailingCategory(t *testing.T) {
+	const id = "account.main.apis"
+	t.Run("three rounds of 404 warn", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404, "mail.folders": 404, "user.me": 200})
+		r.logRound("r2", -4*time.Hour, map[string]int{"user.me": 200})
+		r.logRound("r3", -3*time.Hour, map[string]int{"mail.settings": 404})
+		r.logRound("r4", -2*time.Hour, map[string]int{"mail.rules": 404, "drive.info": 400})
+		got := r.run(true)
+		expect(t, got, id, Warn, "category mail keeps failing (not found; no mailbox?)")
+		if c := got[id]; !strings.Contains(c.Fix, "e5extend account test main --recommend") || strings.Contains(c.Detail, "category user") {
+			t.Errorf("check = %+v", c)
+		}
+	})
+	t.Run("a success in between resets", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404})
+		r.logRound("r2", -4*time.Hour, map[string]int{"mail.messages": 404})
+		r.logRound("r3", -3*time.Hour, map[string]int{"mail.folders": 200, "mail.settings": 404})
+		r.logRound("r4", -2*time.Hour, map[string]int{"mail.rules": 404})
+		expect(t, r.run(true), id, OK, "no category")
+	})
+	t.Run("two rounds are not enough", func(t *testing.T) {
+		r := newRig(t)
+		r.logRound("r1", -5*time.Hour, map[string]int{"mail.messages": 404})
+		r.logRound("r2", -4*time.Hour, map[string]int{"mail.messages": 404})
+		expect(t, r.run(true), id, OK, "no category")
+	})
+	t.Run("other failures do not count", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"mail.messages": 403})
+		}
+		expect(t, r.run(true), id, OK, "no category")
+	})
+	t.Run("a disabled category is ignored", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"mail.messages": 404})
+		}
+		// Before: the default selection includes mail, so it warns.
+		expect(t, r.run(true), id, Warn, "category mail")
+		// After `account test --recommend --apply` removed mail: no warning.
+		r.cfg.Accounts[0].Categories = []string{"user", "files"}
+		expect(t, r.run(true), id, OK, "no category")
+		// An explicit list that still has mail keeps warning.
+		r.cfg.Accounts[0].Categories = []string{"user", "Mail"}
+		expect(t, r.run(true), id, Warn, "category mail")
+	})
+	t.Run("empty log", func(t *testing.T) {
+		expect(t, newRig(t).run(true), id, OK, "no category")
+	})
+	t.Run("onedrive hint and 400", func(t *testing.T) {
+		r := newRig(t)
+		for i, rd := range []string{"r1", "r2", "r3"} {
+			r.logRound(rd, -time.Duration(5-i)*time.Hour, map[string]int{"drive.info": 400})
+		}
+		expect(t, r.run(true), id, Warn, "category files keeps failing (not found; no OneDrive?)")
+	})
+}

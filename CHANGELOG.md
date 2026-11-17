@@ -11,8 +11,11 @@
 
 - 账号密码方式的账号在刷新令牌被拒绝（过期、被撤销、条件访问的登录频率策略 AADSTS70043）时，后台引擎会用 vault 里加密保存的密码自动重新登录，后台不再因此停下。只有登录过一次的账号才会这样；两次自动登录至少间隔 30 分钟；密码错误、账号被锁定或禁用、需要 MFA、被条件访问拦截时进入 `needs_attention`，并且不再自动尝试，直到 `account set-secret`、`account login` 成功或修改账号身份。`doctor`、`account test` 和桌面版只静默刷新，不会用密码登录。设备码和浏览器登录的账号不变。
 - 条件访问“登录频率”策略（AADSTS70043）有专门的提示：依次说明改用应用身份、账号密码（仅限无 MFA）、把应用从策略中排除三条路；`doctor` 和账号状态里单独报告这种情况；桌面版账号卡片上增加“改用应用身份”按钮，直接打开已填好名称的自动创建向导（旧账号保存了用户名时一并带上，否则需要自己填用户的邮箱）。详见 [常见问题](docs/user/faq.md)。
+- API 推荐：登录之后探测账号实际能用哪些 API 分类（只读请求：邮箱设置、OneDrive、Teams、SharePoint 根站点），给每个分类标上推荐 / 不可用（带原因）/ 可能可用。命令行：`e5extend account test <名称> --recommend`，加 `--apply` 把推荐的分类写进账号；桌面版添加账号向导的“API 分类”移到登录之后，默认勾选推荐的。`e5extend doctor` 新增 `account.<名称>.apis`：某个分类连续 3 轮都是 404 时提醒。详见 [docs/design/api-recommend.md](docs/design/api-recommend.md)。
 
 ### 变更
+
+- 桌面版添加账号向导的步骤顺序改为：登录方式、账号信息、登录、API 分类、测试、完成；新账号不再默认勾选全部分类。
 
 - 桌面版窗口左上角改为应用图标。
 - **改名**：E5 Renew 改名为 **E5 Developer Extend**，命令行程序、目录、环境变量、系统服务、包名和 Docker 镜像随之改为 `e5extend`（`E5EXTEND_*`、`ghcr.io/kkazuhak/e5-developer-extend`）。不提供从 v0.1.0 的自动迁移：装过 v0.1.0 的人请先用旧版运行 `e5renew service uninstall` 并卸载，再全新安装；旧的配置目录和钥匙串条目不会被读取或删除。详见 [docs/design/rename.md](docs/design/rename.md)。

@@ -64,6 +64,11 @@
 显示账号的状态和原因：`needs_attention`（需要你处理，原因里有命令）、`paused`（连续 3 轮失败后自动暂停）、
 配置里手动暂停、运行期限已结束。处理后 `e5extend account resume <名称>`。
 
+## account.<名称>.apis
+
+某个分类最近 3 轮的调用全部是 404（或 400）：通常是这个账号没有对应的服务（没有邮箱、没有 OneDrive、没有 Teams 许可）。
+`e5extend account test <名称> --recommend` 看哪些分类可用，`--apply` 写进账号。这一项只读本地调用日志，`--offline` 时也会运行。
+
 ## account.<名称>.secret
 
 Client Secret 还剩 30 天以内（警告）、7 天以内或已过期（失败）。在应用注册里创建新密钥，
