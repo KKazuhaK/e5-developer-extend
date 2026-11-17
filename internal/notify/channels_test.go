@@ -561,3 +561,52 @@ func trustAll(fs ...*fakeService) *http.Client {
 	}
 	return &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}}
 }
+
+func TestClientErrorsShowTheServicesReasonWithoutSecrets(t *testing.T) {
+	f := newFake(t, 400, `{"ok":false,"error_code":400,"description":"Bad Request: chat not found"}`)
+	tg := Target{Channel: config.Channel{ID: "tg", Type: config.ChannelTelegram, ChatID: "1", APIBase: f.URL}, Secrets: map[string]string{"bot_token": "123456:SECRETTOKEN123"}}
+	err := testDeliverer(f).Deliver(context.Background(), tg, sampleEv(Test))
+	if err == nil || !strings.Contains(err.Error(), "HTTP 400: Bad Request: chat not found") {
+		t.Fatalf("got %v", err)
+	}
+	assertNoSecret(t, err.Error(), f.URL)
+	// A body that echoes the secret is redacted, even a very short one.
+	f2 := newFake(t, 401, `{"message":"bad key zq in request"}`)
+	tg2 := Target{Channel: config.Channel{ID: "sl", Type: config.ChannelSlack}, Secrets: map[string]string{"url": f2.URL + "/zq"}}
+	err = testDeliverer(f2).Deliver(context.Background(), tg2, sampleEv(Test))
+	if err == nil || strings.Contains(err.Error(), "zq") {
+		t.Fatalf("short secret leaked: %v", err)
+	}
+	// An HTML error page is not echoed.
+	f3 := newFake(t, 403, `<html><body>Forbidden</body></html>`)
+	tg2.Secrets["url"] = f3.URL + "/x"
+	if err = testDeliverer(f3).Deliver(context.Background(), tg2, sampleEv(Test)); err == nil || strings.Contains(err.Error(), "<") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestServerChanTurboAndServerChan3(t *testing.T) {
+	if got := ServerChanURL("SCT123abcDEF"); got != "https://sctapi.ftqq.com/SCT123abcDEF.send" {
+		t.Errorf("turbo: %s", got)
+	}
+	if got := ServerChanURL("sctp1234t9XyZabc"); got != "https://1234.push.ft07.com/send/sctp1234t9XyZabc.send" {
+		t.Errorf("server chan3: %s", got)
+	}
+	for key, wantPath := range map[string]string{"SCT123abcDEF": "/SCT123abcDEF.send", "sctp1234t9XyZabc": "/send/sctp1234t9XyZabc.send"} {
+		f := newFake(t, 200, `{"code":0,"message":"success"}`)
+		d := testDeliverer(f)
+		d.ServerChanBase = f.URL
+		tgt := Target{Channel: config.Channel{ID: "sc", Type: config.ChannelServerChan}, Secrets: map[string]string{"sendkey": key}}
+		if err := d.Deliver(context.Background(), tgt, sampleEv(Test)); err != nil {
+			t.Fatal(err)
+		}
+		r := f.only(t)
+		if r.Path != wantPath || r.Method != "POST" {
+			t.Errorf("%s: %s %s", key, r.Method, r.Path)
+		}
+		form, _ := url.ParseQuery(string(r.Body))
+		if form.Get("title") == "" || form.Get("desp") == "" || strings.Contains(string(r.Body), key) {
+			t.Errorf("%s body: %s", key, r.Body)
+		}
+	}
+}

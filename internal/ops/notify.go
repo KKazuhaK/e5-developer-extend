@@ -156,7 +156,7 @@ func (s *channelSource) Targets() ([]notify.Target, error) {
 	}
 	var out []notify.Target
 	for _, e := range entries {
-		t := notify.Target{Channel: e.Channel, Secrets: map[string]string{}, AllowHTTP: e.legacy}
+		t := notify.Target{Channel: e.Channel, Secrets: map[string]string{}, AllowHTTP: e.legacy || (e.Type == config.ChannelWebhook && e.Channel.AllowHTTP)}
 		for _, f := range config.ChannelSecrets(e.Type) {
 			val, ok, err := s.secretLocked(notify.ChannelSecretKey(e.ID, f.Name))
 			if err != nil {
@@ -185,89 +185,20 @@ func (s *channelSource) Targets() ([]notify.Target, error) {
 
 // ---- last results ----
 
-const channelStatusFile = "notify-status.json"
-
 // ChannelResult is how the last delivery of a channel went.
-type ChannelResult struct {
-	At    time.Time `json:"at"`
-	OK    bool      `json:"ok"`
-	Error string    `json:"error,omitempty"` // never holds an address or a token
+type ChannelResult = notify.ChannelStatus
+
+func channelDataDir() string {
+	dir, _ := paths.DataDir()
+	return dir
 }
 
-var statusMu sync.Mutex
-
-func channelStatusPath() (string, error) {
-	dir, err := paths.DataDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(dir, channelStatusFile), nil
-}
-
-func readChannelStatus() map[string]ChannelResult {
-	p, err := channelStatusPath()
-	if err != nil {
-		return nil
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		return nil
-	}
-	m := map[string]ChannelResult{}
-	if json.Unmarshal(b, &m) != nil {
-		return nil
-	}
-	return m
-}
+func readChannelStatus() map[string]ChannelResult { return notify.ReadStatus(channelDataDir()) }
 
 // recordChannelResult remembers the outcome of a delivery for the app's channel list.
-func recordChannelResult(id string, err error) {
-	statusMu.Lock()
-	defer statusMu.Unlock()
-	p, perr := channelStatusPath()
-	if perr != nil {
-		return
-	}
-	m := readChannelStatus()
-	if m == nil {
-		m = map[string]ChannelResult{}
-	}
-	r := ChannelResult{At: time.Now(), OK: err == nil}
-	if err != nil {
-		r.Error = firstLine(err.Error())
-	}
-	m[id] = r
-	if b, merr := json.Marshal(m); merr == nil {
-		_ = paths.WriteFileAtomic(p, b)
-	}
-}
+func recordChannelResult(id string, err error) { notify.RecordStatus(channelDataDir(), id, err) }
 
-func forgetChannelResult(id string) {
-	statusMu.Lock()
-	defer statusMu.Unlock()
-	p, perr := channelStatusPath()
-	m := readChannelStatus()
-	if perr != nil || m == nil {
-		return
-	}
-	if _, ok := m[id]; !ok {
-		return
-	}
-	delete(m, id)
-	if b, err := json.Marshal(m); err == nil {
-		_ = paths.WriteFileAtomic(p, b)
-	}
-}
-
-func firstLine(s string) string {
-	if i := strings.IndexByte(s, '\n'); i >= 0 {
-		s = s[:i]
-	}
-	if len(s) > 300 {
-		s = s[:300]
-	}
-	return s
-}
+func forgetChannelResult(id string) { notify.ForgetStatus(channelDataDir(), id) }
 
 // defaultLanguage is the interface language the app saved, for channels that follow it.
 func defaultLanguage() string {
@@ -320,25 +251,29 @@ type SecretStatus struct {
 // Secrets holds new secret values by field; a field left out or empty keeps
 // what is stored.
 type ChannelInput struct {
-	ID           string            `json:"id"`
-	Type         string            `json:"type"`
-	MinLevel     string            `json:"minLevel"`
-	Events       []string          `json:"events"`
-	Language     string            `json:"language"`
-	Template     string            `json:"template"`
-	ChatID       string            `json:"chatId"`
-	APIBase      string            `json:"apiBase"`
-	SMTPHost     string            `json:"smtpHost"`
-	SMTPPort     int               `json:"smtpPort"`
-	Security     string            `json:"security"`
-	Username     string            `json:"username"`
-	From         string            `json:"from"`
-	To           []string          `json:"to"`
-	Server       string            `json:"server"`
-	Topic        string            `json:"topic"`
-	Format       string            `json:"format"`
-	Secrets      map[string]string `json:"secrets"`
-	ClearSecrets []string          `json:"clearSecrets"`
+	ID       string   `json:"id"`
+	Type     string   `json:"type"`
+	MinLevel string   `json:"minLevel"`
+	Events   []string `json:"events"`
+	Language string   `json:"language"`
+	Template string   `json:"template"`
+	ChatID   string   `json:"chatId"`
+	APIBase  string   `json:"apiBase"`
+	SMTPHost string   `json:"smtpHost"`
+	SMTPPort int      `json:"smtpPort"`
+	Security string   `json:"security"`
+	Username string   `json:"username"`
+	From     string   `json:"from"`
+	To       []string `json:"to"`
+	Server   string   `json:"server"`
+	Topic    string   `json:"topic"`
+	Format   string   `json:"format"`
+	// AllowHTTP (webhook) and AllowPlainAuth (email) are explicit exceptions kept
+	// from earlier setups; the app shows them but does not offer to set them.
+	AllowHTTP      bool              `json:"allowHttp"`
+	AllowPlainAuth bool              `json:"allowPlainAuth"`
+	Secrets        map[string]string `json:"secrets"`
+	ClearSecrets   []string          `json:"clearSecrets"`
 }
 
 func (in ChannelInput) channel() config.Channel {
@@ -346,13 +281,15 @@ func (in ChannelInput) channel() config.Channel {
 		Language: in.Language, Template: in.Template, ChatID: strings.TrimSpace(in.ChatID), APIBase: strings.TrimSpace(in.APIBase),
 		SMTPHost: strings.TrimSpace(in.SMTPHost), SMTPPort: in.SMTPPort, Security: in.Security, Username: strings.TrimSpace(in.Username),
 		From: strings.TrimSpace(in.From), To: slices.Clone(in.To), Server: strings.TrimSpace(in.Server),
-		Topic: strings.TrimSpace(in.Topic), Format: in.Format}
+		Topic: strings.TrimSpace(in.Topic), Format: in.Format,
+		AllowHTTP: in.AllowHTTP && in.Type == config.ChannelWebhook, AllowPlainAuth: in.AllowPlainAuth && in.Type == config.ChannelEmail}
 }
 
 func inputOf(c config.Channel) ChannelInput {
 	return ChannelInput{ID: c.ID, Type: c.Type, MinLevel: c.MinLevel, Events: nonNil(c.Events), Language: c.Language,
 		Template: c.Template, ChatID: c.ChatID, APIBase: c.APIBase, SMTPHost: c.SMTPHost, SMTPPort: c.SMTPPort,
-		Security: c.Security, Username: c.Username, From: c.From, To: nonNil(c.To), Server: c.Server, Topic: c.Topic, Format: c.Format}
+		Security: c.Security, Username: c.Username, From: c.From, To: nonNil(c.To), Server: c.Server, Topic: c.Topic, Format: c.Format,
+		AllowHTTP: c.AllowHTTP, AllowPlainAuth: c.AllowPlainAuth}
 }
 
 // ChannelView is a channel for display: its settings, which secrets are
@@ -383,6 +320,10 @@ func ChannelWarnings(c config.Channel, legacy bool) []string {
 	case config.ChannelEmail:
 		if c.SecurityOrDefault() == config.SecurityNone {
 			w = append(w, "email_plain")
+		}
+	case config.ChannelWebhook:
+		if c.AllowHTTP {
+			w = append(w, "allow_http")
 		}
 	}
 	if legacy {
@@ -495,7 +436,7 @@ func validateChannel(in ChannelInput) []ValidationError {
 		}
 		if name == "url" {
 			// The text is not echoed: it may be a pasted address with a token.
-			if u, err := url.Parse(val); err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && notify.IsLoopback(u.Hostname()))) {
+			if u, err := url.Parse(val); err != nil || u.Host == "" || (u.Scheme != "https" && !(u.Scheme == "http" && (notify.IsLoopback(u.Hostname()) || (in.AllowHTTP && in.Type == config.ChannelWebhook)))) {
 				bad = append(bad, ValidationError{Field: "secrets.url", Message: "the address must be an https:// URL"})
 			}
 		}
@@ -565,6 +506,7 @@ func (o *Ops) SaveChannel(ctx context.Context, in ChannelInput, create bool) ([]
 	if len(missing) > 0 {
 		return missing, nil
 	}
+	migratedHTTP := false
 	for _, f := range config.ChannelSecrets(in.Type) {
 		key := notify.ChannelSecretKey(in.ID, f.Name)
 		if val := strings.TrimSpace(in.Secrets[f.Name]); val != "" {
@@ -574,10 +516,12 @@ func (o *Ops) SaveChannel(ctx context.Context, in ChannelInput, create bool) ([]
 		} else if legacy && f.Name == "url" {
 			// Saving the legacy webhook moves its address to the new key.
 			if old, err := v.Get(notify.VaultKey); err == nil {
+				migratedHTTP = isPlainHTTP(string(old))
 				if err := v.Put(key, old); err != nil {
 					return nil, WithHint(fmt.Errorf("store the url of channel %s: %w", in.ID, err), "")
 				}
 			} else if cfg.Notify.WebhookURL != "" {
+				migratedHTTP = isPlainHTTP(cfg.Notify.WebhookURL)
 				if err := v.Put(key, []byte(cfg.Notify.WebhookURL)); err != nil {
 					return nil, WithHint(fmt.Errorf("store the url of channel %s: %w", in.ID, err), "")
 				}
@@ -590,6 +534,11 @@ func (o *Ops) SaveChannel(ctx context.Context, in ChannelInput, create bool) ([]
 		}
 	}
 	ch := in.channel()
+	if migratedHTTP && ch.Type == config.ChannelWebhook {
+		// The old address was http, which older versions accepted: keep it working,
+		// as an explicit exception that the doctor keeps warning about.
+		ch.AllowHTTP = true
+	}
 	if found && existing != nil {
 		*existing = ch
 	} else {
@@ -765,6 +714,11 @@ func (o *Ops) PreviewMessage(typ, lang, template, format, event string) (Preview
 	return Preview{Title: r.Title, Body: r.Body, HTML: r.HTML, Format: PreviewFormat(typ)}, nil
 }
 
+func isPlainHTTP(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && u.Scheme == "http" && !notify.IsLoopback(u.Hostname())
+}
+
 // ---- the single webhook of older versions ----
 
 // ValidWebhook checks that raw looks like an https address (or a local http one).
@@ -879,4 +833,14 @@ func (o *Ops) TestWebhook(ctx context.Context) error {
 		return WithHint(fmt.Errorf("the test alert was not delivered: %s", res[0].Error), "")
 	}
 	return nil
+}
+
+func firstLine(s string) string {
+	if i := strings.IndexByte(s, '\n'); i >= 0 {
+		s = s[:i]
+	}
+	if len(s) > 300 {
+		s = s[:300]
+	}
+	return s
 }

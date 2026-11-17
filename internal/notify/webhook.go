@@ -177,8 +177,33 @@ func doRequest(ctx context.Context, hc *http.Client, timeout time.Duration, r re
 	case s >= 300 && s < 400:
 		return &DeliveryError{Status: s, msg: fmt.Sprintf("%s answered HTTP %d (redirects are not followed; use the final address)", r.label, s)}
 	default:
-		return &DeliveryError{Status: s, msg: fmt.Sprintf("%s answered HTTP %d", r.label, s)}
+		// The reason the service gives (Telegram's "description", ...) is what
+		// tells a wrong chat id from a wrong token. It is redacted like any error.
+		msg := fmt.Sprintf("%s answered HTTP %d", r.label, s)
+		if snip := snippet(answer); snip != "" {
+			msg += ": " + clean(snip)
+		}
+		return &DeliveryError{Status: s, msg: msg}
 	}
+}
+
+// snippet is a short one-line excerpt of an error answer: the text of a JSON
+// description/message/error field when there is one, else the start of the body.
+func snippet(body []byte) string {
+	var m map[string]any
+	text := strings.TrimSpace(string(body))
+	if json.Unmarshal(body, &m) == nil {
+		for _, k := range []string{"description", "message", "errmsg", "error", "msg"} {
+			if v, ok := m[k].(string); ok && v != "" {
+				text = v
+				break
+			}
+		}
+	}
+	if strings.HasPrefix(text, "<") { // an HTML error page says nothing useful
+		return ""
+	}
+	return shorten(text)
 }
 
 // transportReason strips the request URL that net/http puts into its errors.
@@ -199,9 +224,17 @@ func redact(s, raw string) string {
 	parts := []string{raw}
 	if u, err := url.Parse(raw); err == nil {
 		parts = append(parts, u.Host, u.Hostname(), u.RawQuery, u.RawPath, u.Path, u.User.String())
+		// Tokens sit in single path segments and query values; they may be echoed alone.
+		parts = append(parts, strings.Split(u.Path, "/")...)
+		for _, vs := range u.Query() {
+			parts = append(parts, vs...)
+		}
+		if pw, ok := u.User.Password(); ok {
+			parts = append(parts, pw)
+		}
 	}
 	for _, p := range parts {
-		if len(p) >= 3 && p != "/" {
+		if p != "" && p != "/" {
 			s = strings.ReplaceAll(s, p, "<webhook>")
 		}
 	}

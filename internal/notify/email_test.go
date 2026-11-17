@@ -359,3 +359,22 @@ func TestEmailPresetsAndPorts(t *testing.T) {
 		}
 	}
 }
+
+func TestEmailRefusesPlainAuthToARemoteHost(t *testing.T) {
+	tg := Target{Channel: config.Channel{ID: "m", Type: config.ChannelEmail, SMTPHost: "mail.invalid", Security: "none", Username: "u@x.co",
+		From: "a@b.co", To: []string{"c@d.co"}}, Secrets: map[string]string{"password": "PW-123456"}}
+	err := testDeliverer(nil).Deliver(context.Background(), tg, sampleEv(Test))
+	if err == nil || !strings.Contains(err.Error(), "refusing") || strings.Contains(err.Error(), "PW-123456") {
+		t.Fatalf("got %v", err)
+	}
+	// Without a user name there is no password to protect, so the dial is attempted (and fails here).
+	tg.Channel.Username = ""
+	if err := testDeliverer(nil).Deliver(context.Background(), tg, sampleEv(Test)); err == nil || strings.Contains(err.Error(), "refusing") {
+		t.Errorf("no auth: %v", err)
+	}
+	// The explicit exception lifts the refusal (the dial then fails: the host does not exist).
+	tg.Channel.Username, tg.Channel.AllowPlainAuth = "u@x.co", true
+	if err := testDeliverer(nil).Deliver(context.Background(), tg, sampleEv(Test)); err == nil || strings.Contains(err.Error(), "refusing") {
+		t.Errorf("allow_plain_auth: %v", err)
+	}
+}

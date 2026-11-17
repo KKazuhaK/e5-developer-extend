@@ -82,6 +82,13 @@ type Channel struct {
 	Server   string   `toml:"server,omitempty"` // bark, ntfy
 	Topic    string   `toml:"topic,omitempty"`  // ntfy
 	Format   string   `toml:"format,omitempty"` // webhook: json or template
+	// AllowHTTP lets a webhook address be http (webhook only). It is set when a
+	// webhook of an older version that used http is saved as a channel; the
+	// doctor keeps warning about it.
+	AllowHTTP bool `toml:"allow_http,omitempty"`
+	// AllowPlainAuth lets an email channel with security none send the
+	// password to a host that is not this machine (email only).
+	AllowPlainAuth bool `toml:"allow_plain_auth,omitempty"`
 }
 
 // ChannelSecrets lists the vault fields of a channel type and whether each is required.
@@ -152,9 +159,14 @@ var channelIDRe = regexp.MustCompile(`^[a-z0-9-]{1,32}$`)
 // ValidChannelID reports whether s is an allowed channel id: 1-32 of a-z, 0-9 and -.
 func ValidChannelID(s string) bool { return channelIDRe.MatchString(s) }
 
-// CooldownDuration is the parsed Cooldown; 0 means off.
+// CooldownDuration is the parsed Cooldown. Empty means the default; only a
+// zero duration ("0") turns the cooldown off.
 func (n Notify) CooldownDuration() time.Duration {
-	d, err := time.ParseDuration(strings.TrimSpace(n.Cooldown))
+	s := strings.TrimSpace(n.Cooldown)
+	if s == "" {
+		s = DefaultCooldown
+	}
+	d, err := time.ParseDuration(s)
 	if err != nil || d < 0 {
 		return 0
 	}
@@ -334,6 +346,12 @@ func validateChannel(c *Channel, p string, add func(path, format string, args ..
 		default:
 			add(p+".format", "must be json or template")
 		}
+	}
+	if c.AllowHTTP && c.Type != ChannelWebhook {
+		add(p+".allow_http", "is only for type webhook")
+	}
+	if c.AllowPlainAuth && c.Type != ChannelEmail {
+		add(p+".allow_plain_auth", "is only for type email")
 	}
 	if c.Type != ChannelWebhook && c.Format != "" {
 		add(p+".format", "is only for type webhook")

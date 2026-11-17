@@ -165,6 +165,9 @@ export interface ChannelInput {
   server: string;
   topic: string;
   format: "" | "json" | "template";
+  /** Explicit exceptions kept from earlier setups (webhook over http, mail password without encryption); shown, not offered. */
+  allowHttp: boolean;
+  allowPlainAuth: boolean;
   /** New secret values by field; a missing or empty one keeps what is stored. */
   secrets: Record<string, string>;
   /** Optional secret fields to remove. */
@@ -180,7 +183,7 @@ export interface ChannelResult {
   ok: boolean;
   error?: string;
 }
-export type ChannelWarning = "server_http" | "email_plain" | "legacy";
+export type ChannelWarning = "server_http" | "email_plain" | "legacy" | "allow_http";
 /** A channel for display: settings, which secrets are stored, how the last delivery went. */
 export interface ChannelView extends ChannelInput {
   secretFields: SecretStatus[];

@@ -64,7 +64,7 @@ export function emptyChannel(type: ChannelType): ChannelInput {
   return {
     id: "", type, minLevel: "", events: [], language: "", template: "", chatId: "", apiBase: "", smtpHost: "", smtpPort: 0,
     security: type === "email" ? "starttls" : "", username: "", from: "", to: [], server: "", topic: "",
-    format: type === "webhook" ? "json" : "", secrets: {}, clearSecrets: [],
+    format: type === "webhook" ? "json" : "", allowHttp: false, allowPlainAuth: false, secrets: {}, clearSecrets: [],
   };
 }
 

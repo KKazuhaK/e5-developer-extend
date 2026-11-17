@@ -642,6 +642,7 @@ export const en: Dict = {
   "alerts.warn.server_http": "The server address is http, so the token travels unencrypted",
   "alerts.warn.email_plain": "The mail connection is not encrypted",
   "alerts.warn.legacy": "This is the webhook of an older version; save it once to move it to the new format",
+  "alerts.warn.allow_http": "This webhook is allowed to use http (an exception kept from an older setup), so its token travels unencrypted",
   "alerts.err.id": "Lowercase letters, digits and - only, 32 at most",
   "alerts.err.idTaken": "A channel with this name exists",
   "alerts.err.required": "Required",

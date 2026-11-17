@@ -104,3 +104,15 @@ func TestQuietHours(t *testing.T) {
 		t.Error("equal bounds accepted")
 	}
 }
+
+func TestCooldownEmptyMeansDefaultAndOnlyZeroDisables(t *testing.T) {
+	for in, want := range map[string]time.Duration{"": 6 * time.Hour, "  ": 6 * time.Hour, "3h": 3 * time.Hour, "0": 0, "0s": 0} {
+		if got := (Notify{Cooldown: in}).CooldownDuration(); got != want {
+			t.Errorf("%q: %v, want %v", in, got, want)
+		}
+	}
+	if err := (&Config{Version: Version, Notify: Notify{StaleAfter: "72h", Cooldown: ""}, Vault: Vault{Backend: BackendAuto},
+		Schedule: Default().Schedule}).Validate(); err != nil {
+		t.Errorf("empty cooldown rejected: %v", err)
+	}
+}

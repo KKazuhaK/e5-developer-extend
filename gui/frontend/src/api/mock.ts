@@ -402,7 +402,7 @@ let mockChannels: MockChannel[] = q.get("channels") === "some" ? seedChannels() 
 function seedChannels(): MockChannel[] {
   const base = (c: Partial<ChannelView> & Pick<ChannelInput, "id" | "type">): ChannelView => ({
     minLevel: "", events: [], language: "", template: "", chatId: "", apiBase: "", smtpHost: "", smtpPort: 0, security: "", username: "",
-    from: "", to: [], server: "", topic: "", format: "", secrets: {}, clearSecrets: [],
+    from: "", to: [], server: "", topic: "", format: "", allowHttp: false, allowPlainAuth: false, secrets: {}, clearSecrets: [],
     secretFields: SECRETS[c.type].map(([name, required]): SecretStatus => ({ name, required, set: true })),
     legacy: false, lastResult: null, warnings: [], ...c,
   });

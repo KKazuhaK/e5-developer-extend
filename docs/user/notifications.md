@@ -59,7 +59,7 @@ e5extend notify channel add mail --type email --preset gmail \
 | `qq` | `smtp.qq.com` | 465 / `tls` | **授权码**：网页版 QQ 邮箱 → 设置 → 账号 → “POP3/IMAP/SMTP/Exchange/CardDAV 服务”→ 开启 SMTP 服务，按提示发短信，得到授权码；不是 QQ 密码。用户名是完整的 QQ 邮箱地址 |
 | `163` | `smtp.163.com` | 465 / `tls` | **授权码**：网页版 163 邮箱 → 设置 → POP3/SMTP/IMAP → 开启 SMTP 服务，设置授权码。用户名是完整的 163 邮箱地址 |
 
-加密方式：`starttls`（默认，先明文连接再升级，端口 587）、`tls`（一开始就加密，端口 465）、`none`（不加密，端口 25，`doctor` 会警告）。
+加密方式：`starttls`（默认，先明文连接再升级，端口 587）、`tls`（一开始就加密，端口 465）、`none`（不加密，端口 25，`doctor` 会警告）。`none` 时，如果设置了用户名，密码只会发给本机；发给其他主机会被拒绝，除非你在 `config.toml` 的这个渠道里明确写 `allow_plain_auth = true`（不建议）。
 `starttls` 要求服务器必须支持升级，不支持会报错，不会悄悄退回明文。
 
 ### 企业微信（群机器人）
@@ -123,7 +123,7 @@ e5extend notify channel add mail --type email --preset gmail \
 1. 登录 <https://sct.ftqq.com>，在“SendKey”页面复制 **SendKey**（`SCT` 开头）。
 2. `e5extend notify channel add sc --type serverchan`。
 
-消息发送到 `https://sctapi.ftqq.com/<SendKey>.send`（标题 + Markdown 正文），再由 Server 酱转到你绑定的微信等通道。只支持 Server 酱 Turbo 版；Server 酱³（`sctp` 开头的 Key）不支持。敏感字段：`sendkey`。
+消息发送到 Server 酱（标题 + Markdown 正文），再由它转到你绑定的微信等通道。同时支持 Server 酱 Turbo 版（`SCT` 开头的 Key，发到 `sctapi.ftqq.com`）和 Server 酱³（`sctp<uid>t…` 形式的 Key，发到 `https://<uid>.push.ft07.com/send/<Key>.send`，uid 取自 Key 前缀）。敏感字段：`sendkey`。
 
 ### 通用 Webhook
 
@@ -179,8 +179,8 @@ e5extend notify channel add mail --type email --preset gmail \
 
 | 设置 | 默认 | 说明 |
 |---|---|---|
-| `cooldown` | `6h` | 同一账号的同一告警在这段时间内不重复发送；严重告警冷却时间减半；`0` 关闭。管 `needs_attention`、`auto_paused`、`failure_spike`、`all_failing`；`stale`、`secret_expiring` 有各自的重复规则，`recovered`、`period_ended` 只发一次。被冷却吞掉的一次问题不会再发“已恢复” |
-| `quiet_hours` | 空 | 例如 `"23:00-08:00"`（本机时间，可以跨午夜）。期间只发严重告警；其余的暂存，免打扰结束后**合并成一条**发出（只暂存了一条就按原样发） |
+| `cooldown` | `6h` | 同一账号的同一告警在这段时间内不重复发送；严重告警冷却时间减半；留空表示默认值，只有 `0` 才关闭。管 `needs_attention`、`auto_paused`、`failure_spike`、`all_failing`；`stale`、`secret_expiring` 有各自的重复规则，`recovered`、`period_ended` 只发一次。被冷却压下的问题如果冷却结束时仍然存在，会在那时发出（时间显示的是它最初被发现的时间），之后恢复时正常发“已恢复”；冷却期间就已恢复的问题，既不发告警也不发“已恢复” |
+| `quiet_hours` | 空 | 例如 `"23:00-08:00"`（本机时间，可以跨午夜）。期间只发严重告警；其余的暂存，免打扰结束后**合并成一条**发出（只暂存了一条就按原样发；免打扰期间已经恢复的问题，暂存的告警和它的“已恢复”都会丢弃，不会收到没发过的问题的“已恢复”） |
 | `spike_rounds` / `spike_rate` / `spike_min_failures` | 3 / 0.5 / 5 | 见上 |
 | `events` | 空（全部） | 全局只发这些事件 |
 
@@ -188,9 +188,16 @@ e5extend notify channel add mail --type email --preset gmail \
 例如：手机推送（Bark）只要严重的，邮件收全部。汇总消息会按每个渠道的过滤条件分别裁剪。
 `notify test` 总是发出，不受这些过滤条件影响。
 
+### 消息太长时
+
+各服务对单条消息有长度限制（Telegram 4096 字符、企业微信 4096 字节、Discord 2000 字符等）。免打扰汇总太长时，会在条目之间拆成几条各自完整的消息；单条消息本身太长则先截断原文再渲染，所以不会把 HTML 标签或实体切成两半。
+消息里来自外部的文字（账号名、消息正文、机器名、建议）会按各渠道的格式转义：Slack 转义 `& < >`，Telegram 转义 HTML，企业微信、钉钉、Discord、Server 酱转义 Markdown 符号，`<!channel>`、`<url|x>`、`*粗体*` 都只会当作普通文字显示。
+
 ### 发送失败怎么办
 
 - 每个渠道独立发送，一个渠道失败不影响其他渠道。
+- 错误信息会带上服务返回的原因（例如 Telegram 的 `Bad Request: chat not found`），并去掉所有令牌和地址。
+- `e5extend doctor` 会提醒“某个渠道最近连续 3 次发送失败”或“7 天内一次都没送达”，并写出渠道名。
 - 每次发送失败后按 2、4、8 秒退避重试（只对临时性错误：网络错误、HTTP 429、5xx、SMTP 4xx）；密码错、地址不对这类永久性错误不重试。
 - 一条告警只要**至少一个**渠道发出去就算已发送；全部渠道都失败，才会在一小时后重新发送。所以某个渠道一直失败时，请看桌面版渠道列表里的“最近一次发送结果”、`e5extend notify channel list` 或 `doctor`，它不会被自动补发。
 - 对已有渠道的改动（换令牌、改过滤条件、改模板）立即被运行中的引擎看到，不用重启；从“没有任何渠道”到加上第一个渠道，引擎最多 5 分钟后才开始发送。
@@ -251,7 +258,7 @@ e5extend notify set-webhook <地址>           # 旧命令，等价于设置名�
 
 以前只有一个 Webhook（`notify set-webhook`，地址存在 vault 的 `notify/webhook`，更早的版本是 `config.toml` 里的 `notify.webhook_url`）。升级后：
 
-- 它**继续工作**，在渠道列表里显示为名为 `webhook` 的通用 Webhook 渠道（标有“旧格式”）；旧地址即使是 `http://` 也照常使用，`doctor` 会提醒。
+- 它**继续工作**，在渠道列表里显示为名为 `webhook` 的通用 Webhook 渠道（标有“旧格式”）；旧地址即使是 `http://` 也照常使用，`doctor` 会提醒。迁移成新格式时，如果旧地址是 `http://`，会在该渠道里写上 `allow_http = true`（仅通用 Webhook 渠道可用），之后改其他设置不会让它失效；`doctor` 会一直警告，换成 https 地址后可以删掉这一行。
 - 在桌面版里编辑保存它一次，或再运行一次 `notify set-webhook`，就会迁移成新格式（vault 里变成 `notify/webhook/url`，旧条目和明文配置被清除）。
 - 新添加的渠道只写新格式。备份导出、导入包含所有渠道的敏感信息；`--merge` 导入保留本机原有的渠道设置。
 

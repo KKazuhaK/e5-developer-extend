@@ -15,6 +15,7 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/config"
 	"github.com/KKazuhaK/e5-developer-extend/internal/engine"
+	"github.com/KKazuhaK/e5-developer-extend/internal/notify"
 	"github.com/KKazuhaK/e5-developer-extend/internal/service"
 	"github.com/KKazuhaK/e5-developer-extend/internal/store"
 	"github.com/KKazuhaK/e5-developer-extend/internal/vault"
@@ -433,6 +434,42 @@ func TestNotifyWarnsAboutAnHTTPLegacyWebhook(t *testing.T) {
 	if strings.Contains(got["notify"].Detail, "unencrypted") {
 		t.Errorf("a local address was flagged: %s", got["notify"].Detail)
 	}
+}
+
+func TestNotifyKeepsWarningAboutExplicitExceptions(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.Channels = []config.Channel{
+		{ID: "webhook", Type: config.ChannelWebhook, AllowHTTP: true},
+		{ID: "mail", Type: config.ChannelEmail, SMTPHost: "h", From: "a@b.co", To: []string{"c@d.co"}, Security: config.SecurityNone, AllowPlainAuth: true},
+	}
+	r.v.has["notify/webhook/url"] = true
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "allow_http")
+	expect(t, got, "notify", Warn, "allow_plain_auth")
+}
+
+func TestNotifyWarnsAboutChannelsThatKeepFailing(t *testing.T) {
+	r := newRig(t)
+	r.cfg.Notify.Channels = []config.Channel{{ID: "tg", Type: config.ChannelTelegram, ChatID: "1"}, {ID: "sl", Type: config.ChannelSlack}}
+	r.v.has["notify/tg/bot_token"], r.v.has["notify/sl/url"] = true, true
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+	// Three failures in a row, with a success a day ago.
+	notify.RecordStatus(r.dir, "tg", nil)
+	for i := 0; i < 3; i++ {
+		notify.RecordStatus(r.dir, "tg", errors.New("telegram answered HTTP 401"))
+	}
+	got := r.run(true)
+	expect(t, got, "notify", Warn, "channel tg: the last 3 deliveries failed (telegram answered HTTP 401)")
+	if strings.Contains(got["notify"].Detail, "sl") && strings.Contains(got["notify"].Detail, "channel sl") {
+		t.Error("a healthy channel was named")
+	}
+	// A single failure after a recent success is not worth a warning.
+	notify.RecordStatus(r.dir, "tg", nil)
+	notify.RecordStatus(r.dir, "tg", errors.New("telegram answered HTTP 500"))
+	expect(t, r.run(true), "notify", OK, "2 notification channels")
+	// A channel that never delivered anything and whose last attempt failed is flagged.
+	notify.RecordStatus(r.dir, "sl", errors.New("slack answered HTTP 404"))
+	expect(t, r.run(true), "notify", Warn, "channel sl: nothing delivered in the last 7 days")
 }
 
 func TestOutputAndExitCodes(t *testing.T) {

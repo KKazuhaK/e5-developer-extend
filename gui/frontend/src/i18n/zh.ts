@@ -642,6 +642,7 @@ export const zh = {
   "alerts.warn.server_http": "服务器地址是 http，令牌会明文传输",
   "alerts.warn.email_plain": "邮件连接没有加密",
   "alerts.warn.legacy": "这是旧版的 Webhook；保存一次即可迁移到新格式",
+  "alerts.warn.allow_http": "这个 Webhook 允许使用 http（旧设置保留的例外），令牌会明文传输",
   "alerts.err.id": "只能用小写字母、数字和 -，最长 32 位",
   "alerts.err.idTaken": "已有同名渠道",
   "alerts.err.required": "必填",

@@ -53,6 +53,11 @@ const (
 
 	fewAPIs = 5
 
+	// DeliveryFailures is how many failed deliveries in a row make the doctor
+	// warn about a channel; DeliveryStale is how long without a success does too.
+	DeliveryFailures = 3
+	DeliveryStale    = 7 * 24 * time.Hour
+
 	// FailingRounds is how many rounds in a row a category must have failed
 	// with "not found" before the doctor warns about it.
 	FailingRounds = 3
@@ -714,10 +719,38 @@ func checkNotify(d Deps, cfg *config.Config) Check {
 		if ch.Type == config.ChannelEmail && ch.SecurityOrDefault() == config.SecurityNone {
 			add(name+": the mail connection is not encrypted", "set security to starttls or tls")
 		}
+		if ch.AllowHTTP {
+			add(name+": allow_http is set, so its address may be http and travel unencrypted", "use an https address and remove allow_http")
+		}
+		if ch.AllowPlainAuth {
+			add(name+": allow_plain_auth is set, so the password is sent without encryption", "set security to starttls or tls")
+		}
 		if ch.Template != "" {
 			if err := notify.CheckTemplate(ch.Type, ch.Template, ch.Type == config.ChannelWebhook && ch.Format == config.FormatTemplate); err != nil {
 				add(name+": the custom template does not work: "+err.Error(), "e5extend notify preview test --type "+ch.Type)
 			}
+		}
+	}
+	// How the deliveries went (recorded by whoever sent them; no secrets in it).
+	status := notify.ReadStatus(d.DataDir)
+	ids := []string{}
+	for _, ch := range cfg.Notify.Channels {
+		ids = append(ids, ch.ID)
+	}
+	if _, ok := cfg.Notify.FindChannel(notify.LegacyChannelID); !ok {
+		ids = append(ids, notify.LegacyChannelID)
+	}
+	for _, id := range ids {
+		st, ok := status[id]
+		if !ok || st.OK {
+			continue
+		}
+		stale := st.LastOK.IsZero() || d.now().Sub(st.LastOK) > DeliveryStale
+		switch {
+		case st.Failures >= DeliveryFailures:
+			add(fmt.Sprintf("channel %s: the last %d deliveries failed (%s)", id, st.Failures, st.Error), "e5extend notify test "+id)
+		case stale:
+			add(fmt.Sprintf("channel %s: nothing delivered in the last %d days (%s)", id, int(DeliveryStale.Hours()/24), st.Error), "e5extend notify test "+id)
 		}
 	}
 	// The webhook of older versions, when it has not been saved as a channel yet.

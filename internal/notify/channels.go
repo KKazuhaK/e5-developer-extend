@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -405,9 +406,13 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 			return request{}, err
 		}
 		form := url.Values{"title": {r.Title}, "desp": {r.Body}}
-		return request{method: http.MethodPost, url: strings.TrimRight(orDefault(d.ServerChanBase, serverChanBase), "/") + "/" + url.PathEscape(key) + ".send",
+		target := ServerChanURL(key)
+		if d.ServerChanBase != "" { // tests
+			target = strings.TrimRight(d.ServerChanBase, "/") + serverChanPath(key)
+		}
+		return request{method: http.MethodPost, url: target,
 			header: map[string]string{"Content-Type": "application/x-www-form-urlencoded"}, body: []byte(form.Encode()),
-			secret: []string{key}, check: checkErrCode("code", "message", -1)}, nil
+			secret: []string{key, target}, check: checkErrCode("code", "message", -1)}, nil
 
 	case config.ChannelWebhook:
 		u, err := need("url")
@@ -426,6 +431,27 @@ func (d *Deliverer) build(t Target, ev Event, lang string, r Rendered, need func
 		return request{method: http.MethodPost, url: u, header: jsonHeader, body: body, secret: []string{u}}, nil
 	}
 	return request{}, &DeliveryError{msg: "unknown channel type " + c.Type}
+}
+
+var serverChan3Re = regexp.MustCompile(`^sctp(\d+)t`)
+
+// serverChanPath is the path part of the send address of a SendKey: Server Chan
+// Turbo keys (SCT...) use /<key>.send, Server Chan3 keys (sctp<uid>t...) /send/<key>.send.
+func serverChanPath(key string) string {
+	if serverChan3Re.MatchString(key) {
+		return "/send/" + url.PathEscape(key) + ".send"
+	}
+	return "/" + url.PathEscape(key) + ".send"
+}
+
+// ServerChanURL is the address a SendKey posts to: Turbo keys go to
+// sctapi.ftqq.com, Server Chan3 keys to the host of their own uid,
+// https://<uid>.push.ft07.com.
+func ServerChanURL(key string) string {
+	if m := serverChan3Re.FindStringSubmatch(key); m != nil {
+		return "https://" + m[1] + ".push.ft07.com" + serverChanPath(key)
+	}
+	return serverChanBase + serverChanPath(key)
 }
 
 // FeishuSign is the signature of a Feishu custom bot: HMAC-SHA256 keyed with

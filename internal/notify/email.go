@@ -85,13 +85,18 @@ func (d *Deliverer) sendEmail(ctx context.Context, t Target, r Rendered) error {
 	clean := func(err error) error {
 		s := err.Error()
 		for _, v := range secret {
-			if len(v) >= 3 {
+			if v != "" {
 				s = strings.ReplaceAll(s, v, "<secret>")
 			}
 		}
 		return &DeliveryError{Temporary: isTemporarySMTP(err), msg: "email: " + s}
 	}
 
+	// A password must not cross the network unencrypted by accident: with
+	// security none it goes only to this machine unless allow_plain_auth says otherwise.
+	if c.Username != "" && c.SecurityOrDefault() == config.SecurityNone && !c.AllowPlainAuth && !IsLoopback(c.SMTPHost) {
+		return &DeliveryError{msg: "email: refusing to send the password without encryption; use starttls or tls (or set allow_plain_auth)"}
+	}
 	host, port := c.SMTPHost, c.SMTPPortOrDefault()
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	tlsConf := d.tlsConfig(host)

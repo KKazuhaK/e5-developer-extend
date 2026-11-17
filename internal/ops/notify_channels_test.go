@@ -441,3 +441,54 @@ func TestLegacyWebhookKeepsAcceptingHTTPButNewChannelsDoNot(t *testing.T) {
 		t.Error("set-webhook accepted an http address")
 	}
 }
+
+func TestMigratedHTTPWebhookKeepsWorkingAfterEdits(t *testing.T) {
+	e := newTestEnv(t)
+	cfg := config.Default()
+	cfg.Notify.WebhookURL = "http://nas.lan/hook/PLAINTOKEN"
+	if err := cfg.Save(filepath.Join(e.cfgDir, "config.toml")); err != nil {
+		t.Fatal(err)
+	}
+	in, err := e.GetChannel("webhook")
+	if err != nil {
+		t.Fatal(err)
+	}
+	in.MinLevel = config.LevelWarning
+	mustSave(t, e, in, false) // migrates; nothing else about the address is touched
+	raw, _ := os.ReadFile(filepath.Join(e.cfgDir, "config.toml"))
+	if !strings.Contains(string(raw), "allow_http = true") || strings.Contains(string(raw), "PLAINTOKEN") {
+		t.Fatalf("config.toml:\n%s", raw)
+	}
+	// Edit again, with the view the app hands back: the exception survives.
+	chs, _ := e.ListChannels()
+	if len(chs) != 1 || !chs[0].AllowHTTP || chs[0].Legacy {
+		t.Fatalf("view: %+v", chs)
+	}
+	again := chs[0].ChannelInput
+	again.MinLevel = ""
+	mustSave(t, e, again, false)
+	c, p, _ := e.LoadConfigOrDefault()
+	targets, err := e.channelSource(c, p).Targets()
+	if err != nil || len(targets) != 1 || !targets[0].AllowHTTP || targets[0].Secrets["url"] != "http://nas.lan/hook/PLAINTOKEN" {
+		t.Fatalf("target: %+v %v", targets, err)
+	}
+	if w := ChannelWarnings(c.Notify.Channels[0], false); len(w) != 1 || w[0] != "allow_http" {
+		t.Errorf("warnings: %v", w)
+	}
+	// A fresh https-only channel never gets the flag, and it is webhook-only.
+	mustSave(t, e, slackInput("s", "https://h.example/x"), true)
+	c, _, _ = e.LoadConfigOrDefault()
+	if s, _ := c.Notify.FindChannel("s"); s.AllowHTTP {
+		t.Error("allow_http on a slack channel")
+	}
+	// An https webhook migrates without the flag.
+	e2 := newTestEnv(t)
+	cfg2 := config.Default()
+	cfg2.Notify.WebhookURL = "https://h.example/x"
+	_ = cfg2.Save(filepath.Join(e2.cfgDir, "config.toml"))
+	in2, _ := e2.GetChannel("webhook")
+	mustSave(t, e2, in2, false)
+	if c2, _, _ := e2.LoadConfigOrDefault(); c2.Notify.Channels[0].AllowHTTP {
+		t.Error("allow_http set for an https webhook")
+	}
+}
