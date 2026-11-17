@@ -150,6 +150,31 @@ export function AlertsCard({
               <Input {...fieldAria("n-cooldown", fieldErr("notify.cooldown"), "x")} value={n.cooldown} onChange={(e) => { clearRemote("notify.cooldown"); upd((d) => void (d.notify.cooldown = e.target.value)); }} />
             </Field>
             <div className="sm:col-span-2">
+              <div className="flex flex-wrap items-center gap-3">
+                <Switch
+                  id="n-daily-on" checked={n.dailySummaryAt !== ""} aria-labelledby="n-daily-l"
+                  onCheckedChange={(on) => {
+                    clearRemote("notify.dailySummaryAt");
+                    upd((d) => {
+                      d.notify.dailySummaryAt = on ? (d.notify.dailySummaryAt || "21:00") : "";
+                      // A list of chosen events must name the summary, or it would never be sent.
+                      if (on && d.notify.events.length > 0 && !d.notify.events.includes("daily_summary")) d.notify.events = [...d.notify.events, "daily_summary"];
+                    });
+                  }}
+                />
+                <label htmlFor="n-daily-on" className="text-[13px] font-medium" id="n-daily-l">{t("alerts.daily")}</label>
+                {n.dailySummaryAt !== "" && (
+                  <label className="flex items-center gap-2 text-[13px]">{t("alerts.dailyAt")}
+                    <Input id="n-daily" type="time" className="w-32" value={n.dailySummaryAt} aria-invalid={fieldErr("notify.dailySummaryAt") ? true : undefined}
+                      onChange={(e) => { clearRemote("notify.dailySummaryAt"); upd((d) => void (d.notify.dailySummaryAt = e.target.value)); }} />
+                  </label>
+                )}
+              </div>
+              <p className={cn("mt-1.5 text-xs", fieldErr("notify.dailySummaryAt") ? "text-danger" : "text-muted-foreground")} role={fieldErr("notify.dailySummaryAt") ? "alert" : undefined}>
+                {fieldErr("notify.dailySummaryAt") ?? t("alerts.dailyHint")}
+              </p>
+            </div>
+            <div className="sm:col-span-2">
               <p className="mb-1.5 text-[13px] font-medium" id="n-quiet-l">{t("alerts.quiet")}</p>
               <div role="group" aria-labelledby="n-quiet-l" className="flex flex-wrap items-center gap-2">
                 <label className="flex items-center gap-2 text-[13px]">{t("alerts.quietFrom")}

@@ -224,6 +224,20 @@ func (n Notify) InQuietHours(t time.Time) bool {
 	return m >= start || m < end
 }
 
+// ParseDailySummaryAt parses DailySummaryAt into minutes after midnight; ok
+// is false when it is empty (the summary is off).
+func (n Notify) ParseDailySummaryAt() (minutes int, ok bool, err error) {
+	s := strings.TrimSpace(n.DailySummaryAt)
+	if s == "" {
+		return 0, false, nil
+	}
+	t, err := time.Parse("15:04", s)
+	if err != nil {
+		return 0, false, fmt.Errorf("use the form 21:00")
+	}
+	return t.Hour()*60 + t.Minute(), true, nil
+}
+
 // FindChannel returns the channel with the given id.
 func (n Notify) FindChannel(id string) (*Channel, bool) {
 	for i := range n.Channels {
@@ -242,6 +256,9 @@ func validateNotify(n *Notify, add func(path, format string, args ...any)) {
 	}
 	if _, _, _, err := ParseQuietHours(n.QuietHours); err != nil {
 		add("notify.quiet_hours", "%v", err)
+	}
+	if _, _, err := n.ParseDailySummaryAt(); err != nil {
+		add("notify.daily_summary_at", "%v", err)
 	}
 	if n.SpikeRounds < 0 || n.SpikeRounds > 50 {
 		add("notify.spike_rounds", "must be between 1 and 50")

@@ -11,7 +11,7 @@ const base = (): Settings => ({
   },
   network: { proxy: "" },
   notify: {
-    staleAfter: "72h", events: [], webhookConfigured: false, channels: 0, cooldown: "6h", quietHours: "",
+    staleAfter: "72h", events: [], webhookConfigured: false, channels: 0, cooldown: "6h", quietHours: "", dailySummaryAt: "",
     spikeRounds: 3, spikeRate: 0.5, spikeMinFailures: 5,
   },
   ui: { language: "auto", theme: "system", startAtLogin: false },
@@ -146,6 +146,12 @@ describe("validateSettings: alert noise", () => {
     expect(e["notify.spikeRounds"]).toBe("spikeRounds");
     expect(e["notify.spikeRate"]).toBe("spikeRate");
     expect(e["notify.spikeMinFailures"]).toBe("spikeMin");
+  });
+  it("accepts an empty or valid daily summary time and flags the rest", () => {
+    expect(validateSettings(withNotify({ dailySummaryAt: "21:00" }))).toEqual({});
+    expect(validateSettings(withNotify({ dailySummaryAt: "" }))).toEqual({});
+    expect(validateSettings(withNotify({ dailySummaryAt: "9pm" }))["notify.dailySummaryAt"]).toBe("time");
+    expect(validateSettings(withNotify({ dailySummaryAt: "24:00" }))["notify.dailySummaryAt"]).toBe("time");
   });
   it("rejects a quiet window whose ends are equal", () => {
     expect(validateSettings(withNotify({ quietHours: "08:00-08:00" }))["notify.quietHours"]).toBe("quiet");

@@ -93,13 +93,17 @@ type Notify struct {
 	SpikeRounds      int     `toml:"spike_rounds"`
 	SpikeRate        float64 `toml:"spike_rate"`
 	SpikeMinFailures int     `toml:"spike_min_failures"`
+	// DailySummaryAt (HH:MM, local time) turns the daily_summary message on and
+	// sets when it is sent; empty (the default) turns it off. Inside the quiet
+	// hours it is sent when they end.
+	DailySummaryAt string `toml:"daily_summary_at"`
 	// Channels are the destinations. Their secrets live in the vault.
 	Channels []Channel `toml:"channels"`
 }
 
 // NotifyEvents are the alert kinds accepted in Notify.Events.
 var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing",
-	"subscription_expiring", "subscription_status", "subscription_renewed", "update_available"}
+	"subscription_expiring", "subscription_status", "subscription_renewed", "daily_summary", "update_available"}
 
 // DefaultStaleAfter is the default for Notify.StaleAfter.
 const DefaultStaleAfter = "72h"

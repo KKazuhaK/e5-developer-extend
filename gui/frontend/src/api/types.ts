@@ -22,6 +22,13 @@ export interface AccountSummary {
   lastSuccess: string | null;
   todayOk: number;
   todayFailed: number;
+  /** Calls Microsoft throttled today; they are no failures. */
+  todayThrottled: number;
+  /** APIs left out for 24 hours after a 403 or 404. */
+  pausedApis: number;
+  /** When the engine next probes an automatically paused account; null when none is due. */
+  autoResumeAt: string | null;
+  autoResumeTries: number;
   usableApis: number;
   totalApis: number;
   secretExpires: string | null;
@@ -148,6 +155,8 @@ export interface Settings {
     cooldown: string;
     /** "23:00-08:00", or "" for none. */
     quietHours: string;
+    /** "21:00" sends the daily summary at that time; "" turns it off. */
+    dailySummaryAt: string;
     spikeRounds: number;
     /** 0..1 */
     spikeRate: number;

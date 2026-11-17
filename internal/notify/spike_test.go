@@ -68,7 +68,7 @@ func TestOnlyMissingCategoriesDoNotAlert(t *testing.T) {
 
 func TestFailureSpikeAndRecovery(t *testing.T) {
 	r := newSpikeRig()
-	r.calls["main"] = append(callRounds("main", "user.me", "throttled", 429, 2), callRounds("main", "mail.list", "server_error", 503, 1)...)
+	r.calls["main"] = append(callRounds("main", "user.me", "network", 0, 2), callRounds("main", "mail.list", "server_error", 503, 1)...)
 	r.calls["main"] = append(r.calls["main"], callRounds("main", "mail.list", "ok", 200, 1)...)
 	evs := r.eval()
 	if kinds(evs) != "failure_spike" {

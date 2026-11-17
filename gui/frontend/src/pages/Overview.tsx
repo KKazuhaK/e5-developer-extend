@@ -37,6 +37,8 @@ export function Overview() {
   const nextRun = accounts.map((a) => a.nextRun).filter((x): x is string => !!x).sort()[0] ?? null;
   const todayOk = accounts.reduce((n, a) => n + a.todayOk, 0);
   const todayFailed = accounts.reduce((n, a) => n + a.todayFailed, 0);
+  const todayThrottled = accounts.reduce((n, a) => n + a.todayThrottled, 0);
+  const pausedApis = accounts.reduce((n, a) => n + a.pausedApis, 0);
   const runningAll = act.busy.has("*");
 
   const addAccount = () => navigate("accounts", { wizard: { mode: "add" } });
@@ -99,7 +101,11 @@ export function Overview() {
             {todayOk}
             <span className="ml-1 text-sm font-normal text-muted-foreground">{t("overview.ok")}</span>
           </span>
-          <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground">{t("overview.failedN", { n: todayFailed })}</span>
+          <span className="mt-0.5 block text-xs tabular-nums text-muted-foreground">
+            {t("overview.failedN", { n: todayFailed })}
+            {todayThrottled > 0 && <> · <span title={t("account.throttledHint")}>{t("overview.throttledN", { n: todayThrottled })}</span></>}
+            {pausedApis > 0 && <> · <span title={t("account.pausedApisHint")}>{t("account.pausedApis", { n: pausedApis })}</span></>}
+          </span>
         </Stat>
         <Stat label={t("overview.healthy")}>
           <span className="text-lg font-semibold tabular-nums">

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	htmltemplate "html/template"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"text/template"
@@ -48,6 +49,20 @@ type Data struct {
 	OriginLabel string
 	// Digest lists the held events when the message is a summary; empty otherwise.
 	Digest []DigestItem
+	// Summary has one row per account for a daily_summary; empty otherwise.
+	Summary []SummaryData
+}
+
+// SummaryData is one account of a daily summary, ready to show. Line is the
+// whole row as one sentence in the template's language.
+type SummaryData struct {
+	Account               string
+	OK, Failed, Throttled int
+	LastSuccess           string // local time, or "-" when there has been none
+	State, StateLabel     string
+	PausedAPIs            int
+	SubDays               string // days left of the E5 subscription; empty when unknown
+	Line                  string
 }
 
 // DigestItem is one event of a summary.
@@ -86,7 +101,8 @@ var labels = map[string]map[string]string{
 		NeedsAttention: "需要处理", Recovered: "已恢复", AutoPaused: "已自动暂停", Stale: "长时间没有成功调用",
 		SecretExpiring: "密钥即将过期", PeriodEnded: "运行周期已结束", FailureSpike: "调用失败率过高",
 		AllFailing: "所有账号同时异常", SubscriptionExpiring: "E5 订阅即将到期", SubscriptionStatus: "E5 订阅状态变化",
-		SubscriptionRenewed: "E5 订阅已续期", UpdateAvailable: "有新版本可以升级", Test: "测试消息", Digest: "免打扰期间的告警汇总",
+		SubscriptionRenewed: "E5 订阅已续期", UpdateAvailable: "有新版本可以升级", Test: "测试消息", Digest: "免打扰期间的告警汇总", DailySummary: "每日摘要",
+		"state.ok": "正常", "state.needs_attention": "需要处理", "state.paused": "已自动暂停", "state.paused_by_user": "已手动暂停", "state.period_ended": "运行周期已结束",
 		"level.info": "提示", "level.warning": "警告", "level.critical": "严重",
 	},
 	"en": {
@@ -94,7 +110,8 @@ var labels = map[string]map[string]string{
 		Stale: "No successful call for a long time", SecretExpiring: "Client secret expiring",
 		PeriodEnded: "Run period ended", FailureSpike: "High failure rate", AllFailing: "All accounts failing",
 		SubscriptionExpiring: "E5 subscription expiring", SubscriptionStatus: "E5 subscription status changed",
-		SubscriptionRenewed: "E5 subscription renewed", UpdateAvailable: "A new version is available", Test: "Test message", Digest: "Alerts held during quiet hours",
+		SubscriptionRenewed: "E5 subscription renewed", UpdateAvailable: "A new version is available", Test: "Test message", Digest: "Alerts held during quiet hours", DailySummary: "Daily summary",
+		"state.ok": "OK", "state.needs_attention": "needs attention", "state.paused": "paused automatically", "state.paused_by_user": "paused by you", "state.period_ended": "run period ended",
 		"level.info": "Info", "level.warning": "Warning", "level.critical": "Critical",
 	},
 }
@@ -179,12 +196,73 @@ func NewData(ev Event, lang, host string, loc *time.Location) Data {
 	if ev.Origin != "" {
 		d.OriginLabel = EventLabel(ev.Origin, lang)
 	}
+	for _, r := range ev.Summary {
+		d.Summary = append(d.Summary, summaryData(r, lang, loc))
+	}
 	for _, it := range ev.Items {
 		x := NewData(it, lang, host, loc)
 		d.Digest = append(d.Digest, DigestItem{Event: x.Event, EventLabel: x.EventLabel, Level: x.Level,
 			LevelLabel: x.LevelLabel, Account: x.Account, Tenant: x.Tenant, Message: x.Message, Time: x.Time, Hint: x.Hint})
 	}
 	return d
+}
+
+// summaryData turns a summary row into the text a message shows.
+func summaryData(r SummaryRow, lang string, loc *time.Location) SummaryData {
+	zh := lang == "zh"
+	d := SummaryData{Account: r.Account, OK: r.OK, Failed: r.Failed, Throttled: r.Throttled, State: r.State,
+		StateLabel: labels[lang]["state."+r.State], PausedAPIs: r.PausedAPIs, LastSuccess: "-"}
+	if d.StateLabel == "" {
+		d.StateLabel = r.State
+	}
+	if !r.LastSuccess.IsZero() {
+		d.LastSuccess = r.LastSuccess.In(loc).Format("01-02 15:04")
+	}
+	if r.HasSubDays {
+		d.SubDays = strconv.Itoa(r.SubDays)
+	}
+	var b strings.Builder
+	if zh {
+		fmt.Fprintf(&b, "%s：成功 %d，失败 %d", r.Account, r.OK, r.Failed)
+		if r.Throttled > 0 {
+			fmt.Fprintf(&b, "，限流 %d", r.Throttled)
+		}
+		fmt.Fprintf(&b, "；最近成功 %s；%s", d.LastSuccess, d.StateLabel)
+		if r.PausedAPIs > 0 {
+			fmt.Fprintf(&b, "；%d 个 API 已暂停 24 小时", r.PausedAPIs)
+		}
+		if r.HasSubDays {
+			fmt.Fprintf(&b, "；E5 订阅%s", subDaysText(r.SubDays, true))
+		}
+	} else {
+		fmt.Fprintf(&b, "%s: %d ok, %d failed", r.Account, r.OK, r.Failed)
+		if r.Throttled > 0 {
+			fmt.Fprintf(&b, ", %d throttled", r.Throttled)
+		}
+		fmt.Fprintf(&b, "; last success %s; %s", d.LastSuccess, d.StateLabel)
+		if r.PausedAPIs > 0 {
+			fmt.Fprintf(&b, "; %d APIs paused for 24 h", r.PausedAPIs)
+		}
+		if r.HasSubDays {
+			fmt.Fprintf(&b, "; E5 subscription %s", subDaysText(r.SubDays, false))
+		}
+	}
+	d.Line = b.String()
+	return d
+}
+
+func subDaysText(days int, zh bool) string {
+	switch {
+	case days < 0 && zh:
+		return fmt.Sprintf("已过期 %d 天", -days)
+	case days < 0:
+		return fmt.Sprintf("ended %d days ago", -days)
+	case zh:
+		return fmt.Sprintf("还剩 %d 天", days)
+	case days == 1:
+		return "1 day left"
+	}
+	return fmt.Sprintf("%d days left", days)
 }
 
 // mdEscaper backslash-escapes what Markdown (WeCom, DingTalk, Discord, Server
@@ -406,6 +484,13 @@ func SampleEvent(kind string, now time.Time) Event {
 	case Test:
 		ev.Account = ""
 		ev.Message = "this is a test alert; alerts are working"
+	case DailySummary:
+		ev.Account = ""
+		ev.Message = "daily summary: 2 accounts, 41 calls ok, 1 failed, 2 throttled in the last 24 hours"
+		ev.Summary = []SummaryRow{
+			{Account: "demo", OK: 29, Failed: 0, Throttled: 2, LastSuccess: now.Add(-25 * time.Minute), State: SumOK, SubDays: 87, HasSubDays: true},
+			{Account: "demo-2", OK: 12, Failed: 1, LastSuccess: now.Add(-3 * time.Hour), State: SumNeedsAttention, PausedAPIs: 2},
+		}
 	case Digest:
 		ev.Account = ""
 		ev.Message = "2 alerts were held during the quiet hours"

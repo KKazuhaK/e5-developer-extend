@@ -2,7 +2,8 @@
 {{define "body"}}{{if .Digest}}**{{.EventLabel | md}} · {{len .Digest}} alerts**{{range .Digest}}
 [{{.LevelLabel}}] **{{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}} — {{.Message | md}}{{end}}
 {{.Time | md}} · {{.Host | md}}{{else}}**[{{.LevelLabel}}] {{.EventLabel | md}}**{{if .Account}} · {{.Account | md}}{{end}}
-{{.Message | md}}{{if .Rounds}}
+{{.Message | md}}{{range .Summary}}
+{{.Line | md}}{{end}}{{if .Rounds}}
 Failure rate {{.FailRate}}: {{.Failures}} failures over the last {{.Rounds}} rounds{{end}}{{if .Origin}}
 Resolved: {{.OriginLabel | md}}{{end}}{{if .Hint}}
 Next step: {{.Hint | md}}{{end}}
