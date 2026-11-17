@@ -26,7 +26,7 @@ interval_max = "2h"         # upper bound
 apis_per_round_min = 3
 apis_per_round_max = 8
 random_order = true
-work_days = ["mon", "tue", "wed", "thu", "fri"]   # empty means every day
+work_days = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]   # every day; e.g. ["mon", "tue", "wed", "thu", "fri"] for weekdays only
 work_start = "08:00"        # local time; start == end means all day
 work_end = "22:00"
 # period_start = 2026-12-01 # optional run period
