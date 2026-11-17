@@ -1,71 +1,123 @@
 # E5 Developer Extend
 
-跨平台的 Microsoft 365 E5 开发者订阅活跃工具：定时、随机地调用 Microsoft Graph 只读接口，
-让开发者租户保持有开发活动。支持 **Windows、macOS、Linux**，提供 **GUI** 和 **CLI** 两种形态，
-设计目标是**长期在后台稳定运行**。
+**English** | [简体中文](README.zh-CN.md)
 
-> **状态**：第一版 [v0.1.0](https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.1.0) 已发布，变更见 [CHANGELOG.md](CHANGELOG.md)。设计文档见 [`docs/`](docs/)。
+**Keep your Microsoft 365 E5 developer tenant active.**
 
-*A cross-platform (Windows / macOS / Linux) tool that keeps a Microsoft 365 E5 developer tenant active by
-calling read-only Microsoft Graph APIs on a randomized schedule. GUI and CLI.*
+[![Release](https://img.shields.io/github/v/release/KKazuhaK/e5-developer-extend)](https://github.com/KKazuhaK/e5-developer-extend/releases/latest)
+[![License: MIT](https://img.shields.io/github/license/KKazuhaK/e5-developer-extend)](LICENSE)
 
-## 功能
+E5 Developer Extend calls read-only Microsoft Graph APIs on a randomized schedule so that your Microsoft 365 E5
+developer tenant keeps seeing development activity. It runs on **Windows, macOS and Linux**, as a **desktop app**
+(the easy way) or as a **command-line program** for servers, and it is built to run in the background for a long time.
 
-- **登录方式**：浏览器登录、设备码（适合服务器）、Client Secret（应用身份），以及账号密码登录（仅适用于没开 MFA 的账号，不推荐）
-- **API 库**：按分类勾选的 Graph 只读接口，按令牌里实际有的权限自动筛选
-- **调度**：随机抽取、随机顺序、随机参数；工作日和工作时段；断网、睡眠唤醒后自动恢复
-- **多账号**：每个账号单独的状态、日志和统计；连续失败自动暂停（auto-pause）
-- **长期运行**：开机自启、后台服务（systemd / launchd / Windows 服务 / Docker）、健康检查（`e5extend doctor`）、
-  令牌和 Secret 到期提醒、桌面通知和多渠道告警（Telegram、邮件、企业微信、飞书、钉钉、Discord、Slack、Bark、ntfy、Server 酱、Webhook）
-- **体积小**：CLI 约 10 MB，单个可执行文件，无运行时依赖
+![The overview page: engine status, the E5 subscription card and two healthy accounts](docs/images/en/overview.webp)
 
-## 快速开始
+> **Please read first**
+>
+> - Microsoft does not publish how it decides to renew a developer subscription. This tool **cannot guarantee** a
+>   renewal; it only gives the tenant regular, natural-looking activity and tells you what happened.
+> - It only **reads**: it never writes, sends or deletes anything, and response bodies are not stored.
+> - It is not affiliated with Microsoft. Microsoft 365, Microsoft Graph and Entra are trademarks of Microsoft.
+> - Nothing is called while the computer is off or asleep. For long-term use, run it on an always-on machine or server.
 
-从 [Releases](https://github.com/KKazuhaK/e5-developer-extend/releases) 下载：Windows 安装包、macOS dmg、Linux deb/rpm（桌面版），
-或者各平台的命令行压缩包和 Docker 镜像。选哪个文件、未签名的包怎么打开，见 [docs/user/install.md](docs/user/install.md)。
+## Features
 
-桌面版装好后从开始菜单 / 应用程序 / 应用菜单打开 **E5 Developer Extend**；命令行版运行向导：
+- **Automatic app registration**: sign in once as the tenant administrator and the app is created in your tenant with
+  read-only permissions and admin consent. No trip to the Entra portal. (Hand-made registrations work too.)
+- **API recommendations**: after sign-in, each account is checked for what it can really use (mailbox, OneDrive,
+  Teams, SharePoint) and the matching API categories are ticked for you.
+- **Subscription expiry tracking**: the end date and status of the E5 subscription, with renewal history and warnings
+  30, 7 and 1 days before the end.
+- **Alerts**: Telegram, email, WeCom, Feishu, DingTalk, Discord, Slack, Bark, ntfy, ServerChan and generic webhooks,
+  with noise control (cooldown, quiet hours) and message templates.
+- **Backup and migration**: one encrypted file moves everything to another machine, with no new sign-in.
+- **Runs in the background**: start at login, a real background service (systemd / launchd / Windows scheduled task / Docker),
+  recovery after network loss or sleep, and a health check (`doctor`) that explains what to fix.
+- **Randomized and gentle**: random APIs, order and parameters, working days and hours, several accounts, automatic
+  pause after repeated failures. Sign-in by browser, device code or client secret.
+- **Small**: the command-line program is about 10 MB, a single executable with no runtime dependencies.
+
+## Quick start: the desktop app
+
+**1. Download and install.** Get the file for your system from the
+[latest release](https://github.com/KKazuhaK/e5-developer-extend/releases/latest). The packages are not code-signed yet,
+so Windows and macOS ask for one extra click the first time ([how](docs/user/install.md)).
+
+| System | Download (replace `<version>`) |
+|---|---|
+| Windows 10/11 | `E5-Developer-Extend_<version>_windows_amd64_setup.exe` (ARM: `arm64`) |
+| macOS 12+ | `E5-Developer-Extend_<version>_macos_universal.dmg` (Intel and Apple silicon) |
+| Ubuntu 24.04+ / Debian 13+ | `e5extend_<version>-1_amd64.deb` **and** `e5extend-desktop_<version>-1_amd64.deb` |
+| Fedora 39+ | `e5extend-<version>-1.x86_64.rpm` **and** `e5extend-desktop-<version>-1.x86_64.rpm` |
+
+**2. Open it** from the Start menu, Applications or the app menu: **E5 Developer Extend**.
+
+**3. Add an account.** Go to **Accounts → Add account** and keep **Create the app registration automatically**
+(recommended). Give the account a name and choose **Next**.
+
+<img src="docs/images/en/wizard-method.webp" alt="Add account, step 1: create the app registration automatically" width="720">
+
+**4. Sign in as the tenant administrator once.** Open the link, type the code, sign in. The page says
+"Microsoft Graph Command Line Tools": that is Microsoft's own tool, used only this one time. Then check the plan and
+choose **Confirm and create**.
+
+<img src="docs/images/en/admin-signin.webp" alt="The administrator sign-in step with a device code" width="720">
+
+**5. Pick the APIs and finish.** The account signs in with the new app, then the APIs are suggested with
+"Recommended" badges. Accept them, run the test, finish. In **Settings** turn on **Keep running in the background**
+and you are done.
+
+<img src="docs/images/en/api-categories.webp" alt="API categories with recommendation badges" width="720">
+
+The full walk-through, with alerts, backup and the subscription card, is in the
+[getting-started guide](docs/user/getting-started.en.md).
+
+## For servers and the command line
+
+No desktop needed. Install the command-line package (or the tar.gz / zip, or the Docker image), then run the wizard:
 
 ```bash
-e5extend init                    # 交互式向导：配置、账号、登录、试跑、告警、后台服务、体检
+e5extend init      # config, account, sign-in, a first run, alerts, background service, health check
 ```
 
-或者分步：`config init` → `account add` → `account login` → `run-now` → `service install` → `doctor`。
-详见 [docs/user/getting-started.md](docs/user/getting-started.md)。
+Or step by step: `config init` → `account add` → `account login` → `run-now` → `service install` → `doctor`.
+For Docker: `docker pull ghcr.io/kkazuhak/e5-developer-extend:<version>`, see [docs/user/docker.md](docs/user/docker.md)
+(in Chinese). The CLI part of the guide is the last section of the
+[getting-started guide](docs/user/getting-started.en.md#command-line-and-servers).
 
-## 文档
+## Documentation
 
-| 文档 | 内容 |
+The detailed user documentation is written in **Chinese**; the English
+[getting-started guide](docs/user/getting-started.en.md) covers the same path from install to alerts.
+
+| Document | Contents |
 |---|---|
-| [docs/user/install.md](docs/user/install.md) | 下载和安装（各平台、升级、卸载） |
-| [docs/user/getting-started.md](docs/user/getting-started.md) | 五分钟上手 |
-| [docs/user/app-registration.md](docs/user/app-registration.md) | Entra 应用注册（委托身份和应用身份） |
-| [docs/user/background.md](docs/user/background.md) | 各平台后台运行：Linux、macOS、Windows、Docker |
-| [docs/user/docker.md](docs/user/docker.md) | Docker 和 compose |
-| [docs/user/backup.md](docs/user/backup.md) | 备份与迁移：用一个文件搬到另一台机器 |
-| [docs/user/notifications.md](docs/user/notifications.md) | 通知渠道：Telegram、邮件、企业微信、飞书、钉钉等的设置方法，降噪与自定义模板 |
-| [docs/user/faq.md](docs/user/faq.md) | 常见问题 |
-| [docs/user/troubleshooting.md](docs/user/troubleshooting.md) | 按 `doctor` 检查项排错 |
-| [docs/research.md](docs/research.md) | 技术选型与决定 |
-| [docs/architecture.md](docs/architecture.md) | 架构、模块、长期后台运行设计 |
-| [docs/graph-api-catalog.md](docs/graph-api-catalog.md) | Graph API 库与权限（只读部分已对照官方文档核实，部分条目待实测） |
-| [docs/dev-setup.md](docs/dev-setup.md) | 开发环境搭建 |
+| [docs/user/getting-started.en.md](docs/user/getting-started.en.md) | Getting started, GUI first (English) |
+| [docs/user/getting-started.md](docs/user/getting-started.md) | Getting started (Chinese) |
+| [docs/user/install.md](docs/user/install.md) | Download and install on each system, upgrade, uninstall |
+| [docs/user/app-registration.md](docs/user/app-registration.md) | Entra app registration, automatic or by hand |
+| [docs/user/background.md](docs/user/background.md) | Running in the background: Linux, macOS, Windows, Docker |
+| [docs/user/docker.md](docs/user/docker.md) | Docker and compose |
+| [docs/user/backup.md](docs/user/backup.md) | Backup and migration |
+| [docs/user/notifications.md](docs/user/notifications.md) | Alert channels, noise control, templates |
+| [docs/user/faq.md](docs/user/faq.md) | FAQ |
+| [docs/user/troubleshooting.md](docs/user/troubleshooting.md) | Troubleshooting by `doctor` check |
+| [docs/architecture.md](docs/architecture.md), [docs/research.md](docs/research.md), [docs/dev-setup.md](docs/dev-setup.md) | Design and development (Chinese) |
+| [CHANGELOG.md](CHANGELOG.md) | What changed (Chinese) |
 
-## 构建（CLI）
+## Build from source
 
-需要 Go 1.26 或更新版本。
+Go 1.26 or newer. The command-line program:
 
 ```bash
 go build -o bin/e5extend ./cmd/e5extend
 ./bin/e5extend version
 ```
 
-## 说明
+The desktop app (Wails v3, React and TypeScript in `gui/frontend`) and the screenshot script are described in
+[docs/dev-setup.md](docs/dev-setup.md) and [scripts/screenshots/README.md](scripts/screenshots/README.md).
 
-- 微软没有公开开发者订阅续期的判定标准。本工具**不保证**订阅一定能续期。
-- 电脑关机或睡眠期间不会发出调用。需要长期使用的话，建议部署在常开的机器或服务器上。
-- 本项目与 Microsoft 没有关联。Microsoft 365、Microsoft Graph、Entra 是 Microsoft 的商标。
-
-## 许可证
+## License
 
 [MIT](LICENSE)
