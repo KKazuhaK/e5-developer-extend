@@ -87,6 +87,7 @@ func (c *Config) Validate() error {
 		}
 		seenEv[ev] = true
 	}
+	validateNotify(&c.Notify, add)
 	switch c.Vault.Backend {
 	case BackendAuto, BackendKeyring, BackendFile:
 	default:

@@ -75,10 +75,25 @@ type Notify struct {
 	StaleAfter string `toml:"stale_after"`
 	// Events lists the alert kinds to send; empty means all of them.
 	Events []string `toml:"events"`
+	// Cooldown is how long the same alert for the same account is not sent
+	// again; critical alerts use half of it. "0" turns it off.
+	Cooldown string `toml:"cooldown"`
+	// QuietHours is a local time window such as "23:00-08:00"; during it only
+	// critical alerts are sent and the rest is sent as one summary afterwards.
+	// Empty turns it off.
+	QuietHours string `toml:"quiet_hours"`
+	// SpikeRounds, SpikeRate and SpikeMinFailures define a failure_spike:
+	// at least SpikeRate of the calls and at least SpikeMinFailures calls
+	// failed over the last SpikeRounds rounds.
+	SpikeRounds      int     `toml:"spike_rounds"`
+	SpikeRate        float64 `toml:"spike_rate"`
+	SpikeMinFailures int     `toml:"spike_min_failures"`
+	// Channels are the destinations. Their secrets live in the vault.
+	Channels []Channel `toml:"channels"`
 }
 
 // NotifyEvents are the alert kinds accepted in Notify.Events.
-var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended"}
+var NotifyEvents = []string{"needs_attention", "recovered", "auto_paused", "stale", "secret_expiring", "period_ended", "failure_spike", "all_failing"}
 
 // DefaultStaleAfter is the default for Notify.StaleAfter.
 const DefaultStaleAfter = "72h"
@@ -123,7 +138,11 @@ func Default() *Config {
 			WorkStart:       "08:00",
 			WorkEnd:         "22:00",
 		},
-		Notify:   Notify{StaleAfter: DefaultStaleAfter, Events: []string{}},
+		Notify: Notify{
+			StaleAfter: DefaultStaleAfter, Events: []string{}, Cooldown: DefaultCooldown,
+			SpikeRounds: DefaultSpikeRounds, SpikeRate: DefaultSpikeRate, SpikeMinFailures: DefaultSpikeMinFailures,
+			Channels: []Channel{},
+		},
 		Vault:    Vault{Backend: BackendAuto},
 		Accounts: []Account{},
 	}
