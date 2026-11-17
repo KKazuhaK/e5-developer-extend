@@ -68,7 +68,7 @@ export const zh = {
 
   "account.fixPrefix": "建议：",
   "freq.app": "改用应用身份（推荐）：不受用户登录策略影响，可以一直在后台运行。",
-  "freq.password": "账号密码登录，仅限没有 MFA 的账号。密码会加密保存在本机。E5 开发者租户通常强制 MFA，所以这条路多半走不通。",
+  "freq.password": "账号密码登录，仅限没有 MFA 的账号。密码会加密保存在本机。E5 开发者租户通常强制 MFA，登录频率策略常和 MFA 一起出现，所以这条路多半走不通，优先用应用身份。",
   "freq.exclude": "请租户管理员把本应用注册从条件访问策略中排除（Entra > 保护 > 条件访问），然后重新登录。",
   "freq.switch": "改用应用身份",
   "account.lastSuccess": "上次成功",

@@ -120,7 +120,7 @@ export function AccountWizard({ mode, name, startStep, from, onClose }: { mode: 
     api.accounts
       .get(from)
       .then((a) => {
-        setInput((i) => ({ ...i, name: appIdentityName(from), auth: "client_secret", username: a.username }));
+        setInput((i) => ({ ...i, name: appIdentityName(from, snapshot.data?.accounts.map((x) => x.name) ?? []), auth: "client_secret", username: a.username }));
         setLoaded(true);
       })
       .catch((e) => setLoadError(errMsg(e)));

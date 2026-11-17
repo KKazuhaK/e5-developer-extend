@@ -69,5 +69,14 @@ export const SIGN_IN_FREQUENCY_CODE = "AADSTS70043";
 export const isSignInFrequency = (reason: string | null | undefined): boolean => !!reason && reason.includes(SIGN_IN_FREQUENCY_CODE);
 /** The reason without the long command-line hint that follows its first "; ". */
 export const reasonHead = (reason: string): string => reason.split("; ")[0];
-/** Name suggested for the app identity that replaces `name`. */
-export const appIdentityName = (name: string): string => `${name}-app`.slice(0, 32);
+/**
+ * Name suggested for the app identity that replaces `name`: `<name>-app`, with the base cut so that
+ * the suffix survives the 32-character limit, and a counter when that name is already taken.
+ */
+export function appIdentityName(name: string, existing: readonly string[] = []): string {
+  const taken = new Set([name, ...existing]);
+  const make = (suffix: string) => name.slice(0, 32 - suffix.length) + suffix;
+  let candidate = make("-app");
+  for (let n = 2; taken.has(candidate); n++) candidate = make(`-app${n}`);
+  return candidate;
+}

@@ -69,7 +69,7 @@ export const en: Dict = {
 
   "account.fixPrefix": "Fix: ",
   "freq.app": "Switch to the app identity (recommended): it is not affected by user sign-in policies, so it keeps running.",
-  "freq.password": "Password sign-in, only if the account has no MFA. The password is stored encrypted on this machine. E5 developer tenants usually enforce MFA, so this rarely works.",
+  "freq.password": "Password sign-in, only if the account has no MFA. The password is stored encrypted on this machine. E5 developer tenants usually enforce MFA, and a sign-in frequency policy often comes with MFA, so this rarely works. Prefer the app identity.",
   "freq.exclude": "Ask the tenant administrator to exclude this app registration from the Conditional Access policy (Entra > Protection > Conditional Access), then sign in again.",
   "freq.switch": "Switch to app identity",
   "account.lastSuccess": "Last success",

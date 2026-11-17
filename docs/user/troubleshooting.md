@@ -41,7 +41,7 @@
 - 需要登录（失败）：`e5extend account login <名称>`。
 - `sign-in is cut off by a Conditional Access sign-in frequency policy (AADSTS70043)`（失败）：租户的条件访问“登录频率”策略把刷新令牌限制在几个小时内，
   重新登录只能再撑几个小时。按顺序：改用应用身份 `e5extend account add <名称>-app --auto --auth client_secret`（不受用户登录策略影响）；
-  账号没有 MFA 时改用账号密码（程序会自动重新登录，E5 开发者租户通常有 MFA，多半不行）；
+  账号确实没有 MFA 时才用账号密码（登录频率策略常和 MFA 一起出现，多半不行，优先用应用身份）；
   或让管理员在条件访问里排除本应用注册，再 `e5extend account login <名称>`。详见 [常见问题](faq.md)。
 - 凭据错误（失败）：Client Secret 错或过期，`e5extend account set-secret <名称>`；也检查 Client ID。
 - 需要管理员同意（失败）：在应用注册的“API 权限”里点“授予管理员同意”。

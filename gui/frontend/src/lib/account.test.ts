@@ -95,6 +95,21 @@ describe("sign-in frequency cutoff", () => {
   });
   it("suggests a valid name for the app identity", () => {
     expect(appIdentityName("main")).toBe("main-app");
-    expect(appIdentityName("x".repeat(32))).toHaveLength(32);
+  });
+  it("keeps the suffix and a different name at 32 characters", () => {
+    const long = "x".repeat(32);
+    const n = appIdentityName(long);
+    expect(n).toHaveLength(32);
+    expect(n.endsWith("-app")).toBe(true);
+    expect(n).not.toBe(long);
+    expect(appIdentityName("x".repeat(28) + "-app")).not.toBe("x".repeat(28) + "-app");
+  });
+  it("counts up when the name is taken", () => {
+    expect(appIdentityName("main", ["main-app"])).toBe("main-app2");
+    expect(appIdentityName("main", ["main-app", "main-app2"])).toBe("main-app3");
+    const taken = ["x".repeat(28) + "-app"];
+    const n = appIdentityName("x".repeat(32), taken);
+    expect(n).toHaveLength(32);
+    expect(taken).not.toContain(n);
   });
 });
