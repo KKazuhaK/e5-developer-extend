@@ -27,9 +27,11 @@ function messageParams(lang: Lang, params: Record<string, string> | null | undef
   const out: TParams = { ...(params ?? {}) };
   if (params?.count !== undefined && params.count !== "" && !Number.isNaN(Number(params.count))) out.count = Number(params.count);
   if (params?.seconds !== undefined) {
-    const d = formatDuration(Number(params.seconds), lang);
-    out.dur = d;
-    out.age = d;
+    const s = Math.max(0, Number(params.seconds) || 0);
+    out.dur = formatDuration(s, lang);
+    // An age reads like the CLI's: whole minutes once it is a minute or more,
+    // and never negative when the clock is a little off.
+    out.age = formatDuration(s >= 60 ? Math.round(s / 60) * 60 : s, lang);
   }
   if (params?.offset !== undefined) out.when = whenPhrase(lang, Number(params.offset));
   return out;
