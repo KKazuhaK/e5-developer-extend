@@ -99,7 +99,7 @@ shred -u e5extend-release-signing.key
 
 ### 3.3 频率和位置
 
-- 引擎（后台服务或托盘里的引擎）的每个 tick 看 `update.json`：距上次成功检查满 24 小时才请求（失败时按退避）。检查在独立 goroutine 里进行，不拖慢轮次。
+- 引擎（后台服务或托盘里的引擎）启动 1 分钟后（等网络就绪）开始，每个 tick 看 `update.json`：距上次成功检查满 24 小时才请求（失败时按退避）。检查在独立 goroutine 里进行，不拖慢轮次。
 - 命令行 `e5extend update check` 和窗口里的“立即检查”总是请求（`force`），也更新 `update.json`。窗口打开时若缓存已超过一天且没开 `check = false`，会静默检查一次（引擎没在运行的机器上也能提示）。
 - `update.json` 的内容：`channel`、`etag`、`checked_at`、`attempted_at`、`not_before`、`failures`、`latest`（标签、版本、页面地址、是否预发布、发布时间）。
   损坏或版本更新的文件当作空缓存。换了通道就重新检查。离线时一切照旧，只是不更新。
@@ -165,13 +165,13 @@ channel = "stable"    # stable | prerelease
 `UpdateService`（Wails 服务），方法：
 
 - `Info() UpdateInfo`：不联网，读 `update.json` 和安装方式。字段：当前版本、最新版本、是否有新版本、发布页、通道、上次检查时间、`plan`（`mode` auto/manual、`reason`、`kind`）、`dev`、`checkEnabled`。
-- `Check() UpdateInfo`：联网检查（强制），返回新的信息；失败时 reject，错误里带原因（限流、网络）。
+- `Check(force bool) UpdateInfo`：联网检查。`force = true` 是“立即检查”；`false` 是窗口打开时的那次，只在每日检查到期且 `check = true` 时才真正请求。失败时 reject，错误里带原因（限流、网络），上次的结果仍可通过 `Info` 读到。
 - `Install() error`：立即返回，在后台升级；进度和结果通过事件推送。同一时间只允许一个升级（`Backend.begin()` 保证窗口关闭时等它做完）。
-- `Restart() error`：升级完成后重启托盘/应用（见第 4 节）。
-- `OpenReleasePage()`：打开发布页。
+- `Restart() error`：升级完成后重启托盘/应用（见第 4 节）；后端由 `window.go` 注入。
+- 打开发布页用已有的 `system.openExternal`。
 
-事件 `update:progress`：`{stage: "download"|"verify"|"install"|"restart"|"done"|"error", file, done, total, result?, error?}`。
-`result` 就是 `update.Outcome`（步骤、手动命令、是否需要退出/重启）。Windows 安装包：先推送 `done`，约 1.5 秒后窗口进程退出，让安装程序接手。
+事件 `update:progress`：`{stage: "download"|"verify"|"install"|"done"|"error", file, done, total, result, code, error}`；`code` 是稳定的错误码（`no_signature`、`no_key`、`bad_signature`、`checksum`、`manual_<原因>`、`other`），界面按它显示中文。
+`result` 就是 `ops.UpdateResult`（`update.Outcome` 加上后台服务重启的结果）（步骤、手动命令、是否需要退出/重启）。Windows 安装包：先推送 `done`，约 1.5 秒后窗口进程退出，让安装程序接手。
 
 `ops` 层（`internal/ops/update.go`）提供命令行和 GUI 共用的 `UpdateInfo`、`UpdateCheck`、`UpdateInstall`，负责：读配置（代理、通道、是否开启）、构造 `update.Service` 和 `update.Installer`（注入真实的 exec、`os.Executable`、文件系统）、升级后重启服务。测试里全部注入假的。
 

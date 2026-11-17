@@ -4,6 +4,13 @@
 
 ## 未发布
 
+### 新增
+
+- 检查更新和一键升级。引擎每天查一次 GitHub 上有没有新版本（走配置的代理，支持 `ETag`，遇到限流或离线按退避重试，开发构建从不检查），结果存在数据目录的 `update.json`。`config.toml` 新增 `[update]`：`check = true`（默认；`false` 只关闭每天的自动检查，手动检查不受影响）、`channel = "stable"`（默认）或 `"prerelease"`。新增告警事件 `update_available`（提示级别，每个版本只通知一次，走现有渠道、过滤、免打扰和重试）；`doctor` 在有新版本时多一行 `update`（不影响退出码）；`e5extend update check [--json]`、`e5extend update install [--yes]`。
+- 升级前验证发布签名：发布流水线用 Ed25519 密钥给 `SHA256SUMS` 签名（minisign 兼容格式，文件 `SHA256SUMS.minisig`，可用 `minisign -Vm SHA256SUMS -P <公钥>` 自己验证），仓库密钥 `RELEASE_SIGNING_KEY` 不存在时发布照常成功、只是没有签名，程序也就只提示新版本并给出发布页。公钥编进程序（`internal/update/pubkey.go`，目前是占位符，**仓库所有者需要运行一次 `go run scripts/release/gen-signing-key.go` 并设置密钥**，步骤见 [docs/design/update.md](docs/design/update.md) 和 [docs/design/release.md](docs/design/release.md)）。
+- 按安装方式升级：Windows 安装包（静默运行新安装包）、Windows 命令行 zip（改名替换，正在运行的文件先改名为 `.old`）、macOS 应用（挂载 dmg 替换 `.app`）、macOS / Linux 的 tar 包（原子替换）、Linux deb / rpm（命令行包和桌面包一起装；桌面版用 `pkexec`，命令行不是 root 时给出确切的 `sudo` 命令）；Docker 只通知。升级后自动重启后台服务（服务管理器新增 `Restart`），先验证签名和 SHA-256，任何一步失败都不会改动现有程序。详见 [docs/design/update.md](docs/design/update.md) 和 [安装 → 升级](docs/user/install.md#升级)。
+- 桌面版：概览页新版本横幅（版本号、发布说明、“立即升级”带进度、“稍后”按版本隐藏）、“关于”页的当前/最新版本和“立即检查”、托盘菜单“升级到 x.y.z”；Mock 变体 `?update=available|downloading|error|manual|restart|none`。
+
 ## [0.2.0] - 2026-11-16
 
 产品改名为 **E5 Developer Extend**（命令行 `e5extend`），并新增自动创建应用注册、API 推荐、订阅到期检测、异常通知等功能。

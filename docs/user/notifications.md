@@ -159,6 +159,7 @@ e5extend notify channel add mail --type email --preset gmail \
 | `subscription_expiring` | 警告 / 严重 | 关注的订阅离到期（`nextLifecycleDateTime`）30 天提醒一次（警告），7 天和 1 天各一次（严重），到期当天还会再提醒；续期后重新计 |
 | `subscription_status` | 严重 / 提示 | 订阅状态从 `Enabled` 变成 `Warning`、`Suspended`、`LockedOut` 或 `Deleted`（严重），或恢复为 `Enabled`（提示） |
 | `subscription_renewed` | 提示 | 订阅的到期时间向后移动了，写明从哪天移到哪天 |
+| `update_available` | 提示 | 有新版本可以升级，写明新旧版本和发布页；**每个版本只通知一次**（升级后重新计，再出新版本会再通知）。每天检查一次，`config.toml` 的 `[update] check = false` 可关闭检查 |
 | `recovered` | 提示 | 之前的问题恢复了；`failure_spike` 解除时会写明“解除的是调用失败率过高” |
 | `period_ended` | 提示 | 运行期限结束 |
 
