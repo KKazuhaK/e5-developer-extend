@@ -27,6 +27,9 @@ type AccountInput struct {
 	Categories    []string `json:"categories"`
 	SecretExpires string   `json:"secretExpires"`
 	Secret        string   `json:"secret,omitempty"`
+	// UseStoredSecret takes the secret already in the vault under this
+	// account's name (put there by automatic app setup) instead of Secret.
+	UseStoredSecret bool `json:"useStoredSecret,omitempty"`
 }
 
 // Account converts the input into a config entry (without the secret).
@@ -96,7 +99,7 @@ func (o *Ops) AddAccount(ctx context.Context, in AccountInput) error {
 	if err := checkCategories(acct.Categories); err != nil {
 		return err
 	}
-	if acct.NeedsSecret() && in.Secret == "" {
+	if acct.NeedsSecret() && in.Secret == "" && !in.UseStoredSecret {
 		return errors.New("the secret must not be empty")
 	}
 
@@ -118,7 +121,16 @@ func (o *Ops) AddAccount(ctx context.Context, in AccountInput) error {
 	}
 
 	var v *vault.Vault
-	if acct.NeedsSecret() {
+	if acct.NeedsSecret() && in.Secret == "" {
+		// UseStoredSecret: the secret is already in the vault.
+		sv, err := o.OpenVault(cfg)
+		if err != nil {
+			return err
+		}
+		if ok, _ := sv.Has(vault.SecretKey(acct.Name)); !ok {
+			return fmt.Errorf("no secret is stored for account %q", acct.Name)
+		}
+	} else if acct.NeedsSecret() {
 		if v, err = o.OpenVault(cfg); err != nil {
 			return err
 		}
