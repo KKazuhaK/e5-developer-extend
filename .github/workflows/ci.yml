@@ -4,33 +4,80 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
+
+# A new push to a pull request cancels its stale run; each main push gets its own group and is never cancelled.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # Ignore any go.work file so CI builds only this module.
+  GOWORK: "off"
+
+# The desktop app (package ./gui) needs CGO and GTK on Linux, so only the "gui"
+# and "native" jobs build it. Every other job works on the package list that
+# leaves ./gui out; its pure-Go parts (./gui/services, ./gui/trayhost) stay in.
+# The package list is built with a while-read loop (not mapfile) so it also
+# runs on the old bash 3.2 of macOS runners, and tr removes CR on Windows.
 
 jobs:
-  cli:
-    name: CLI (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      # The desktop app (package ./gui) needs CGO and GTK on Linux, so it is
-      # built by the GUI job. Everything else, including its pure-Go parts
-      # (./gui/services, ./gui/trayhost), is checked here without any GUI libraries.
+      - name: gofmt
+        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
+      - name: go mod tidy
+        run: go mod tidy -diff
       - name: Vet
         shell: bash
-        run: go vet $(go list ./... | grep -v '/gui$' | tr -d '\r')
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          go vet "${pkgs[@]}"
+      # Pinned so a new staticcheck release cannot turn CI red by itself; Dependabot does not track go run versions.
+      - name: staticcheck
+        shell: bash
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 "${pkgs[@]}"
+      # actionlint also runs shellcheck on the run: blocks of every workflow.
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
+
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
       - name: Test
         shell: bash
-        run: go test -race $(go list ./... | grep -v '/gui$' | tr -d '\r')
-      - name: Build
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          go test -race "${pkgs[@]}"
+      - name: Build the CLI
         env:
           CGO_ENABLED: "0"
         run: go build -o bin/ ./cmd/e5extend
@@ -41,26 +88,145 @@ jobs:
             echo "cmd/e5extend must not import Wails"; exit 1
           fi
 
-  gui:
-    name: GUI (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+  # Windows and macOS code is compiled (and vetted, so OS-specific files and
+  # tests are type-checked) from Linux; the native job runs it for real after merge.
+  cross-compile:
+    name: Cross-compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      - uses: actions/setup-node@v6
+      - name: Build the CLI for every target
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          for target in windows/amd64 darwin/amd64 darwin/arm64 linux/arm64; do
+            echo "== $target"
+            GOOS="${target%/*}" GOARCH="${target#*/}" go build -o /dev/null ./cmd/e5extend
+          done
+      - name: Vet the non-GUI packages for Windows and macOS
+        shell: bash
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          for goos in windows darwin; do
+            echo "== $goos"
+            GOOS="$goos" go vet "${pkgs[@]}"
+          done
+
+  gui:
+    name: GUI (Linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: 22
       - name: Install GTK4 and WebKitGTK
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libx11-dev libgtk-4-dev libwebkitgtk-6.0-dev
+      - name: Install the Wails CLI
+        env:
+          CGO_ENABLED: "0"
+        run: go install github.com/wailsapp/wails/v3/cmd/wails3@v3.1.0
+      - name: Generate the frontend bindings
+        run: wails3 generate bindings -d gui/frontend/bindings -ts ./gui
+      - name: Frontend checks and build
+        run: |
+          if [ -f gui/frontend/package.json ]; then
+            cd gui/frontend
+            npm ci
+            npm run typecheck
+            npm test
+            npm run build
+          else
+            echo "gui/frontend/package.json not found; building with the placeholder page"
+          fi
+      - name: Build
+        run: |
+          mkdir -p bin
+          tags=""
+          if [ -f gui/frontend/dist/index.html ]; then tags="frontend"; fi
+          go build -tags "$tags" -o bin/ ./gui
+      - name: Vet
+        run: go vet ./gui/...
+      - name: Test
+        run: go test ./gui/... ./internal/ops/...
+
+  # Known vulnerabilities in the standard library and dependencies that the code reaches.
+  # ./gui is left out because it needs the GTK headers (cgo).
+  vulncheck:
+    name: Vulnerability check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        shell: bash
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 "${pkgs[@]}"
+
+  # The real macOS and Windows runs: slower and costlier, so only after merge
+  # (or by hand), not on every pull request.
+  native:
+    name: Native (${{ matrix.os }})
+    if: github.event_name != 'pull_request'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+      - name: Test the non-GUI packages
+        shell: bash
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          go vet "${pkgs[@]}"
+          go test -race "${pkgs[@]}"
+      - name: Build the CLI
+        shell: bash
+        env:
+          CGO_ENABLED: "0"
+        run: go build -o bin/ ./cmd/e5extend
       - name: Install the Wails CLI
         shell: bash
         env:
@@ -81,7 +247,7 @@ jobs:
           else
             echo "gui/frontend/package.json not found; building with the placeholder page"
           fi
-      - name: Build
+      - name: Build the GUI
         shell: bash
         run: |
           mkdir -p bin
@@ -91,21 +257,8 @@ jobs:
           ldflags=""
           if [ "$RUNNER_OS" = "Windows" ]; then ldflags="-H=windowsgui"; fi
           go build -tags "$tags" -ldflags "$ldflags" -o bin/ ./gui
-      - name: Vet
+      - name: Vet and test the GUI
         shell: bash
-        run: go vet ./gui/...
-      - name: Test
-        shell: bash
-        run: go test ./gui/... ./internal/ops/...
-
-  fmt:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
-        with:
-          go-version-file: go.mod
-      - name: gofmt
-        run: test -z "$(gofmt -l .)" || (gofmt -l . && exit 1)
-      - name: go mod tidy
-        run: go mod tidy -diff
+        run: |
+          go vet ./gui/...
+          go test ./gui/... ./internal/ops/...

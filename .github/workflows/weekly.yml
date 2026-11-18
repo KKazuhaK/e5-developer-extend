@@ -1,0 +1,56 @@
+name: Weekly
+
+# Catches new vulnerabilities in code that has not changed. GitHub disables
+# scheduled workflows after 60 days without repository activity.
+on:
+  schedule:
+    - cron: "23 4 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+env:
+  # Ignore any go.work file so CI builds only this module.
+  GOWORK: "off"
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
+        with:
+          go-version-file: go.mod
+      # ./gui is left out because it needs the GTK headers (cgo).
+      - name: govulncheck
+        shell: bash
+        run: |
+          pkgs=()
+          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 "${pkgs[@]}"
+
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22
+      # --ignore-scripts: install scripts are not needed to audit the lockfile.
+      - name: Install and audit
+        working-directory: gui/frontend
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high

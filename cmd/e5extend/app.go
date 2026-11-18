@@ -78,10 +78,6 @@ func (a *app) authenticator(cfg *config.Config, acct config.Account) (auth.Authe
 	return a.ops().Authenticator(cfg, acct)
 }
 
-func (a *app) findAccount(cfg *config.Config, name string) (*config.Account, error) {
-	return a.ops().FindAccount(cfg, name)
-}
-
 var errInterrupted = errors.New("interrupted")
 
 // readSecret reads a secret without echo from a terminal, or one line from

@@ -38,7 +38,6 @@ const (
 )
 
 type fakeAuth struct {
-	mu     sync.Mutex
 	tok    auth.Token
 	err    error
 	block  chan struct{} // when set, Login waits for it or for the context

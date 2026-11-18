@@ -21,10 +21,9 @@ import (
 	"github.com/KKazuhaK/e5-developer-extend/internal/paths"
 )
 
-const (
-	formatVersion byte = 1
-	keySize            = 32
-)
+const formatVersion byte = 1
+
+const keySize = 32
 
 var (
 	// ErrNotFound means the key has no stored value.

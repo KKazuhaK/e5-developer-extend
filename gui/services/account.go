@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
-	"sync"
 
 	"github.com/KKazuhaK/e5-developer-extend/internal/auth"
 	"github.com/KKazuhaK/e5-developer-extend/internal/catalog"
@@ -211,7 +210,6 @@ func (s *AccountService) CancelLogin(name string) {
 type loginUI struct {
 	emit func(LoginEvent)
 	open func(string) error
-	once sync.Once
 }
 
 var (

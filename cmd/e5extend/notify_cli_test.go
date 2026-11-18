@@ -147,7 +147,7 @@ func TestNotifyChannelCommands(t *testing.T) {
 	if strings.Contains(out, "TOPTOKEN") || strings.Contains(out, "SIGNSECRET") {
 		t.Errorf("add printed a secret: %s", out)
 	}
-	out = e.mustRun(srv.URL+"/slack/OTHERTOKEN\n", "notify", "channel", "add", "sl", "--type", "slack", "--events", "failure_spike,recovered")
+	e.mustRun(srv.URL+"/slack/OTHERTOKEN\n", "notify", "channel", "add", "sl", "--type", "slack", "--events", "failure_spike,recovered")
 	cfg := e.loadCfg()
 	if len(cfg.Notify.Channels) != 2 || cfg.Notify.Channels[0].MinLevel != "warning" || len(cfg.Notify.Channels[1].Events) != 2 {
 		t.Fatalf("config: %+v", cfg.Notify.Channels)

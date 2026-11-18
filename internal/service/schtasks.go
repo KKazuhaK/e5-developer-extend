@@ -333,6 +333,7 @@ func (m *schtasks) installFailure(o InstallOptions, res *Result, err error, regi
 		if o.Headless {
 			return fmt.Errorf("registering a headless task needs an elevated (administrator) prompt: %w", err)
 		}
+		//lint:ignore ST1005 shown to users as written; "Task Scheduler" is a proper name
 		return fmt.Errorf("Task Scheduler refused (access denied); try from an elevated prompt: %w", err)
 	case o.Headless && (batchRightRe.MatchString(low) || strings.Contains(low, "logon failure") ||
 		strings.Contains(low, "logon type") || strings.Contains(low, "batch job")):
