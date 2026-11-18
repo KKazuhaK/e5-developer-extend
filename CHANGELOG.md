@@ -4,6 +4,18 @@
 
 ## 未发布
 
+## [0.3.1] - 2026-11-18
+
+安全修复：用 Go 1.26.11 重新构建。0.3.0 用 Go 1.26.0 构建，带有 Go 标准库中已修复的漏洞（net/http、crypto/tls、crypto/x509、html/template）。功能没有变化。
+
+### 安全
+
+- 构建工具链升级到 Go 1.26.11（`go.mod` 新增 `toolchain go1.26.11`，Docker 构建镜像固定到 `golang:1.26.11`），修复 0.3.0 二进制里 govulncheck 报告的 14 个标准库漏洞。
+
+### 内部
+
+- CI：拉取请求只在 Linux 上测试，并交叉编译 Windows 和 macOS；macOS 和 Windows 的原生测试在 main 上和发布前运行。新增 staticcheck、govulncheck、actionlint、Dependabot 和每周安全检查；所有 action 固定到提交 SHA。
+
 ## [0.3.0] - 2026-11-17
 
 账号可以改名，新增检查更新和一键升级（带发布签名验证），调用节奏新增“密集（同原版强度）”和“急救”预设，API 目录扩充并按 API 统计调用，引擎在限流、接口不可用和自动暂停后的恢复上更稳健，并新增每日摘要和自动暂停开关。
@@ -91,6 +103,7 @@
 - 桌面版 E5 Renew：托盘图标和主窗口（React），中英文界面。
 - 发布包：Windows 安装包、macOS dmg、Linux deb/rpm、命令行压缩包、Docker 镜像（暂未代码签名）。
 
+[0.3.1]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.1
 [0.3.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.3.0
 [0.2.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.2.0
 [0.1.0]: https://github.com/KKazuhaK/e5-developer-extend/releases/tag/v0.1.0
