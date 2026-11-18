@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # The build stage runs on the build machine and cross-compiles, so a
 # multi-platform build (linux/amd64, linux/arm64) needs no emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26 AS build
+# Pinned: the golang image forces GOTOOLCHAIN=local, so go.mod's toolchain line is ignored here.
+FROM --platform=$BUILDPLATFORM golang:1.26.11@sha256:4165ee6bf3b7811fd7b40373290405c83d0167dcb87ee5f29c427cdcef45ff8f AS build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download

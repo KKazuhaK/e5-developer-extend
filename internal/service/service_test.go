@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"flag"
 	"os"
 	"path/filepath"
@@ -227,10 +228,10 @@ func TestPlanFormatHidesSecrets(t *testing.T) {
 
 func TestFakeRunnerRepliesAndFailures(t *testing.T) {
 	f := &FakeRunner{Replies: map[string]Output{"a b": {Stdout: "x"}, "a": {Stdout: "short"}}, FailOn: []string{"bad"}}
-	if o, err := f.Run(nil, "a", "b", "c"); err != nil || o.Stdout != "x" { //nolint:staticcheck
+	if o, err := f.Run(context.TODO(), "a", "b", "c"); err != nil || o.Stdout != "x" {
 		t.Errorf("longest prefix: %v %v", o, err)
 	}
-	if _, err := f.Run(nil, "bad"); err == nil { //nolint:staticcheck
+	if _, err := f.Run(context.TODO(), "bad"); err == nil {
 		t.Error("FailOn ignored")
 	}
 	if got := f.Commands(); len(got) != 2 || got[0] != "a b c" {

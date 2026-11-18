@@ -2,6 +2,8 @@ module github.com/KKazuhaK/e5-developer-extend
 
 go 1.26.0
 
+toolchain go1.26.11
+
 require (
 	github.com/AzureAD/microsoft-authentication-library-for-go v1.10.1
 	github.com/gofrs/flock v0.13.2

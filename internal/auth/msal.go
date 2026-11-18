@@ -100,6 +100,7 @@ func (d *delegated) passwordSignIn(ctx context.Context, gate PasswordGate, silen
 	if err != nil {
 		return Token{}, err
 	}
+	//lint:ignore SA1019 the password sign-in option deliberately uses the username/password flow
 	res, err := c.AcquireTokenByUsernamePassword(withRecovery(ctx), scopes, d.acct.Username, string(pw))
 	if err != nil {
 		err = d.wrap(err)
@@ -191,6 +192,7 @@ func (d *delegated) Login(ctx context.Context, ui LoginUI) (Token, error) {
 		if gerr != nil {
 			return Token{}, fmt.Errorf("account %q: read password from vault: %w", d.acct.Name, gerr)
 		}
+		//lint:ignore SA1019 the password sign-in option deliberately uses the username/password flow
 		res, err = c.AcquireTokenByUsernamePassword(ctx, scopes, d.acct.Username, string(pw))
 	}
 	if err != nil {

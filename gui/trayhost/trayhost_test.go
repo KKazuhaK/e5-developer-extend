@@ -37,7 +37,6 @@ type fakeHost struct {
 	runErr   error
 	snap     ops.Snapshot
 	handover bool
-	running  chan struct{} // closed while our engine runs
 	engineUp bool
 }
 

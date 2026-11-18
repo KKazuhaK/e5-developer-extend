@@ -218,7 +218,7 @@ func TestHandoverWrittenBeforeTheConfigIsAdoptedWhenTheAccountAppears(t *testing
 func TestEntriesOfUnknownAccountsExpire(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
 	f.start()
-	old := time.Now().Add(-25 * time.Hour)
+	old := f.clock.Now().Add(-25 * time.Hour)
 	_ = store.SavePendingImport(f.dir, &store.PendingImport{Mode: store.PendingReplace, Written: old, Accounts: map[string]*store.AccountState{"ghost": importedState(1, time.Time{})}})
 	f.tickWait()
 	f.tickWait()
@@ -240,7 +240,7 @@ func TestEntriesOfUnknownAccountsExpire(t *testing.T) {
 func TestHandoverOlderThanAWeekIsIgnored(t *testing.T) {
 	f := newFixture(t, delegatedAcct("main"))
 	f.start()
-	_ = store.SavePendingImport(f.dir, &store.PendingImport{Mode: store.PendingReplace, Written: time.Now().Add(-8 * 24 * time.Hour),
+	_ = store.SavePendingImport(f.dir, &store.PendingImport{Mode: store.PendingReplace, Written: f.clock.Now().Add(-8 * 24 * time.Hour),
 		Accounts: map[string]*store.AccountState{"main": importedState(77, f.clock.Now().Add(time.Hour))}})
 	f.tickWait()
 	f.tickWait()

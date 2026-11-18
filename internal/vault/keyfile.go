@@ -35,6 +35,8 @@ const (
 // dpapiEntropy is mixed into the encryption. It is not a secret (it is in
 // the source); it only stops generic "decrypt every DPAPI blob" tools from
 // working on this file without knowing what it is.
+//
+//lint:ignore U1000 only the Windows build reads it
 var dpapiEntropy = []byte("e5extend master key v1")
 
 // ErrDPAPIUnsupported means this platform has no DPAPI.
