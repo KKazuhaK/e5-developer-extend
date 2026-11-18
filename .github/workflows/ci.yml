@@ -44,15 +44,21 @@ jobs:
       - name: Vet
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           go vet "${pkgs[@]}"
       # Pinned so a new staticcheck release cannot turn CI red by itself; Dependabot does not track go run versions.
       - name: staticcheck
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           go run honnef.co/go/tools/cmd/staticcheck@v0.8.2 "${pkgs[@]}"
       # actionlint also runs shellcheck on the run: blocks of every workflow.
       - name: actionlint
@@ -74,8 +80,11 @@ jobs:
       - name: Test
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           go test -race "${pkgs[@]}"
       - name: Build the CLI
         env:
@@ -115,12 +124,18 @@ jobs:
       - name: Vet the non-GUI packages for Windows and macOS
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           for goos in windows darwin; do
             echo "== $goos"
             GOOS="$goos" go vet "${pkgs[@]}"
           done
+      # ./gui is vetted for Windows only: it needs cgo on Linux and macOS, but on Windows it type-checks without cgo.
+      - name: Vet the GUI for Windows
+        run: GOOS=windows go vet ./gui/...
 
   gui:
     name: GUI (Linux)
@@ -188,8 +203,11 @@ jobs:
       - name: govulncheck
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 "${pkgs[@]}"
 
   # The real macOS and Windows runs: slower and costlier, so only after merge
@@ -218,8 +236,11 @@ jobs:
       - name: Test the non-GUI packages
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           go vet "${pkgs[@]}"
           go test -race "${pkgs[@]}"
       - name: Build the CLI

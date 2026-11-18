@@ -8,8 +8,7 @@ on:
   # On pull requests only when something the service depends on changes.
   pull_request:
     paths:
-      - "internal/service/**"
-      - "internal/vault/**"
+      - "internal/**"
       - "scripts/service-e2e*.sh"
       - "cmd/e5extend/**"
       - "go.mod"

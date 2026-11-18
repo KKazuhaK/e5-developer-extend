@@ -48,13 +48,17 @@ jobs:
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version-file: go.mod
-      # ./gui needs CGO and GTK, so it is left out; the while-read loop works on macOS bash 3.2 and tr strips CR on Windows.
+      # ./gui needs CGO and GTK, so it is left out (the native job in ci.yml covers it).
       - name: Test the non-GUI packages
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
-          go test -race "${pkgs[@]}"
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
+          # No -race here: the Linux job in ci.yml already runs the race detector, and it makes the Windows run too slow.
+          go test "${pkgs[@]}"
 
   cli:
     name: CLI archives and packages

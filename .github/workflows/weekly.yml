@@ -31,8 +31,11 @@ jobs:
       - name: govulncheck
         shell: bash
         run: |
+          # Capture go list first so a failure stops the step; then drop CR (Windows) and ./gui.
+          out=$(go list ./...)
           pkgs=()
-          while IFS= read -r p; do pkgs+=("$p"); done < <(go list ./... | grep -v '/gui$' | tr -d '\r')
+          while IFS= read -r p; do pkgs+=("$p"); done < <(printf '%s\n' "$out" | tr -d '\r' | grep -v '/gui$')
+          [ "${#pkgs[@]}" -gt 0 ] || { echo "no packages found"; exit 1; }
           go run golang.org/x/vuln/cmd/govulncheck@v1.10.0 "${pkgs[@]}"
 
   npm-audit:
